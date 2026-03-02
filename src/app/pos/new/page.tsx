@@ -229,13 +229,13 @@ export default function NewPOPage() {
 
   const filteredSkus = (key: string) => {
     const search = (skuSearch[key] || "").toLowerCase();
-    if (!search) return skus;
+    if (!search) return skus.slice(0, 20); // Show first 20 when no search
     return skus.filter(
       (s) =>
-        s.standardSku.toLowerCase().includes(search) ||
-        s.flavor.toLowerCase().includes(search) ||
-        s.category.toLowerCase().includes(search) ||
-        s.description.toLowerCase().includes(search)
+        (s.standardSku || "").toLowerCase().includes(search) ||
+        (s.flavor || "").toLowerCase().includes(search) ||
+        (s.category || "").toLowerCase().includes(search) ||
+        (s.description || "").toLowerCase().includes(search)
     );
   };
 
@@ -384,7 +384,7 @@ export default function NewPOPage() {
             </button>
           </div>
 
-          <div className="overflow-x-auto">
+          <div className="overflow-visible">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-900 text-white">
@@ -444,7 +444,7 @@ export default function NewPOPage() {
                         className="w-full border border-gray-300 rounded px-2 py-1 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-black"
                       />
                       {activeDropdown === item.key && (
-                        <div className="absolute z-10 mt-1 w-80 max-h-60 overflow-y-auto bg-white border border-gray-200 rounded-md shadow-lg">
+                        <div className="absolute z-50 mt-1 w-96 max-h-60 overflow-y-auto bg-white border border-gray-300 rounded-md shadow-xl">
                           {filteredSkus(item.key).map((sku) => (
                             <button
                               key={sku.id}
