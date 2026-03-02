@@ -17,6 +17,7 @@ export async function GET() {
     contactName: r.fields["Contact Name"] as string,
     contactEmail: r.fields["Contact Email"] as string,
     paymentTerms: r.fields["Payment Terms"] as string,
+    categories: (r.fields["Category"] as string[]) || [],
   }));
 
   return NextResponse.json(suppliers);

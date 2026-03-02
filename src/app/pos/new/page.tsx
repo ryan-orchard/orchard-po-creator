@@ -12,6 +12,7 @@ interface Supplier {
   state: string;
   zip: string;
   paymentTerms: string;
+  categories: string[];
 }
 
 interface SKU {
@@ -21,7 +22,6 @@ interface SKU {
   flavor: string;
   count: string;
   description: string;
-  suppliers: string[];
 }
 
 interface ShipTo {
@@ -261,9 +261,10 @@ export default function NewPOPage() {
 
   const filteredSkus = (key: string) => {
     const search = (skuSearch[key] || "").toLowerCase();
-    // Filter by selected supplier first
-    const supplierFiltered = supplierId
-      ? skus.filter((s) => s.suppliers.includes(supplierId))
+    // Filter by supplier's categories
+    const supplier = suppliers.find((s) => s.id === supplierId);
+    const supplierFiltered = supplier?.categories?.length
+      ? skus.filter((s) => supplier.categories.includes(s.category))
       : skus;
     if (!search) return supplierFiltered.slice(0, 20);
     return supplierFiltered.filter(
