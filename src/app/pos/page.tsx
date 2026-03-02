@@ -20,9 +20,9 @@ interface Supplier {
 const statusColors: Record<string, string> = {
   Draft: "bg-yellow-100 text-yellow-800",
   Issued: "bg-blue-100 text-blue-800",
-  "Partially Received": "bg-orange-100 text-orange-800",
+  Confirmed: "bg-purple-100 text-purple-800",
+  Shipped: "bg-orange-100 text-orange-800",
   Received: "bg-green-100 text-green-800",
-  Closed: "bg-gray-100 text-gray-600",
 };
 
 export default function POListPage() {

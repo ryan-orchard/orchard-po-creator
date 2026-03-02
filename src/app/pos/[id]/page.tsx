@@ -87,12 +87,14 @@ interface EditLineItem {
   totalPrice: number;
 }
 
+const STATUSES = ["Draft", "Issued", "Confirmed", "Shipped", "Received"] as const;
+
 const statusColors: Record<string, string> = {
   Draft: "bg-yellow-100 text-yellow-800",
   Issued: "bg-blue-100 text-blue-800",
-  "Partially Received": "bg-orange-100 text-orange-800",
+  Confirmed: "bg-purple-100 text-purple-800",
+  Shipped: "bg-orange-100 text-orange-800",
   Received: "bg-green-100 text-green-800",
-  Closed: "bg-gray-100 text-gray-600",
 };
 
 export default function PODetailPage() {
@@ -103,6 +105,10 @@ export default function PODetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const justCreated = searchParams.get("created") === "1";
+
+  // Status update
+  const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [showStatusMenu, setShowStatusMenu] = useState(false);
 
   // Edit mode state
   const [editing, setEditing] = useState(false);
@@ -153,6 +159,24 @@ export default function PODetailPage() {
       setShipTos(st);
       setRefDataLoaded(true);
     });
+  };
+
+  const updateStatus = async (newStatus: string) => {
+    if (!po) return;
+    setUpdatingStatus(true);
+    setShowStatusMenu(false);
+    try {
+      await fetch(`/api/purchase-orders/${params.id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      setPO({ ...po, status: newStatus });
+    } catch {
+      alert("Error updating status.");
+    } finally {
+      setUpdatingStatus(false);
+    }
   };
 
   const startEditing = async () => {
@@ -497,11 +521,11 @@ export default function PODetailPage() {
                   onChange={(e) => setEditStatus(e.target.value)}
                   className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
                 >
-                  <option value="Draft">Draft</option>
-                  <option value="Issued">Issued</option>
-                  <option value="Partially Received">Partially Received</option>
-                  <option value="Received">Received</option>
-                  <option value="Closed">Closed</option>
+                  {STATUSES.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
                 </select>
               </div>
               <div>
@@ -734,7 +758,7 @@ export default function PODetailPage() {
 
   // ─── VIEW MODE ───
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50" onClick={() => setShowStatusMenu(false)}>
       <div className="max-w-6xl mx-auto px-6 py-8">
         {justCreated && (
           <div className="mb-6 bg-green-50 border border-green-200 rounded-lg px-4 py-3 text-sm text-green-800">
@@ -750,11 +774,31 @@ export default function PODetailPage() {
               <h1 className="text-2xl font-bold text-gray-900 font-mono">
                 {po.poNumber}
               </h1>
-              <span
-                className={`inline-block px-2.5 py-0.5 text-xs font-medium rounded-full ${statusColors[po.status] || "bg-gray-100 text-gray-600"}`}
-              >
-                {po.status}
-              </span>
+              <div className="relative" onClick={(e) => e.stopPropagation()}>
+                <button
+                  onClick={() => setShowStatusMenu(!showStatusMenu)}
+                  disabled={updatingStatus}
+                  className={`inline-block px-2.5 py-0.5 text-xs font-medium rounded-full cursor-pointer hover:opacity-80 ${statusColors[po.status] || "bg-gray-100 text-gray-600"}`}
+                >
+                  {updatingStatus ? "..." : po.status}
+                </button>
+                {showStatusMenu && (
+                  <div className="absolute z-50 mt-1 left-0 bg-white border border-gray-200 rounded-md shadow-lg py-1 min-w-[120px]">
+                    {STATUSES.map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => updateStatus(s)}
+                        className={`block w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 ${po.status === s ? "font-semibold" : ""}`}
+                      >
+                        <span
+                          className={`inline-block w-2 h-2 rounded-full mr-2 ${statusColors[s]?.split(" ")[0] || "bg-gray-200"}`}
+                        />
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
             <p className="text-sm text-gray-500 mt-1">
               {po.date
@@ -766,7 +810,13 @@ export default function PODetailPage() {
                 : "No date"}
             </p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 print:hidden">
+            <button
+              onClick={() => window.print()}
+              className="px-4 py-2 text-sm font-medium text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50"
+            >
+              Print / PDF
+            </button>
             <button
               onClick={startEditing}
               className="px-4 py-2 text-sm font-medium bg-green-50 text-green-700 border border-green-200 rounded-md hover:bg-green-100"

@@ -24,3 +24,28 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+@media print {
+  body {
+    background: white !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .print\:hidden {
+    display: none !important;
+  }
+  .min-h-screen {
+    min-height: auto !important;
+  }
+  .bg-gray-50 {
+    background: white !important;
+  }
+  .bg-gray-900 {
+    background: #111827 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .text-white {
+    color: white !important;
+  }
+}
