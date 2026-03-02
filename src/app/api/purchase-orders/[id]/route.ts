@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getRecord, getRecords, TABLES } from "@/lib/airtable";
+import { getRecord, deleteRecord, TABLES } from "@/lib/airtable";
 
 export async function GET(
   _request: NextRequest,
@@ -95,5 +95,30 @@ export async function GET(
     });
   } catch {
     return NextResponse.json({ error: "PO not found" }, { status: 404 });
+  }
+}
+
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+
+  try {
+    // Get PO to find its line items
+    const record = await getRecord(TABLES.PURCHASE_ORDERS, id);
+    const lineItemIds = (record.fields["PO Line Items"] as string[]) || [];
+
+    // Delete line items first
+    for (const liId of lineItemIds) {
+      await deleteRecord(TABLES.PO_LINE_ITEMS, liId);
+    }
+
+    // Delete the PO
+    await deleteRecord(TABLES.PURCHASE_ORDERS, id);
+
+    return NextResponse.json({ success: true });
+  } catch {
+    return NextResponse.json({ error: "Failed to delete PO" }, { status: 500 });
   }
 }

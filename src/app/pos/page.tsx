@@ -30,6 +30,7 @@ export default function POListPage() {
   const [pos, setPOs] = useState<PO[]>([]);
   const [suppliers, setSuppliers] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -45,6 +46,19 @@ export default function POListPage() {
       setLoading(false);
     });
   }, []);
+
+  const handleDelete = async (poId: string, poNumber: string) => {
+    if (!confirm(`Delete ${poNumber}? This cannot be undone.`)) return;
+    setDeleting(poId);
+    try {
+      await fetch(`/api/purchase-orders/${poId}`, { method: "DELETE" });
+      setPOs((prev) => prev.filter((p) => p.id !== poId));
+    } catch {
+      alert("Error deleting PO. Please try again.");
+    } finally {
+      setDeleting(null);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -98,6 +112,7 @@ export default function POListPage() {
                   <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
                     Total
                   </th>
+                  <th className="px-4 py-3 w-24"></th>
                 </tr>
               </thead>
               <tbody>
@@ -129,6 +144,23 @@ export default function POListPage() {
                       {po.grandTotal != null
                         ? `$${po.grandTotal.toLocaleString("en-US", { minimumFractionDigits: 2 })}`
                         : "—"}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex gap-2 justify-end" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          onClick={() => router.push(`/pos/${po.id}`)}
+                          className="text-xs text-gray-500 hover:text-gray-900"
+                        >
+                          View
+                        </button>
+                        <button
+                          onClick={() => handleDelete(po.id, po.poNumber)}
+                          disabled={deleting === po.id}
+                          className="text-xs text-gray-500 hover:text-red-600 disabled:opacity-50"
+                        >
+                          {deleting === po.id ? "..." : "Delete"}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

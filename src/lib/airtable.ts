@@ -106,3 +106,13 @@ export async function getRecord(
   });
   return res.json();
 }
+
+export async function deleteRecord(
+  tableId: string,
+  recordId: string
+): Promise<void> {
+  await fetch(`${BASE_URL}/${tableId}/${recordId}`, {
+    method: "DELETE",
+    headers,
+  });
+}
