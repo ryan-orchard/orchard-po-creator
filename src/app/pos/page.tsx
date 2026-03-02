@@ -112,7 +112,7 @@ export default function POListPage() {
                   <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
                     Total
                   </th>
-                  <th className="px-4 py-3 w-24"></th>
+                  <th className="px-4 py-3 w-10"></th>
                 </tr>
               </thead>
               <tbody>
@@ -145,22 +145,21 @@ export default function POListPage() {
                         ? `$${po.grandTotal.toLocaleString("en-US", { minimumFractionDigits: 2 })}`
                         : "—"}
                     </td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex gap-2 justify-end" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          onClick={() => router.push(`/pos/${po.id}`)}
-                          className="text-xs text-gray-500 hover:text-gray-900"
-                        >
-                          View
-                        </button>
-                        <button
-                          onClick={() => handleDelete(po.id, po.poNumber)}
-                          disabled={deleting === po.id}
-                          className="text-xs text-gray-500 hover:text-red-600 disabled:opacity-50"
-                        >
-                          {deleting === po.id ? "..." : "Delete"}
-                        </button>
-                      </div>
+                    <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => handleDelete(po.id, po.poNumber)}
+                        disabled={deleting === po.id}
+                        className="text-red-300 hover:text-red-500 disabled:opacity-50 p-1"
+                        title="Delete PO"
+                      >
+                        {deleting === po.id ? (
+                          <span className="text-xs">...</span>
+                        ) : (
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        )}
+                      </button>
                     </td>
                   </tr>
                 ))}

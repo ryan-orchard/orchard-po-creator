@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getRecord, deleteRecord, TABLES } from "@/lib/airtable";
+import {
+  getRecord,
+  updateRecord,
+  deleteRecord,
+  createRecords,
+  TABLES,
+} from "@/lib/airtable";
 
 export async function GET(
   _request: NextRequest,
@@ -43,6 +49,7 @@ export async function GET(
           : null;
         return {
           id: li.id,
+          skuId: skuIds[0] || null,
           sku: sku
             ? {
                 standardSku: sku.fields["Standard SKU"] as string,
@@ -71,6 +78,8 @@ export async function GET(
       paymentTerms: record.fields["Payment Terms"] as string,
       notes: record.fields["Notes"] as string,
       grandTotal: record.fields["Grand Total"] as number,
+      supplierId: supplierIds[0] || null,
+      shipToId: shipToIds[0] || null,
       supplier: supplier
         ? {
             id: supplier.id,
@@ -95,6 +104,73 @@ export async function GET(
     });
   } catch {
     return NextResponse.json({ error: "PO not found" }, { status: 404 });
+  }
+}
+
+export async function PUT(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const body = await request.json();
+
+  try {
+    // Update PO header
+    const po = await updateRecord(TABLES.PURCHASE_ORDERS, id, {
+      Date: body.date,
+      Supplier: [body.supplierId],
+      "Ship To": [body.shipToId],
+      "Delivery Date": body.deliveryDate || null,
+      "Shipping Terms": body.shippingTerms || "",
+      "Payment Terms": body.paymentTerms || "",
+      Notes: body.notes || "",
+      "Grand Total": body.grandTotal,
+      Status: body.status || "Draft",
+    });
+
+    // Delete existing line items
+    const existing = await getRecord(TABLES.PURCHASE_ORDERS, id);
+    const existingLineItemIds =
+      (existing.fields["PO Line Items"] as string[]) || [];
+    for (const liId of existingLineItemIds) {
+      await deleteRecord(TABLES.PO_LINE_ITEMS, liId);
+    }
+
+    // Recreate line items
+    const poNumber = po.fields?.["PO Number"] || existing.fields["PO Number"];
+    if (body.lineItems && body.lineItems.length > 0) {
+      const lineItemRecords = body.lineItems.map(
+        (item: {
+          skuId: string;
+          section: string;
+          qtySticks: number;
+          qtyCartons: number | null;
+          unitCost: number;
+          costBasis: string;
+          totalPrice: number;
+        }) => ({
+          fields: {
+            "Line Item ID": `${poNumber}-${item.skuId.slice(-6)}`,
+            "Purchase Order": [id],
+            SKU: [item.skuId],
+            Section: item.section,
+            "Qty Sticks": item.qtySticks,
+            "Qty Cartons": item.qtyCartons,
+            "Unit Cost": item.unitCost,
+            "Cost Basis": item.costBasis,
+            "Total Price": item.totalPrice,
+          },
+        })
+      );
+      await createRecords(TABLES.PO_LINE_ITEMS, lineItemRecords);
+    }
+
+    return NextResponse.json({ id, poNumber });
+  } catch {
+    return NextResponse.json(
+      { error: "Failed to update PO" },
+      { status: 500 }
+    );
   }
 }
 
