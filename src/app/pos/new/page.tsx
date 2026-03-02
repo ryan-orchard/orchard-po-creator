@@ -21,6 +21,7 @@ interface SKU {
   flavor: string;
   count: string;
   description: string;
+  suppliers: string[];
 }
 
 interface ShipTo {
@@ -72,6 +73,17 @@ export default function NewPOPage() {
   const [skuSearch, setSkuSearch] = useState<Record<string, string>>({});
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
 
+  // Custom Ship To
+  const [showCustomShipTo, setShowCustomShipTo] = useState(false);
+  const [customShipTo, setCustomShipTo] = useState({
+    name: "",
+    address: "",
+    city: "",
+    state: "",
+    zip: "",
+  });
+  const [savingShipTo, setSavingShipTo] = useState(false);
+
   function createEmptyLineItem(): LineItem {
     return {
       key: crypto.randomUUID(),
@@ -100,13 +112,11 @@ export default function NewPOPage() {
     });
   }, []);
 
-  // Auto-fill payment terms from supplier
+  // Auto-fill payment terms from supplier (always overwrite when supplier changes)
   useEffect(() => {
     if (supplierId) {
       const supplier = suppliers.find((s) => s.id === supplierId);
-      if (supplier?.paymentTerms) {
-        setPaymentTerms(supplier.paymentTerms);
-      }
+      setPaymentTerms(supplier?.paymentTerms || "");
     }
   }, [supplierId, suppliers]);
 
@@ -182,6 +192,28 @@ export default function NewPOPage() {
 
   const grandTotal = lineItems.reduce((sum, item) => sum + item.totalPrice, 0);
 
+  const handleSaveCustomShipTo = async () => {
+    if (!customShipTo.name) return;
+    setSavingShipTo(true);
+    try {
+      const res = await fetch("/api/ship-to", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(customShipTo),
+      });
+      const newLocation = await res.json();
+      setShipTos((prev) => [...prev, newLocation]);
+      setShipToId(newLocation.id);
+      setShowCustomShipTo(false);
+      setCustomShipTo({ name: "", address: "", city: "", state: "", zip: "" });
+    } catch (err) {
+      console.error(err);
+      alert("Error saving location. Please try again.");
+    } finally {
+      setSavingShipTo(false);
+    }
+  };
+
   const handleSubmit = async () => {
     if (!supplierId || !shipToId || lineItems.every((li) => !li.skuId)) {
       alert("Please select a supplier, ship-to location, and at least one SKU.");
@@ -218,7 +250,7 @@ export default function NewPOPage() {
       });
 
       const result = await res.json();
-      router.push(`/pos/${result.id}`);
+      router.push(`/pos/${result.id}?created=1`);
     } catch (err) {
       console.error(err);
       alert("Error creating PO. Please try again.");
@@ -229,8 +261,12 @@ export default function NewPOPage() {
 
   const filteredSkus = (key: string) => {
     const search = (skuSearch[key] || "").toLowerCase();
-    if (!search) return skus.slice(0, 20); // Show first 20 when no search
-    return skus.filter(
+    // Filter by selected supplier first
+    const supplierFiltered = supplierId
+      ? skus.filter((s) => s.suppliers.includes(supplierId))
+      : skus;
+    if (!search) return supplierFiltered.slice(0, 20);
+    return supplierFiltered.filter(
       (s) =>
         (s.standardSku || "").toLowerCase().includes(search) ||
         (s.flavor || "").toLowerCase().includes(search) ||
@@ -297,7 +333,15 @@ export default function NewPOPage() {
               </label>
               <select
                 value={shipToId}
-                onChange={(e) => setShipToId(e.target.value)}
+                onChange={(e) => {
+                  if (e.target.value === "__custom__") {
+                    setShowCustomShipTo(true);
+                    setShipToId("");
+                  } else {
+                    setShipToId(e.target.value);
+                    setShowCustomShipTo(false);
+                  }
+                }}
                 className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
               >
                 <option value="">Select location...</option>
@@ -307,7 +351,77 @@ export default function NewPOPage() {
                     {s.address ? ` — ${s.address}, ${s.city}, ${s.state}` : ""}
                   </option>
                 ))}
+                <option value="__custom__">+ Add custom location...</option>
               </select>
+              {showCustomShipTo && (
+                <div className="mt-2 p-3 border border-gray-200 rounded-md bg-gray-50 space-y-2">
+                  <input
+                    type="text"
+                    placeholder="Location name *"
+                    value={customShipTo.name}
+                    onChange={(e) =>
+                      setCustomShipTo((prev) => ({ ...prev, name: e.target.value }))
+                    }
+                    className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Address"
+                    value={customShipTo.address}
+                    onChange={(e) =>
+                      setCustomShipTo((prev) => ({ ...prev, address: e.target.value }))
+                    }
+                    className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                  />
+                  <div className="grid grid-cols-3 gap-2">
+                    <input
+                      type="text"
+                      placeholder="City"
+                      value={customShipTo.city}
+                      onChange={(e) =>
+                        setCustomShipTo((prev) => ({ ...prev, city: e.target.value }))
+                      }
+                      className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                    />
+                    <input
+                      type="text"
+                      placeholder="State"
+                      value={customShipTo.state}
+                      onChange={(e) =>
+                        setCustomShipTo((prev) => ({ ...prev, state: e.target.value }))
+                      }
+                      className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Zip"
+                      value={customShipTo.zip}
+                      onChange={(e) =>
+                        setCustomShipTo((prev) => ({ ...prev, zip: e.target.value }))
+                      }
+                      className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleSaveCustomShipTo}
+                      disabled={savingShipTo || !customShipTo.name}
+                      className="px-3 py-1.5 text-xs bg-gray-900 text-white rounded hover:bg-gray-800 disabled:opacity-50"
+                    >
+                      {savingShipTo ? "Saving..." : "Save Location"}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowCustomShipTo(false);
+                        setCustomShipTo({ name: "", address: "", city: "", state: "", zip: "" });
+                      }}
+                      className="px-3 py-1.5 text-xs text-gray-600 border border-gray-300 rounded hover:bg-gray-100"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">

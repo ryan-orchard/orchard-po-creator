@@ -3,7 +3,6 @@ import { getRecords, TABLES } from "@/lib/airtable";
 
 export async function GET() {
   const records = await getRecords(TABLES.SKUS, {
-    filterByFormula: '{Status} = "Active"',
     sort: [{ field: "Standard SKU", direction: "asc" }],
   });
 
@@ -15,6 +14,7 @@ export async function GET() {
     count: r.fields["Count"] as string,
     description: r.fields["Description"] as string,
     status: r.fields["Status"] as string,
+    suppliers: (r.fields["Suppliers"] as string[]) || [],
   }));
 
   return NextResponse.json(skus);
