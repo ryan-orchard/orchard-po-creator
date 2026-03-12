@@ -39,6 +39,7 @@ interface PODetail {
       flavor: string;
       count: string;
       category: string;
+      supplierItemName: string;
     } | null;
     section: string;
     qtySticks: number;
@@ -64,6 +65,7 @@ interface SKU {
   flavor: string;
   count: string;
   description: string;
+  supplierItemName: string;
 }
 
 interface ShipTo {
@@ -201,6 +203,7 @@ export default function PODetailPage() {
               flavor: li.sku.flavor,
               count: li.sku.count,
               description: "",
+              supplierItemName: li.sku.supplierItemName || "",
             }
           : undefined,
         section: li.section,
@@ -970,7 +973,7 @@ export default function PODetailPage() {
                       {items.map((item) => (
                         <tr key={item.id} className="border-b border-gray-100">
                           <td className="px-4 py-2.5 text-gray-900">
-                            {item.sku?.flavor || item.sku?.standardSku || "\u2014"}
+                            {item.sku?.supplierItemName || item.sku?.flavor || item.sku?.standardSku || "\u2014"}
                           </td>
                           <td className="px-4 py-2.5 text-gray-600">
                             {item.sku?.count === "Stick" ? "Bulk" : `${item.sku?.count} CT`}

@@ -14,6 +14,7 @@ export async function GET() {
     count: r.fields["Count"] as string,
     description: r.fields["Description"] as string,
     status: r.fields["Status"] as string,
+    supplierItemName: r.fields["Supplier Item Name"] as string,
   }));
 
   return NextResponse.json(skus);

@@ -56,6 +56,7 @@ export async function GET(
                 flavor: sku.fields["Flavor"] as string,
                 count: sku.fields["Count"] as string,
                 category: sku.fields["Category"] as string,
+                supplierItemName: sku.fields["Supplier Item Name"] as string,
               }
             : null,
           section: li.fields["Section"] as string,

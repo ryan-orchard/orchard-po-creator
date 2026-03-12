@@ -23,6 +23,7 @@ interface SKU {
   flavor: string;
   count: string;
   description: string;
+  supplierItemName: string;
 }
 
 interface ShipTo {
