@@ -17,12 +17,13 @@ interface Supplier {
   name: string;
 }
 
+const STATUS_TABS = ["All", "Draft", "Issued", "Received", "Closed"] as const;
+
 const statusColors: Record<string, string> = {
   Draft: "bg-yellow-100 text-yellow-800",
   Issued: "bg-blue-100 text-blue-800",
-  Confirmed: "bg-purple-100 text-purple-800",
-  Shipped: "bg-orange-100 text-orange-800",
   Received: "bg-green-100 text-green-800",
+  Closed: "bg-gray-100 text-gray-600",
 };
 
 export default function POListPage() {
@@ -31,6 +32,7 @@ export default function POListPage() {
   const [suppliers, setSuppliers] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<string>("All");
 
   useEffect(() => {
     Promise.all([
@@ -60,10 +62,20 @@ export default function POListPage() {
     }
   };
 
+  const filteredPOs = activeTab === "All"
+    ? pos
+    : pos.filter((po) => po.status === activeTab);
+
+  const tabCounts = STATUS_TABS.reduce((acc, tab) => {
+    acc[tab] = tab === "All" ? pos.length : pos.filter((p) => p.status === tab).length;
+    return acc;
+  }, {} as Record<string, number>);
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-6xl mx-auto px-6 py-8">
-        <div className="flex items-center justify-between mb-8">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">
               Purchase Orders
@@ -72,25 +84,57 @@ export default function POListPage() {
               {pos.length} {pos.length === 1 ? "order" : "orders"}
             </p>
           </div>
-          <button
-            onClick={() => router.push("/pos/new")}
-            className="bg-gray-900 text-white px-4 py-2 text-sm rounded-md hover:bg-gray-800"
-          >
-            + New PO
-          </button>
-        </div>
-
-        {loading ? (
-          <p className="text-gray-500">Loading...</p>
-        ) : pos.length === 0 ? (
-          <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
-            <p className="text-gray-500 mb-4">No purchase orders yet.</p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {}}
+              className="border border-gray-300 text-gray-700 px-4 py-2 text-sm rounded-md hover:bg-gray-50"
+            >
+              Upload PO
+            </button>
             <button
               onClick={() => router.push("/pos/new")}
               className="bg-gray-900 text-white px-4 py-2 text-sm rounded-md hover:bg-gray-800"
             >
-              Create your first PO
+              + Create PO
             </button>
+          </div>
+        </div>
+
+        {/* Status tabs */}
+        <div className="flex items-center gap-1 mb-4 border-b border-gray-200">
+          {STATUS_TABS.map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === tab
+                  ? "border-gray-900 text-gray-900"
+                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+              }`}
+            >
+              {tab}
+              <span className={`ml-1.5 text-xs ${activeTab === tab ? "text-gray-600" : "text-gray-400"}`}>
+                {tabCounts[tab]}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        {loading ? (
+          <p className="text-gray-500">Loading...</p>
+        ) : filteredPOs.length === 0 ? (
+          <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
+            <p className="text-gray-500 mb-4">
+              {activeTab === "All" ? "No purchase orders yet." : `No ${activeTab.toLowerCase()} purchase orders.`}
+            </p>
+            {activeTab === "All" && (
+              <button
+                onClick={() => router.push("/pos/new")}
+                className="bg-gray-900 text-white px-4 py-2 text-sm rounded-md hover:bg-gray-800"
+              >
+                Create your first PO
+              </button>
+            )}
           </div>
         ) : (
           <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
@@ -98,10 +142,7 @@ export default function POListPage() {
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                    PO Number
-                  </th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                    Date
+                    PO #
                   </th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
                     Supplier
@@ -112,11 +153,14 @@ export default function POListPage() {
                   <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
                     Total
                   </th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                    Date
+                  </th>
                   <th className="px-4 py-3 w-10"></th>
                 </tr>
               </thead>
               <tbody>
-                {pos.map((po) => (
+                {filteredPOs.map((po) => (
                   <tr
                     key={po.id}
                     onClick={() => router.push(`/pos/${po.id}`)}
@@ -124,11 +168,6 @@ export default function POListPage() {
                   >
                     <td className="px-4 py-3 font-mono font-semibold text-gray-900">
                       {po.poNumber}
-                    </td>
-                    <td className="px-4 py-3 text-gray-600">
-                      {po.date
-                        ? new Date(po.date + "T00:00:00").toLocaleDateString("en-US")
-                        : "—"}
                     </td>
                     <td className="px-4 py-3 text-gray-600">
                       {po.supplier?.[0] ? suppliers[po.supplier[0]] || "—" : "—"}
@@ -143,6 +182,11 @@ export default function POListPage() {
                     <td className="px-4 py-3 text-right font-semibold tabular-nums">
                       {po.grandTotal != null
                         ? `$${po.grandTotal.toLocaleString("en-US", { minimumFractionDigits: 2 })}`
+                        : "—"}
+                    </td>
+                    <td className="px-4 py-3 text-gray-600">
+                      {po.date
+                        ? new Date(po.date + "T00:00:00").toLocaleDateString("en-US")
                         : "—"}
                     </td>
                     <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>

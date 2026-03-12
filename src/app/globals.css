@@ -34,6 +34,9 @@ body {
   .print\:hidden {
     display: none !important;
   }
+  .print\:ml-0 {
+    margin-left: 0 !important;
+  }
   .min-h-screen {
     min-height: auto !important;
   }

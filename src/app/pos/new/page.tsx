@@ -12,6 +12,7 @@ interface Supplier {
   state: string;
   zip: string;
   paymentTerms: string;
+  shippingTerms: string;
   categories: string[];
 }
 
@@ -112,11 +113,12 @@ export default function NewPOPage() {
     });
   }, []);
 
-  // Auto-fill payment terms from supplier (always overwrite when supplier changes)
+  // Auto-fill terms from supplier (always overwrite when supplier changes)
   useEffect(() => {
     if (supplierId) {
       const supplier = suppliers.find((s) => s.id === supplierId);
       setPaymentTerms(supplier?.paymentTerms || "");
+      setShippingTerms(supplier?.shippingTerms || "");
     }
   }, [supplierId, suppliers]);
 
@@ -147,7 +149,7 @@ export default function NewPOPage() {
             }
           }
 
-          // Recalculate totals
+          // Recalculate quantities and totals
           if (
             updates.qtySticks !== undefined ||
             updates.qtyCartons !== undefined ||
@@ -155,23 +157,17 @@ export default function NewPOPage() {
             updates.costBasis !== undefined ||
             updates.skuId !== undefined
           ) {
-            if (updated.costBasis === "Per Carton" && updated.qtyCartons) {
-              updated.totalPrice = updated.qtyCartons * updated.unitCost;
-            } else if (updated.costBasis === "Per Stick") {
-              updated.totalPrice = updated.qtySticks * updated.unitCost;
-            }
+            const count = updated.sku ? parseInt(updated.sku.count) : NaN;
 
-            // Auto-calc cartons from sticks
-            if (updated.sku && updated.qtySticks > 0) {
-              const count = parseInt(updated.sku.count);
-              if (!isNaN(count) && count > 0) {
-                updated.qtyCartons = Math.ceil(updated.qtySticks / count);
+            if (updated.costBasis === "Per Carton" && !isNaN(count) && count > 0) {
+              // Carton-based: user enters cartons, sticks auto-calc
+              if (updates.qtyCartons !== undefined) {
+                updated.qtySticks = (updated.qtyCartons || 0) * count;
               }
-            }
-
-            // Recalculate total after carton update
-            if (updated.costBasis === "Per Carton" && updated.qtyCartons) {
-              updated.totalPrice = updated.qtyCartons * updated.unitCost;
+              updated.totalPrice = (updated.qtyCartons || 0) * updated.unitCost;
+            } else if (updated.costBasis === "Per Stick") {
+              // Stick-based: user enters sticks
+              updated.totalPrice = updated.qtySticks * updated.unitCost;
             }
           }
 
@@ -215,8 +211,8 @@ export default function NewPOPage() {
   };
 
   const handleSubmit = async () => {
-    if (!supplierId || !shipToId || lineItems.every((li) => !li.skuId)) {
-      alert("Please select a supplier, ship-to location, and at least one SKU.");
+    if (!supplierId || !shipToId || !deliveryDate || lineItems.every((li) => !li.skuId)) {
+      alert("Please fill in all required fields: supplier, ship-to, delivery date, and at least one SKU.");
       return;
     }
 
@@ -437,7 +433,7 @@ export default function NewPOPage() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Delivery Date
+                Delivery Date *
               </label>
               <input
                 type="date"
@@ -530,7 +526,7 @@ export default function NewPOPage() {
               <tbody>
                 {lineItems.map((item) => (
                   <tr key={item.key} className="border-b border-gray-100">
-                    <td className="px-3 py-2 relative">
+                    <td className="px-3 py-2 relative min-w-[280px]">
                       <input
                         type="text"
                         value={
@@ -556,7 +552,7 @@ export default function NewPOPage() {
                           setTimeout(() => setActiveDropdown(null), 200)
                         }
                         placeholder="Search SKU or flavor..."
-                        className="w-full border border-gray-300 rounded px-2 py-1 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-black"
+                        className="w-full border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-black"
                       />
                       {activeDropdown === item.key && (
                         <div className="absolute z-50 mt-1 w-96 max-h-60 overflow-y-auto bg-white border border-gray-300 rounded-md shadow-xl">
@@ -596,26 +592,50 @@ export default function NewPOPage() {
                       />
                     </td>
                     <td className="px-3 py-2">
-                      <input
-                        type="number"
-                        value={item.qtySticks || ""}
-                        onChange={(e) =>
-                          updateLineItem(item.key, {
-                            qtySticks: parseInt(e.target.value) || 0,
-                          })
-                        }
-                        className="w-full border border-gray-300 rounded px-2 py-1 text-xs text-right focus:outline-none focus:ring-2 focus:ring-black"
-                        placeholder="0"
-                      />
+                      {item.costBasis === "Per Stick" ? (
+                        <input
+                          type="number"
+                          value={item.qtySticks || ""}
+                          onChange={(e) =>
+                            updateLineItem(item.key, {
+                              qtySticks: parseInt(e.target.value) || 0,
+                            })
+                          }
+                          className="w-full border border-gray-300 rounded px-2 py-1 text-xs text-right focus:outline-none focus:ring-2 focus:ring-black"
+                          placeholder="0"
+                        />
+                      ) : (
+                        <input
+                          type="number"
+                          value={item.qtySticks || ""}
+                          readOnly
+                          className="w-full border border-gray-200 bg-gray-50 rounded px-2 py-1 text-xs text-right text-gray-500"
+                          placeholder="—"
+                        />
+                      )}
                     </td>
                     <td className="px-3 py-2">
-                      <input
-                        type="number"
-                        value={item.qtyCartons ?? ""}
-                        readOnly
-                        className="w-full border border-gray-200 bg-gray-50 rounded px-2 py-1 text-xs text-right text-gray-500"
-                        placeholder="—"
-                      />
+                      {item.costBasis === "Per Carton" ? (
+                        <input
+                          type="number"
+                          value={item.qtyCartons ?? ""}
+                          onChange={(e) =>
+                            updateLineItem(item.key, {
+                              qtyCartons: parseInt(e.target.value) || 0,
+                            })
+                          }
+                          className="w-full border border-gray-300 rounded px-2 py-1 text-xs text-right focus:outline-none focus:ring-2 focus:ring-black"
+                          placeholder="0"
+                        />
+                      ) : (
+                        <input
+                          type="number"
+                          value={item.qtyCartons ?? ""}
+                          readOnly
+                          className="w-full border border-gray-200 bg-gray-50 rounded px-2 py-1 text-xs text-right text-gray-500"
+                          placeholder="—"
+                        />
+                      )}
                     </td>
                     <td className="px-3 py-2">
                       <input

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 
 interface PODetail {
@@ -87,14 +87,13 @@ interface EditLineItem {
   totalPrice: number;
 }
 
-const STATUSES = ["Draft", "Issued", "Confirmed", "Shipped", "Received"] as const;
+const STATUSES = ["Draft", "Issued", "Received", "Closed"] as const;
 
 const statusColors: Record<string, string> = {
   Draft: "bg-yellow-100 text-yellow-800",
   Issued: "bg-blue-100 text-blue-800",
-  Confirmed: "bg-purple-100 text-purple-800",
-  Shipped: "bg-orange-100 text-orange-800",
   Received: "bg-green-100 text-green-800",
+  Closed: "bg-gray-100 text-gray-600",
 };
 
 export default function PODetailPage() {
@@ -917,88 +916,126 @@ export default function PODetailPage() {
           </div>
         </div>
 
-        {/* Line Items */}
+        {/* Line Items — grouped by section */}
         <div className="bg-white rounded-lg border border-gray-200 overflow-hidden mb-6">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-900 text-white">
                 <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider">
-                  SKU
+                  Product
                 </th>
                 <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider">
-                  Section
+                  Carton Count
                 </th>
                 <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider">
                   Qty (Sticks)
                 </th>
                 <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider">
-                  Qty (Ctns)
+                  Qty (Cartons)
                 </th>
                 <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider">
                   Unit Cost
                 </th>
-                <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wider">
-                  Cost Basis
-                </th>
                 <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider">
-                  Total
+                  Total Price
                 </th>
               </tr>
             </thead>
             <tbody>
-              {po.lineItems.map((item) => (
-                <tr key={item.id} className="border-b border-gray-100">
-                  <td className="px-4 py-3">
-                    <span className="font-mono font-semibold text-gray-900">
-                      {item.sku?.standardSku || "\u2014"}
-                    </span>
-                    {item.sku?.flavor && (
-                      <span className="text-gray-500 ml-2 text-xs">
-                        {item.sku.flavor}
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-gray-600">{item.section}</td>
-                  <td className="px-4 py-3 text-right tabular-nums">
-                    {item.qtySticks?.toLocaleString() || "\u2014"}
-                  </td>
-                  <td className="px-4 py-3 text-right tabular-nums text-gray-500">
-                    {item.qtyCartons?.toLocaleString() || "\u2014"}
-                  </td>
-                  <td className="px-4 py-3 text-right tabular-nums">
-                    $
-                    {item.unitCost?.toLocaleString("en-US", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    }) || "0.00"}
-                  </td>
-                  <td className="px-4 py-3 text-center text-gray-500">
-                    {item.costBasis}
-                  </td>
-                  <td className="px-4 py-3 text-right font-semibold tabular-nums">
-                    $
-                    {item.totalPrice?.toLocaleString("en-US", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    }) || "0.00"}
-                  </td>
-                </tr>
-              ))}
+              {(() => {
+                // Group line items by section
+                const sections: Record<string, typeof po.lineItems> = {};
+                for (const item of po.lineItems) {
+                  const key = item.section || "Other";
+                  if (!sections[key]) sections[key] = [];
+                  sections[key].push(item);
+                }
+                const sectionKeys = Object.keys(sections);
+
+                return sectionKeys.map((sectionName) => {
+                  const items = sections[sectionName];
+                  const sectionSticks = items.reduce((sum, i) => sum + (i.qtySticks || 0), 0);
+                  const sectionCartons = items.reduce((sum, i) => sum + (i.qtyCartons || 0), 0);
+                  const sectionTotal = items.reduce((sum, i) => sum + (i.totalPrice || 0), 0);
+
+                  return (
+                    <React.Fragment key={sectionName}>
+                      {/* Section header */}
+                      <tr className="bg-gray-50">
+                        <td colSpan={6} className="px-4 py-2 text-xs font-bold text-gray-900 uppercase tracking-wider">
+                          {sectionName}
+                        </td>
+                      </tr>
+                      {/* Line items */}
+                      {items.map((item) => (
+                        <tr key={item.id} className="border-b border-gray-100">
+                          <td className="px-4 py-2.5 text-gray-900">
+                            {item.sku?.flavor || item.sku?.standardSku || "\u2014"}
+                          </td>
+                          <td className="px-4 py-2.5 text-gray-600">
+                            {item.sku?.count === "Stick" ? "Bulk" : `${item.sku?.count} CT`}
+                          </td>
+                          <td className="px-4 py-2.5 text-right tabular-nums">
+                            {item.qtySticks?.toLocaleString() || "\u2014"}
+                          </td>
+                          <td className="px-4 py-2.5 text-right tabular-nums text-gray-500">
+                            {item.qtyCartons?.toLocaleString() || "\u2014"}
+                          </td>
+                          <td className="px-4 py-2.5 text-right tabular-nums">
+                            ${item.unitCost?.toLocaleString("en-US", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            }) || "0.00"}
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-semibold tabular-nums">
+                            ${item.totalPrice?.toLocaleString("en-US", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            }) || "0.00"}
+                          </td>
+                        </tr>
+                      ))}
+                      {/* Section subtotal */}
+                      <tr className="border-b border-gray-200">
+                        <td className="px-4 py-2.5 font-semibold text-gray-900">Total</td>
+                        <td></td>
+                        <td className="px-4 py-2.5 text-right font-semibold tabular-nums">
+                          {sectionSticks.toLocaleString()}
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-gray-500">
+                          {sectionCartons.toLocaleString()}
+                        </td>
+                        <td></td>
+                        <td className="px-4 py-2.5 text-right font-bold tabular-nums">
+                          ${sectionTotal.toLocaleString("en-US", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                        </td>
+                      </tr>
+                    </React.Fragment>
+                  );
+                });
+              })()}
             </tbody>
           </table>
 
-          <div className="flex justify-end px-4 py-4 border-t border-gray-200 bg-gray-50">
-            <div className="text-right">
-              <p className="text-xs text-gray-500 uppercase tracking-wider">
-                Grand Total
-              </p>
-              <p className="text-2xl font-bold text-gray-900 tabular-nums">
-                $
-                {po.grandTotal?.toLocaleString("en-US", {
+          {/* Grand Total */}
+          <div className="border-t-2 border-gray-300 px-4 py-3 flex justify-between items-center bg-gray-50">
+            <span className="font-bold text-gray-900 uppercase text-sm">Grand Total</span>
+            <div className="flex gap-16 text-sm tabular-nums">
+              <span className="font-bold">
+                {po.lineItems.reduce((s, i) => s + (i.qtySticks || 0), 0).toLocaleString()}
+              </span>
+              <span className="font-bold text-gray-500">
+                {po.lineItems.reduce((s, i) => s + (i.qtyCartons || 0), 0).toLocaleString()}
+              </span>
+              <span className="font-bold text-lg">
+                ${po.grandTotal?.toLocaleString("en-US", {
                   minimumFractionDigits: 2,
                   maximumFractionDigits: 2,
                 }) || "0.00"}
-              </p>
+              </span>
             </div>
           </div>
         </div>
