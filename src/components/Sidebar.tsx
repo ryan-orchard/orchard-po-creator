@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 const NAV_SECTIONS = [
   {
     items: [
+      { name: "Dashboard", href: "/dashboard", icon: HomeIcon },
       { name: "Notifications", href: "/notifications", icon: BellIcon, soon: true, badge: 3 },
     ],
   },
@@ -31,6 +32,14 @@ const NAV_SECTIONS = [
     ],
   },
 ];
+
+function HomeIcon({ className }: { className?: string }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
+    </svg>
+  );
+}
 
 function BellIcon({ className }: { className?: string }) {
   return (
@@ -95,7 +104,7 @@ export default function Sidebar() {
     <aside className="w-56 bg-white border-r border-gray-200 flex flex-col h-screen fixed left-0 top-0 print:hidden">
       {/* Client name */}
       <div className="px-5 py-5 border-b border-gray-100">
-        <Link href="/pos" className="block">
+        <Link href="/dashboard" className="block">
           <span className="text-lg font-bold text-gray-900 tracking-tight">
             Magna
           </span>
