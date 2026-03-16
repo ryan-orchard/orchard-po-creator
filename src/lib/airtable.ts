@@ -14,6 +14,11 @@ export const TABLES = {
   SHIP_TO: "tblbqGnSNW73ERvtb",
   PURCHASE_ORDERS: "tbl711R2Jksca6GIg",
   PO_LINE_ITEMS: "tblEcEunHZgysdz4t",
+  SHIPMENTS: "tblJ7git6niHxXszj",
+  SHIPMENT_LINES: "tbltFOuTRS4iBMCIL",
+  RECEIPTS: "tbl2jmxFtJYFDFALa",
+  RECEIPT_LINES: "tbllMDF4pUw5T4q8T",
+  WAREHOUSES: "tblbqGnSNW73ERvtb",
 };
 
 export interface AirtableRecord {

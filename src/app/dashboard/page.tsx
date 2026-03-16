@@ -11,18 +11,35 @@ interface PO {
   date: string;
 }
 
+interface Shipment {
+  id: string;
+  shipmentNumber: string;
+  purchaseOrder: string[];
+  status: string;
+  shipDate: string;
+  expectedDeliveryDate: string;
+  shipTo: string[];
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const [pos, setPOs] = useState<PO[]>([]);
+  const [shipments, setShipments] = useState<Shipment[]>([]);
+  const [poMap, setPOMap] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/purchase-orders")
-      .then((r) => r.json())
-      .then((data) => {
-        setPOs(data);
-        setLoading(false);
-      });
+    Promise.all([
+      fetch("/api/purchase-orders").then((r) => r.json()),
+      fetch("/api/shipments").then((r) => r.json()),
+    ]).then(([poData, shipmentData]) => {
+      setPOs(poData);
+      setShipments(shipmentData);
+      const pMap: Record<string, string> = {};
+      poData.forEach((p: PO) => { pMap[p.id] = p.poNumber; });
+      setPOMap(pMap);
+      setLoading(false);
+    });
   }, []);
 
   const statusCounts = pos.reduce(
@@ -36,13 +53,23 @@ export default function DashboardPage() {
   const totalValue = pos.reduce((sum, po) => sum + (po.grandTotal || 0), 0);
   const openPOs = pos.filter((p) => p.status !== "Closed").length;
 
-  const cards = [
+  const poCards = [
     { label: "Total POs", value: pos.length, color: "bg-gray-900 text-white" },
     { label: "Open", value: openPOs, color: "bg-blue-50 text-blue-900" },
     { label: "Draft", value: statusCounts["Draft"] || 0, color: "bg-yellow-50 text-yellow-900" },
     { label: "Issued", value: statusCounts["Issued"] || 0, color: "bg-blue-50 text-blue-900" },
     { label: "Received", value: statusCounts["Received"] || 0, color: "bg-green-50 text-green-900" },
     { label: "Closed", value: statusCounts["Closed"] || 0, color: "bg-gray-50 text-gray-600" },
+  ];
+
+  const created = shipments.filter((s) => s.status === "Created").length;
+  const inTransit = shipments.filter((s) => s.status === "In Transit").length;
+  const delivered = shipments.filter((s) => s.status === "Delivered").length;
+  const shipmentCards = [
+    { label: "Total Shipments", value: shipments.length, color: "bg-gray-900 text-white" },
+    { label: "Created", value: created, color: "bg-yellow-50 text-yellow-900" },
+    { label: "In Transit", value: inTransit, color: "bg-blue-50 text-blue-900" },
+    { label: "Delivered", value: delivered, color: "bg-green-50 text-green-900" },
   ];
 
   return (
@@ -57,9 +84,28 @@ export default function DashboardPage() {
           <p className="text-gray-500">Loading...</p>
         ) : (
           <>
-            {/* Stat cards */}
+            {/* PO Stat cards */}
+            <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Purchase Orders</h2>
             <div className="grid grid-cols-6 gap-3 mb-8">
-              {cards.map((card) => (
+              {poCards.map((card) => (
+                <div
+                  key={card.label}
+                  className={`rounded-lg px-4 py-4 ${card.color}`}
+                >
+                  <p className="text-xs font-medium uppercase tracking-wider opacity-70">
+                    {card.label}
+                  </p>
+                  <p className="text-2xl font-bold mt-1 tabular-nums">
+                    {card.value}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            {/* Shipment Stat cards */}
+            <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Shipments</h2>
+            <div className="grid grid-cols-4 gap-3 mb-8">
+              {shipmentCards.map((card) => (
                 <div
                   key={card.label}
                   className={`rounded-lg px-4 py-4 ${card.color}`}
@@ -93,6 +139,59 @@ export default function DashboardPage() {
                 </button>
               </div>
             </div>
+
+            {/* Recent Shipments */}
+            {shipments.length > 0 && (
+              <div className="bg-white rounded-lg border border-gray-200 overflow-hidden mb-6">
+                <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+                  <h2 className="text-sm font-semibold text-gray-900">Recent Shipments</h2>
+                  <button
+                    onClick={() => router.push("/shipments")}
+                    className="text-xs text-gray-500 hover:text-gray-700"
+                  >
+                    View all →
+                  </button>
+                </div>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-200">
+                      <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">Shipment #</th>
+                      <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">PO #</th>
+                      <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
+                      <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">Ship Date</th>
+                      <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">ETA</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {shipments.slice(0, 5).map((shipment) => (
+                      <tr
+                        key={shipment.id}
+                        onClick={() => router.push(`/shipments/${shipment.id}`)}
+                        className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
+                      >
+                        <td className="px-4 py-2.5 font-mono font-semibold text-gray-900">{shipment.shipmentNumber}</td>
+                        <td className="px-4 py-2.5 font-mono text-gray-600">
+                          {shipment.purchaseOrder?.[0] ? poMap[shipment.purchaseOrder[0]] || "—" : "—"}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <span className={`inline-block px-2 py-0.5 text-xs font-medium rounded-full ${
+                            { Created: "bg-yellow-100 text-yellow-800", "In Transit": "bg-blue-100 text-blue-800", Delivered: "bg-green-100 text-green-800" }[shipment.status] || "bg-gray-100 text-gray-600"
+                          }`}>
+                            {shipment.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2.5 text-gray-600">
+                          {shipment.shipDate ? new Date(shipment.shipDate + "T00:00:00").toLocaleDateString("en-US") : "—"}
+                        </td>
+                        <td className="px-4 py-2.5 text-gray-600">
+                          {shipment.expectedDeliveryDate ? new Date(shipment.expectedDeliveryDate + "T00:00:00").toLocaleDateString("en-US") : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
             {/* Recent POs */}
             <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
