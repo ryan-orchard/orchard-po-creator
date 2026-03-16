@@ -1,0 +1,328 @@
+{
+  "1-CT-SHIPPING-BOX": {
+    "airtableId": "rec77d6MRM6ktdR4W",
+    "standardSku": "PKG-SHIPBOX-1CT"
+  },
+  "14ct-Amazon-Blood Orange": {
+    "airtableId": "recww8pUHSMx3woMI",
+    "standardSku": "ELEC-BLOODORANGE-14"
+  },
+  "14ct-Amazon-Variety Pack": {
+    "airtableId": "reclx0b53q44h06w3",
+    "standardSku": "ELEC-VARIETY-14"
+  },
+  "14ct-Amazon-Watermelon Lime": {
+    "airtableId": "recrVeGefd9Gmql8R",
+    "standardSku": "ELEC-WATERMELONLIME-14"
+  },
+  "1CARTON-APPLE-JUICE": {
+    "airtableId": "rec2V8349wpIqtUdp",
+    "standardSku": "ELEC-APPLEJUICE-28"
+  },
+  "1CARTON-BLUE-ICE": {
+    "airtableId": "recDS0BKYyvbLEHsz",
+    "standardSku": "ELEC-BLUEICE-28"
+  },
+  "1CARTON-ISLAND-PUNCH": {
+    "airtableId": "rec4IsIH2HRcBIQ6h",
+    "standardSku": "ELEC-ISLANDPUNCH-28"
+  },
+  "1CARTON-LEMON-LIME": {
+    "airtableId": "recp9XyaYn9SfHk7t",
+    "standardSku": "ELEC-LEMONLIME-28"
+  },
+  "1CARTON-MINT-LEMONADE": {
+    "airtableId": "recl4QeU0S8CVmvdS",
+    "standardSku": "ELEC-MINTLEMONADE-28"
+  },
+  "1CARTON-SUMMER-BERRIES": {
+    "airtableId": "recaXtPH4VykmFuXK",
+    "standardSku": "ELEC-SUMMERBERRIES-28"
+  },
+  "1CARTON-TEA-LEMONADE": {
+    "airtableId": "recKC9Nu9GsbsvVq1",
+    "standardSku": "ELEC-TEALEMONADE-28"
+  },
+  "1CARTON-VARIETY-PACK": {
+    "airtableId": "recTRyZjB9vYFgUYQ",
+    "standardSku": "ELEC-VARIETY-28"
+  },
+  "1CARTON-WATERMELON-LIME": {
+    "airtableId": "recAku1mEpybnGehP",
+    "standardSku": "ELEC-WATERMELONLIME-28"
+  },
+  "1CT-SHIPPING-BOX": {
+    "airtableId": "rec77d6MRM6ktdR4W",
+    "standardSku": "PKG-SHIPBOX-1CT"
+  },
+  "2-CT-SHIPPING-BOX": {
+    "airtableId": "receY7OsRg8qKCtcM",
+    "standardSku": "PKG-SHIPBOX-2CT"
+  },
+  "28ct-Amazon-Summer Berries": {
+    "airtableId": "recaXtPH4VykmFuXK",
+    "standardSku": "ELEC-SUMMERBERRIES-28"
+  },
+  "2CT - BLOOD ORG": {
+    "airtableId": "recW3d1ADhi84F0fT",
+    "standardSku": "ELEC-BLOODORANGE-2"
+  },
+  "2CT FINISHED GOOD - *NO* QR CODE SURPRISE PACK": {
+    "airtableId": "recrmKNKp6BxOQkd7",
+    "standardSku": "PKG-2CT-NOQR-SURPRISE"
+  },
+  "2CT FINISHED GOOD - APPLE JUICE": {
+    "airtableId": "recuJr1bf2mBEU3bh",
+    "standardSku": "ELEC-APPLEJUICE-2"
+  },
+  "2CT FINISHED GOOD - LEMON LIME": {
+    "airtableId": "rec7aSpWrDZa4Q9hn",
+    "standardSku": "ELEC-LEMONLIME-2"
+  },
+  "2CT FINISHED GOOD - SUMMER BERRIES": {
+    "airtableId": "recaXtPH4VykmFuXK",
+    "standardSku": "ELEC-SUMMERBERRIES-28"
+  },
+  "2CT FINISHED GOOD - TEA LEMONADE": {
+    "airtableId": "recZMuppP7teme6W3",
+    "standardSku": "ELEC-TEALEMONADE-2"
+  },
+  "2CT FINISHED GOOD - WATERMELON LIME": {
+    "airtableId": "recXOw4S6NAg62COy",
+    "standardSku": "ELEC-WATERMELONLIME-2"
+  },
+  "2CT Smpl - BI": {
+    "airtableId": "recDS0BKYyvbLEHsz",
+    "standardSku": "ELEC-BLUEICE-28"
+  },
+  "2CT Smpl - IP": {
+    "airtableId": "recbREAJssX9zT0vE",
+    "standardSku": "ELEC-ISLANDPUNCH-2"
+  },
+  "2CT Smpl - TL/BO": {
+    "airtableId": "reclWTDWchOs7sH61",
+    "standardSku": "ELEC-TL/BO-2"
+  },
+  "2CT Smpl - TL/LL": {
+    "airtableId": "recg0x17TVWcfM0Vt",
+    "standardSku": "ELEC-TL/LL-2"
+  },
+  "2CT Smpl - TL/ML": {
+    "airtableId": "recAFgbxlBd3OqJQZ",
+    "standardSku": "ELEC-TL/ML-2"
+  },
+  "2CT Smpl - TL/WL": {
+    "airtableId": "recxOBow70TGgQKGd",
+    "standardSku": "ELEC-TL/WL-2"
+  },
+  "2CT Smpl - WL/LL": {
+    "airtableId": "recnQcUnFEMpumNjy",
+    "standardSku": "ELEC-WL/LL-2"
+  },
+  "2ct FIN GD - ML": {
+    "airtableId": "recLGene1flElsSFh",
+    "standardSku": "ELEC-MINTLEMONADE-2"
+  },
+  "7ct-Amazon-Blood Orange": {
+    "airtableId": "recmBz8fqeuZK7ZP3",
+    "standardSku": "ELEC-BLOODORANGE-7"
+  },
+  "7ct-Amazon-Variety Pack": {
+    "airtableId": "recOMXitwstmD1BFJ",
+    "standardSku": "ELEC-VARIETY-7"
+  },
+  "7ct-Amazon-Watermelon Lime": {
+    "airtableId": "receRu3OLGEqKScC4",
+    "standardSku": "ELEC-WATERMELONLIME-7"
+  },
+  "8-CT-SAMPLER - FINISHED GOOD": {
+    "airtableId": "recF28R9FVzNZdpO0",
+    "standardSku": "ELEC-SAMPLER-8"
+  },
+  "Amazon 8/12 Box": null,
+  "BOX-FILLING": null,
+  "CARTION-ICE-BLUE-CUSTOM": {
+    "airtableId": "recDS0BKYyvbLEHsz",
+    "standardSku": "ELEC-BLUEICE-28"
+  },
+  "CARTON - WATERMELON": {
+    "airtableId": "recAku1mEpybnGehP",
+    "standardSku": "ELEC-WATERMELONLIME-28"
+  },
+  "CARTON-BLOOD-ORG": {
+    "airtableId": "rec6wpc0snsBLpsHx",
+    "standardSku": "ELEC-BLOODORANGE-28"
+  },
+  "CARTON-LEMON-LIME": {
+    "airtableId": "recp9XyaYn9SfHk7t",
+    "standardSku": "ELEC-LEMONLIME-28"
+  },
+  "CARTON-TEA-LEMONADE": {
+    "airtableId": "recKC9Nu9GsbsvVq1",
+    "standardSku": "ELEC-TEALEMONADE-28"
+  },
+  "CARTON-UNFLAVOR": {
+    "airtableId": "recC9JBAxSS7iq5FS",
+    "standardSku": "ELEC-UNFLAVORED-STICK"
+  },
+  "CARTON-UNFLAVORED": {
+    "airtableId": "recC9JBAxSS7iq5FS",
+    "standardSku": "ELEC-UNFLAVORED-STICK"
+  },
+  "CARTON-VARIETY-PACK": {
+    "airtableId": "recTRyZjB9vYFgUYQ",
+    "standardSku": "ELEC-VARIETY-28"
+  },
+  "Carton-Mint-Lemo": {
+    "airtableId": "recl4QeU0S8CVmvdS",
+    "standardSku": "ELEC-MINTLEMONADE-28"
+  },
+  "HANDWRITTEN-NOTES": null,
+  "MAGAJU0701": {
+    "airtableId": "recSHqoQ5VeowrL7o",
+    "standardSku": "ELEC-APPLEJUICE-7"
+  },
+  "MAGAJU1401": {
+    "airtableId": "reccbrNPhhHHu05oq",
+    "standardSku": "ELEC-APPLEJUICE-14"
+  },
+  "MAGBLO0701": {
+    "airtableId": "recmBz8fqeuZK7ZP3",
+    "standardSku": "ELEC-BLOODORANGE-7"
+  },
+  "MAGBLO1401": {
+    "airtableId": "recww8pUHSMx3woMI",
+    "standardSku": "ELEC-BLOODORANGE-14"
+  },
+  "MAGLML0701": {
+    "airtableId": "recRMq9U4WywtxTPj",
+    "standardSku": "ELEC-LEMONLIME-7"
+  },
+  "MAGLML1401": {
+    "airtableId": "rec5XvqENF43nPDCR",
+    "standardSku": "ELEC-LEMONLIME-14"
+  },
+  "MAGMTL0701": {
+    "airtableId": "reczkGP0WGsFnCW5p",
+    "standardSku": "ELEC-MINTLEMONADE-7"
+  },
+  "MAGMTL1401": {
+    "airtableId": "reclYa5TevuenBhzA",
+    "standardSku": "ELEC-MINTLEMONADE-14"
+  },
+  "MAGNA-BOTTLE-CLEAR": {
+    "airtableId": "recsrqrcBhDrnbbBD",
+    "standardSku": "MERCH-BOTTLE-CLEAR"
+  },
+  "MAGNA-WORLD-TEE-L": {
+    "airtableId": "recUALa6bQrp9Z1iq",
+    "standardSku": "MERCH-TEE-L"
+  },
+  "MAGNA-WORLD-TEE-M": {
+    "airtableId": "recitukoOAnyKEwHH",
+    "standardSku": "MERCH-TEE-M"
+  },
+  "MAGNA-WORLD-TEE-S": {
+    "airtableId": "recpgiHL9mW9YfTfO",
+    "standardSku": "MERCH-TEE-S"
+  },
+  "MAGNA-WORLD-TEE-XL": {
+    "airtableId": "recIxMPBFtIS2Hvu4",
+    "standardSku": "MERCH-TEE-XL"
+  },
+  "MAGNA-WORLD-TEE-XS": {
+    "airtableId": "recpgiHL9mW9YfTfO",
+    "standardSku": "MERCH-TEE-S"
+  },
+  "MAGTLM0701": {
+    "airtableId": "recN683BPgVKFLiqK",
+    "standardSku": "ELEC-TEALEMONADE-7"
+  },
+  "MAGTLM1401": {
+    "airtableId": "recfLkbzXl3eEv0a4",
+    "standardSku": "ELEC-TEALEMONADE-14"
+  },
+  "MAGWTL0701": {
+    "airtableId": "receRu3OLGEqKScC4",
+    "standardSku": "ELEC-WATERMELONLIME-7"
+  },
+  "MAGWTL1401": {
+    "airtableId": "recrVeGefd9Gmql8R",
+    "standardSku": "ELEC-WATERMELONLIME-14"
+  },
+  "Magna - Matte Labels": null,
+  "Magna Stamp": null,
+  "PACKAGE - 2CT *NO* QR CODE SURPRISE PACK": {
+    "airtableId": "recrmKNKp6BxOQkd7",
+    "standardSku": "PKG-2CT-NOQR-SURPRISE"
+  },
+  "PKGENV0201": {
+    "airtableId": "recXtKBjvPRHJYLR0",
+    "standardSku": "PKG-ENV-2CT"
+  },
+  "PKGENV0701": {
+    "airtableId": "rectqTFsIRgzsFfAf",
+    "standardSku": "PKG-ENV-7CT"
+  },
+  "PKGENV1401": {
+    "airtableId": "recdH8xMczWFuyHPn",
+    "standardSku": "PKG-ENV-14CT"
+  },
+  "PLAY-THE-LONG-GAME-HAT": {
+    "airtableId": "recCrTzuP9Rxqwoeb",
+    "standardSku": "MERCH-HAT-LOGOBLACK"
+  },
+  "Run NYC - HAT": {
+    "airtableId": "rec1R014pGzrKamd0",
+    "standardSku": "MERCH-HAT-RUNNYC"
+  },
+  "STICK-APPLE-JUICE": {
+    "airtableId": "reckdlFCqZNsLBNqG",
+    "standardSku": "ELEC-APPLEJUICE-STICK"
+  },
+  "STICK-BLOOD ORG": {
+    "airtableId": "recmiYql286jH4zZg",
+    "standardSku": "ELEC-BLOODORANGE-STICK"
+  },
+  "STICK-BLUE-ICE": {
+    "airtableId": "recaL37ZxYAoocYYZ",
+    "standardSku": "ELEC-BLUEICE-STICK"
+  },
+  "STICK-ISLAND-PUNCH": {
+    "airtableId": "recTlmIfmRE7WBk7W",
+    "standardSku": "ELEC-ISLANDPUNCH-STICK"
+  },
+  "STICK-LEMON-LIME": {
+    "airtableId": "reclMeMxQomaHHcvi",
+    "standardSku": "ELEC-LEMONLIME-STICK"
+  },
+  "STICK-MINT LEMON": {
+    "airtableId": "recWHaiSZj2XGYVpA",
+    "standardSku": "ELEC-MINTLEMONADE-STICK"
+  },
+  "STICK-RASPBERRY": {
+    "airtableId": "recTpQ64zr1bJD9lR",
+    "standardSku": "ELEC-RASPBERRY-STICK"
+  },
+  "STICK-STRAWBERRY": {
+    "airtableId": "recED6ub93yuUIr4J",
+    "standardSku": "ELEC-STRAWBERRY-STICK"
+  },
+  "STICK-TEA-LEMONADE": {
+    "airtableId": "recgcdt5ukQFTC9Zr",
+    "standardSku": "ELEC-TEALEMONADE-STICK"
+  },
+  "STICK-WATERMELON-LIME": {
+    "airtableId": "rect7ksDMXvu4bdsg",
+    "standardSku": "ELEC-WATERMELONLIME-STICK"
+  },
+  "SWEAT IS SWEET - HAT": {
+    "airtableId": "rec3S5GL0D2p2XDwl",
+    "standardSku": "MERCH-HAT-SWEATISFWEET"
+  },
+  "TTS-8-CT-SAMPLER - FINISHED GOOD": {
+    "airtableId": "recF28R9FVzNZdpO0",
+    "standardSku": "ELEC-SAMPLER-8"
+  },
+  "UPC Stickers": null
+}

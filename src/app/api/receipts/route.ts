@@ -1,0 +1,148 @@
+import { NextRequest, NextResponse } from "next/server";
+import {
+  getRecords,
+  getRecord,
+  createRecord,
+  createRecords,
+  TABLES,
+} from "@/lib/airtable";
+
+export async function GET() {
+  // Fetch receipts with their line items
+  const records = await getRecords(TABLES.RECEIPTS, {
+    sort: [{ field: "Received Date", direction: "desc" }],
+  });
+
+  // Fetch all receipt lines, POs, warehouses, and SKUs for joining
+  const [allLines, allPOs, allWarehouses, allSKUs] = await Promise.all([
+    getRecords(TABLES.RECEIPT_LINES),
+    getRecords(TABLES.PURCHASE_ORDERS),
+    getRecords(TABLES.WAREHOUSES),
+    getRecords(TABLES.SKUS),
+  ]);
+
+  // Build lookup maps
+  const poMap: Record<string, string> = {};
+  for (const po of allPOs) {
+    poMap[po.id] = po.fields["PO Number"] as string;
+  }
+
+  const warehouseMap: Record<string, string> = {};
+  for (const wh of allWarehouses) {
+    warehouseMap[wh.id] = (wh.fields["Code"] as string) || (wh.fields["Name"] as string) || wh.id;
+  }
+
+  const skuMap: Record<string, string> = {};
+  for (const sku of allSKUs) {
+    skuMap[sku.id] = (sku.fields["Standard SKU"] as string) || (sku.fields["Name"] as string) || sku.id;
+  }
+
+  const lineMap: Record<string, typeof allLines> = {};
+  for (const line of allLines) {
+    const receiptIds = line.fields["Receipt"] as string[];
+    if (receiptIds?.[0]) {
+      if (!lineMap[receiptIds[0]]) lineMap[receiptIds[0]] = [];
+      lineMap[receiptIds[0]].push(line);
+    }
+  }
+
+  const receipts = records.map((r) => {
+    const poIds = r.fields["Purchase Order"] as string[] | undefined;
+    const warehouseIds = r.fields["Warehouses"] as string[] | undefined;
+    const lines = lineMap[r.id] || [];
+
+    return {
+      id: r.id,
+      receiptNumber: r.fields["Receipt Number"] as string,
+      receivedDate: r.fields["Received Date"] as string,
+      purchaseOrder: poIds?.[0] ? poMap[poIds[0]] : null,
+      purchaseOrderId: poIds?.[0] || null,
+      warehouse: warehouseIds?.[0] ? warehouseMap[warehouseIds[0]] : null,
+      warehouseId: warehouseIds?.[0] || null,
+      externalReceiptId: r.fields["External Receipt ID"] as string,
+      notes: r.fields["Notes"] as string,
+      lines: lines.map((l) => {
+        const skuIds = l.fields["SKU"] as string[] | undefined;
+        return {
+          id: l.id,
+          sku: skuIds?.[0] ? skuMap[skuIds[0]] : null,
+          skuId: skuIds?.[0] || null,
+          qtyReceived: l.fields["Qty Received"] as number,
+          qtyExpected: l.fields["Qty Expected"] as number | null,
+          threePlSku: l.fields["3PL SKU"] as string,
+          lotNumber: l.fields["Lot Number"] as string,
+        };
+      }),
+    };
+  });
+
+  return NextResponse.json(receipts);
+}
+
+export async function POST(request: NextRequest) {
+  const body = await request.json();
+
+  // Generate Receipt number: RCP-10001, RCP-10002, ...
+  const existingReceipts = await getRecords(TABLES.RECEIPTS);
+  let maxNum = 10000;
+  for (const r of existingReceipts) {
+    const num = r.fields["Receipt Number"] as string;
+    const match = num?.match(/^RCP-(\d+)$/);
+    if (match) {
+      maxNum = Math.max(maxNum, parseInt(match[1], 10));
+    }
+  }
+  const receiptNumber = `RCP-${maxNum + 1}`;
+
+  // Look up warehouse by code if facility code provided
+  let warehouseId = body.warehouseId;
+  if (!warehouseId && body.facilityCode) {
+    const warehouses = await getRecords(TABLES.WAREHOUSES, {
+      filterByFormula: `{Code} = "${body.facilityCode}"`,
+    });
+    if (warehouses.length > 0) {
+      warehouseId = warehouses[0].id;
+    }
+  }
+
+  // Create receipt header
+  const receiptFields: Record<string, unknown> = {
+    "Receipt Number": receiptNumber,
+    "Received Date": body.receivedDate,
+    ...(body.purchaseOrderId ? { "Purchase Order": [body.purchaseOrderId] } : {}),
+    ...(warehouseId ? { Warehouses: [warehouseId] } : {}),
+    ...(body.externalReceiptId ? { "External Receipt ID": body.externalReceiptId } : {}),
+    ...(body.notes ? { Notes: body.notes } : {}),
+  };
+
+  const receipt = await createRecord(TABLES.RECEIPTS, receiptFields);
+
+  // Create receipt line items
+  if (body.lineItems && body.lineItems.length > 0) {
+    const lineItemRecords = body.lineItems.map(
+      (item: {
+        skuId?: string;
+        qtyReceived: number;
+        qtyExpected?: number;
+        threePlSku?: string;
+        lotNumber?: string;
+      },
+        index: number
+      ) => ({
+        fields: {
+          "Line ID": `${receiptNumber}-${index + 1}`,
+          Receipt: [receipt.id],
+          ...(item.skuId ? { SKU: [item.skuId] } : {}),
+          "Qty Received": item.qtyReceived,
+          ...(item.qtyExpected != null ? { "Qty Expected": item.qtyExpected } : {}),
+          ...(item.threePlSku ? { "3PL SKU": item.threePlSku } : {}),
+          ...(item.lotNumber ? { "Lot Number": item.lotNumber } : {}),
+        },
+      })
+    );
+
+    await createRecords(TABLES.RECEIPT_LINES, lineItemRecords);
+  }
+
+  return NextResponse.json({ id: receipt.id, receiptNumber });
+}
