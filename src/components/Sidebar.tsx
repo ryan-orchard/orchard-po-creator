@@ -14,21 +14,29 @@ const NAV_SECTIONS = [
     label: "PURCHASING",
     items: [
       { name: "Purchase Orders", href: "/pos", icon: ClipboardIcon },
-      { name: "Shipments", href: "/shipments", icon: TruckIcon, soon: true },
+      { name: "Shipments", href: "/shipments", icon: TruckIcon },
     ],
   },
   {
     label: "WAREHOUSE",
     items: [
-      { name: "Receipts", href: "/receipts", icon: InboxIcon, soon: true },
+      { name: "Receipts", href: "/receipts", icon: InboxIcon },
+      { name: "On-Hand Inventory", href: "/warehouse/on-hand", icon: CubeIcon, soon: true },
       { name: "Work Orders", href: "/work-orders", icon: WrenchIcon, soon: true },
     ],
   },
   {
-    label: "INVENTORY",
+    label: "FINANCE",
     items: [
       { name: "Landed Costs", href: "/landed-costs", icon: CalculatorIcon, soon: true },
       { name: "Invoices", href: "/invoices", icon: DocumentIcon, soon: true },
+    ],
+  },
+  {
+    label: "ADMIN",
+    items: [
+      { name: "Data Ingestion", href: "/warehouse/data-ingestion", icon: UploadIcon },
+      { name: "Items", href: "/items", icon: TagIcon },
     ],
   },
 ];
@@ -73,6 +81,14 @@ function InboxIcon({ className }: { className?: string }) {
   );
 }
 
+function UploadIcon({ className }: { className?: string }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+    </svg>
+  );
+}
+
 function WrenchIcon({ className }: { className?: string }) {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -85,6 +101,23 @@ function CalculatorIcon({ className }: { className?: string }) {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 15.75V18m-7.5-6.75h.008v.008H8.25v-.008zm0 2.25h.008v.008H8.25V13.5zm0 2.25h.008v.008H8.25v-.008zm0 2.25h.008v.008H8.25V18zm2.498-6.75h.007v.008h-.007v-.008zm0 2.25h.007v.008h-.007V13.5zm0 2.25h.007v.008h-.007v-.008zm0 2.25h.007v.008h-.007V18zm2.504-6.75h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V13.5zm0 2.25h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V18zm2.498-6.75h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V13.5zM8.25 6h7.5v2.25h-7.5V6zM12 2.25c-1.892 0-3.758.11-5.593.322C5.307 2.7 4.5 3.65 4.5 4.757V19.5a2.25 2.25 0 002.25 2.25h10.5a2.25 2.25 0 002.25-2.25V4.757c0-1.108-.806-2.057-1.907-2.185A48.507 48.507 0 0012 2.25z" />
+    </svg>
+  );
+}
+
+function CubeIcon({ className }: { className?: string }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" />
+    </svg>
+  );
+}
+
+function TagIcon({ className }: { className?: string }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 6h.008v.008H6V6z" />
     </svg>
   );
 }

@@ -26,6 +26,9 @@ const statusColors: Record<string, string> = {
   Closed: "bg-gray-100 text-gray-600",
 };
 
+type SortField = "poNumber" | "supplier" | "status" | "grandTotal" | "date";
+type SortDir = "asc" | "desc";
+
 export default function POListPage() {
   const router = useRouter();
   const [pos, setPOs] = useState<PO[]>([]);
@@ -33,6 +36,8 @@ export default function POListPage() {
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string>("All");
+  const [sortField, setSortField] = useState<SortField>("date");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
 
   useEffect(() => {
     Promise.all([
@@ -62,9 +67,43 @@ export default function POListPage() {
     }
   };
 
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDir(sortDir === "asc" ? "desc" : "asc");
+    } else {
+      setSortField(field);
+      setSortDir(field === "grandTotal" || field === "date" ? "desc" : "asc");
+    }
+  };
+
   const filteredPOs = activeTab === "All"
     ? pos
     : pos.filter((po) => po.status === activeTab);
+
+  const sortedPOs = [...filteredPOs].sort((a, b) => {
+    let cmp = 0;
+    switch (sortField) {
+      case "poNumber":
+        cmp = a.poNumber.localeCompare(b.poNumber, undefined, { numeric: true });
+        break;
+      case "supplier": {
+        const sA = a.supplier?.[0] ? suppliers[a.supplier[0]] || "" : "";
+        const sB = b.supplier?.[0] ? suppliers[b.supplier[0]] || "" : "";
+        cmp = sA.localeCompare(sB);
+        break;
+      }
+      case "status":
+        cmp = (a.status || "").localeCompare(b.status || "");
+        break;
+      case "grandTotal":
+        cmp = (a.grandTotal || 0) - (b.grandTotal || 0);
+        break;
+      case "date":
+        cmp = (a.date || "").localeCompare(b.date || "");
+        break;
+    }
+    return sortDir === "asc" ? cmp : -cmp;
+  });
 
   const tabCounts = STATUS_TABS.reduce((acc, tab) => {
     acc[tab] = tab === "All" ? pos.length : pos.filter((p) => p.status === tab).length;
@@ -141,26 +180,29 @@ export default function POListPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                    PO #
-                  </th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                    Supplier
-                  </th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                    Status
-                  </th>
-                  <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                    Total
-                  </th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                    Date
-                  </th>
+                  {([
+                    { field: "poNumber" as SortField, label: "PO #", align: "text-left" },
+                    { field: "supplier" as SortField, label: "Supplier", align: "text-left" },
+                    { field: "status" as SortField, label: "Status", align: "text-left" },
+                    { field: "grandTotal" as SortField, label: "Total", align: "text-right" },
+                    { field: "date" as SortField, label: "Date", align: "text-left" },
+                  ]).map((col) => (
+                    <th
+                      key={col.field}
+                      onClick={() => handleSort(col.field)}
+                      className={`${col.align} px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700 select-none`}
+                    >
+                      {col.label}
+                      {sortField === col.field && (
+                        <span className="ml-1">{sortDir === "asc" ? "↑" : "↓"}</span>
+                      )}
+                    </th>
+                  ))}
                   <th className="px-4 py-3 w-10"></th>
                 </tr>
               </thead>
               <tbody>
-                {filteredPOs.map((po) => (
+                {sortedPOs.map((po) => (
                   <tr
                     key={po.id}
                     onClick={() => router.push(`/pos/${po.id}`)}
