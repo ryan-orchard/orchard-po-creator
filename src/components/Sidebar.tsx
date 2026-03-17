@@ -20,6 +20,7 @@ const NAV_SECTIONS = [
     label: "WAREHOUSE",
     items: [
       { name: "Receipts", href: "/receipts", icon: InboxIcon },
+      { name: "Receipt Matching", href: "/receipts/matching", icon: LinkIcon },
       { name: "On-Hand Inventory", href: "/warehouse/on-hand", icon: CubeIcon, soon: true },
       { name: "Work Orders", href: "/work-orders", icon: WrenchIcon, soon: true },
     ],
@@ -118,6 +119,14 @@ function TagIcon({ className }: { className?: string }) {
     <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z" />
       <path strokeLinecap="round" strokeLinejoin="round" d="M6 6h.008v.008H6V6z" />
+    </svg>
+  );
+}
+
+function LinkIcon({ className }: { className?: string }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m9.86-4.122a4.5 4.5 0 00-1.242-7.244l-4.5-4.5a4.5 4.5 0 00-6.364 6.364L4.94 8.82" />
     </svg>
   );
 }

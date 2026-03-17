@@ -11,7 +11,6 @@ interface ReceiptLine {
   lotNumber: string | null;
   standardSku: string | null;
   airtableSkuId: string | null;
-  uom: string | null;
   skuMapped: boolean;
 }
 
@@ -20,8 +19,6 @@ interface ParsedReceipt {
   receivedDate: string;
   facility: string;
   lines: ReceiptLine[];
-  matchedPO: { id: string; poNumber: string } | null;
-  poMatchAttempted: boolean;
 }
 
 interface ClassificationSummary {
@@ -35,17 +32,19 @@ interface ClassificationSummary {
   total: number;
 }
 
+interface AvailableItem {
+  id: string;
+  standardSku: string;
+  category: string;
+}
+
 interface IngestResult {
   fileName: string;
   totalRows: number;
   dateRange: { from: string | null; to: string | null };
   classification: ClassificationSummary;
   receipts: ParsedReceipt[];
-  availablePOs: {
-    id: string;
-    poNumber: string;
-    lineItems: { skuId: string; qtySticks: number; qtyCartons: number | null }[];
-  }[];
+  availableItems: AvailableItem[];
 }
 
 export default function DataIngestionPage() {
@@ -57,15 +56,18 @@ export default function DataIngestionPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
-  // Local state for PO overrides (receipt index -> PO id)
-  const [poOverrides, setPOOverrides] = useState<Record<number, string>>({});
+  // SKU overrides: key = "receiptIdx-lineIdx", value = airtable item ID
+  const [skuOverrides, setSkuOverrides] = useState<Record<string, string>>({});
+  // Deleted lines: set of "receiptIdx-lineIdx" keys
+  const [deletedLines, setDeletedLines] = useState<Set<string>>(new Set());
 
   const handleFileUpload = async (file: File) => {
     setUploading(true);
     setError(null);
     setResult(null);
     setSubmitted(false);
-    setPOOverrides({});
+    setSkuOverrides({});
+    setDeletedLines(new Set());
 
     try {
       const formData = new FormData();
@@ -104,20 +106,30 @@ export default function DataIngestionPage() {
       let created = 0;
       for (let i = 0; i < result.receipts.length; i++) {
         const receipt = result.receipts[i];
-        const poId = poOverrides[i] || receipt.matchedPO?.id || null;
+
+        // Filter out deleted lines
+        const activeLines = receipt.lines
+          .map((line, lineIdx) => ({ line, lineIdx }))
+          .filter(({ lineIdx }) => !deletedLines.has(`${i}-${lineIdx}`));
+
+        // Skip receipt if all lines were deleted
+        if (activeLines.length === 0) continue;
 
         const body = {
           receivedDate: receipt.receivedDate,
-          purchaseOrderId: poId,
           facilityCode: receipt.facility === "RNOs003" ? "STORD" : receipt.facility,
           externalReceiptId: receipt.orderNumber,
-          lineItems: receipt.lines.map((line) => ({
-            skuId: line.airtableSkuId || undefined,
-            qtyReceived: line.qtyReceived,
-            qtyExpected: line.qtyExpected || undefined,
-            threePlSku: line.stordSku,
-            lotNumber: line.lotNumber || undefined,
-          })),
+          lineItems: activeLines.map(({ line, lineIdx }) => {
+            const overrideKey = `${i}-${lineIdx}`;
+            const skuId = skuOverrides[overrideKey] || line.airtableSkuId || undefined;
+            return {
+              skuId,
+              qtyReceived: line.qtyReceived,
+              qtyExpected: line.qtyExpected || undefined,
+              threePlSku: line.stordSku,
+              lotNumber: line.lotNumber || undefined,
+            };
+          }),
         };
 
         const response = await fetch("/api/receipts", {
@@ -130,7 +142,7 @@ export default function DataIngestionPage() {
       }
 
       setSubmitted(true);
-      alert(`Created ${created} receipt(s) in Airtable.`);
+      alert(`Created ${created} receipt(s) in Airtable. Go to Receipt Matching to link them to POs.`);
     } catch {
       alert("Error creating receipts. Please try again.");
     } finally {
@@ -138,41 +150,17 @@ export default function DataIngestionPage() {
     }
   };
 
-  const getReceiptStatus = (receipt: ParsedReceipt, index: number) => {
-    const hasUnmapped = receipt.lines.some((l) => !l.skuMapped);
-    const hasPO = poOverrides[index] || receipt.matchedPO;
-    if (hasUnmapped) return "unmapped";
-    if (!hasPO) return "needs-po";
-    // Check if all mapped SKUs exist on the selected PO
-    const poId = (poOverrides[index] || receipt.matchedPO?.id) as string;
-    if (poId && result) {
-      const po = result.availablePOs.find((p) => p.id === poId);
-      if (po) {
-        const hasMismatch = receipt.lines.some(
-          (l) => l.airtableSkuId && !po.lineItems.some((li) => li.skuId === l.airtableSkuId)
-        );
-        if (hasMismatch) return "sku-mismatch";
-      }
-    }
+  const getLineStatus = (line: ReceiptLine, receiptIdx: number, lineIdx: number) => {
+    const overrideKey = `${receiptIdx}-${lineIdx}`;
+    if (skuOverrides[overrideKey]) return "resolved";
+    if (!line.skuMapped) return "unmapped";
     return "ready";
   };
 
   const statusConfig = {
     ready: { label: "Ready", color: "bg-green-100 text-green-800" },
-    "sku-mismatch": { label: "SKU Mismatch", color: "bg-orange-100 text-orange-800" },
-    "needs-po": { label: "No PO Match", color: "bg-yellow-100 text-yellow-800" },
     unmapped: { label: "Unmapped SKU", color: "bg-red-100 text-red-800" },
-  };
-
-  // Look up PO expected qty for a receipt line's SKU
-  const getPOLineMatch = (receiptIdx: number, line: ReceiptLine) => {
-    if (!result || !line.airtableSkuId) return null;
-    const poId = poOverrides[receiptIdx] || result.receipts[receiptIdx].matchedPO?.id;
-    if (!poId) return null;
-    const po = result.availablePOs.find((p) => p.id === poId);
-    if (!po) return null;
-    const poLine = po.lineItems.find((li) => li.skuId === line.airtableSkuId);
-    return poLine || null;
+    resolved: { label: "Mapped", color: "bg-blue-100 text-blue-800" },
   };
 
   return (
@@ -258,7 +246,8 @@ export default function DataIngestionPage() {
                     setResult(null);
                     setError(null);
                     setSubmitted(false);
-                    setPOOverrides({});
+                    setSkuOverrides({});
+                    setDeletedLines(new Set());
                   }}
                   className="text-sm text-gray-500 hover:text-gray-700"
                 >
@@ -348,129 +337,162 @@ export default function DataIngestionPage() {
                         <th className="text-left px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">
                           3PL SKU
                         </th>
-                        <th className="text-left px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                        <th className="text-left px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider min-w-[200px]">
                           Mapped SKU
                         </th>
                         <th className="text-right px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">
                           Qty Received
                         </th>
-                        <th className="text-right px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                          PO Qty
-                        </th>
-                        <th className="text-left px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider min-w-[160px]">
-                          Purchase Order
-                        </th>
+                        <th className="px-3 py-2.5 w-8"></th>
                       </tr>
                     </thead>
                     <tbody>
-                      {result.receipts.map((receipt, idx) => {
-                        const status = getReceiptStatus(receipt, idx);
-                        const config = statusConfig[status];
-                        const selectedPOId = poOverrides[idx] || receipt.matchedPO?.id || "";
+                      {result.receipts.map((receipt, idx) =>
+                        receipt.lines.map((line, lineIdx) => {
+                          const lineKey = `${idx}-${lineIdx}`;
+                          if (deletedLines.has(lineKey)) return null;
 
-                        return receipt.lines.map((line, lineIdx) => (
-                          <tr
-                            key={`${idx}-${lineIdx}`}
-                            className={`border-b border-gray-100 ${
-                              lineIdx === 0 && idx > 0 ? "border-t-2 border-t-gray-200" : ""
-                            }`}
-                          >
-                            {/* Status — only on first line */}
-                            <td className="px-3 py-2.5">
-                              {lineIdx === 0 && (
+                          const lineStatus = getLineStatus(line, idx, lineIdx);
+                          const config = statusConfig[lineStatus];
+                          const overrideKey = lineKey;
+                          const hasOverride = !!skuOverrides[overrideKey];
+                          const overrideItem = hasOverride
+                            ? result.availableItems.find((item) => item.id === skuOverrides[overrideKey])
+                            : null;
+
+                          return (
+                            <tr
+                              key={lineKey}
+                              className={`border-b border-gray-100 ${
+                                lineIdx === 0 && idx > 0 ? "border-t-2 border-t-gray-200" : ""
+                              }`}
+                            >
+                              {/* Status — shown on every line */}
+                              <td className="px-3 py-2.5">
                                 <span className={`px-2 py-0.5 text-xs font-medium rounded-full whitespace-nowrap ${config.color}`}>
                                   {config.label}
                                 </span>
-                              )}
-                            </td>
-                            {/* Order # — only on first line */}
-                            <td className="px-3 py-2.5 font-mono text-gray-600 text-xs">
-                              {lineIdx === 0 ? receipt.orderNumber : ""}
-                            </td>
-                            {/* Date — only on first line */}
-                            <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap">
-                              {lineIdx === 0 && receipt.receivedDate
-                                ? new Date(receipt.receivedDate + "T00:00:00").toLocaleDateString("en-US")
-                                : ""}
-                            </td>
-                            {/* 3PL SKU */}
-                            <td className="px-3 py-2.5 font-mono text-gray-600 text-xs">
-                              {line.stordSku}
-                            </td>
-                            {/* Mapped SKU */}
-                            <td className="px-3 py-2.5">
-                              {line.standardSku ? (
-                                <span className="font-mono text-gray-900 text-xs">{line.standardSku}</span>
-                              ) : line.skuMapped ? (
-                                <span className="text-gray-400 italic text-xs">Non-inventory</span>
-                              ) : (
-                                <span className="text-red-500 font-medium text-xs">Unmapped</span>
-                              )}
-                            </td>
-                            {/* Qty Received */}
-                            <td className="px-3 py-2.5 text-right font-mono text-gray-900">
-                              {line.qtyReceived.toLocaleString()}
-                            </td>
-                            {/* PO Qty — expected from PO line item */}
-                            <td className="px-3 py-2.5 text-right">
-                              {(() => {
-                                const poLine = getPOLineMatch(idx, line);
-                                const hasPO = poOverrides[idx] || receipt.matchedPO;
-                                if (!hasPO || !line.airtableSkuId) return <span className="text-gray-300">—</span>;
-                                if (!poLine) {
-                                  return (
-                                    <span className="text-yellow-600 text-xs font-medium" title="This SKU is not on the selected PO">
-                                      Not on PO
-                                    </span>
-                                  );
-                                }
-                                const poQty = line.uom === "Carton" ? (poLine.qtyCartons || 0) : poLine.qtySticks;
-                                const match = poQty === line.qtyReceived;
-                                return (
-                                  <span className={`font-mono ${match ? "text-green-600" : "text-orange-500"}`}>
-                                    {poQty.toLocaleString()}
-                                  </span>
-                                );
-                              })()}
-                            </td>
-                            {/* PO Dropdown — only on first line */}
-                            <td className="px-3 py-2.5">
-                              {lineIdx === 0 && (
-                                <div className="flex items-center gap-1">
+                              </td>
+                              {/* Order # — shown on every line */}
+                              <td className="px-3 py-2.5 font-mono text-gray-600 text-xs">
+                                {receipt.orderNumber}
+                              </td>
+                              {/* Date — shown on every line */}
+                              <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap">
+                                {receipt.receivedDate
+                                  ? new Date(receipt.receivedDate + "T00:00:00").toLocaleDateString("en-US")
+                                  : "—"}
+                              </td>
+                              {/* 3PL SKU */}
+                              <td className="px-3 py-2.5 font-mono text-gray-600 text-xs">
+                                {line.stordSku}
+                              </td>
+                              {/* Mapped SKU — editable for unmapped */}
+                              <td className="px-3 py-2.5">
+                                {line.standardSku ? (
+                                  <span className="font-mono text-gray-900 text-xs">{line.standardSku}</span>
+                                ) : line.skuMapped ? (
+                                  <span className="text-gray-400 italic text-xs">Non-inventory</span>
+                                ) : hasOverride ? (
+                                  <div className="flex items-center gap-1">
+                                    <span className="font-mono text-blue-700 text-xs">{overrideItem?.standardSku}</span>
+                                    <button
+                                      onClick={() => {
+                                        setSkuOverrides((prev) => {
+                                          const next = { ...prev };
+                                          delete next[overrideKey];
+                                          return next;
+                                        });
+                                      }}
+                                      className="text-gray-400 hover:text-gray-600 text-xs"
+                                      title="Clear mapping"
+                                    >
+                                      x
+                                    </button>
+                                  </div>
+                                ) : (
                                   <select
-                                    value={selectedPOId}
+                                    value=""
                                     onChange={(e) => {
-                                      setPOOverrides((prev) => ({
-                                        ...prev,
-                                        [idx]: e.target.value,
-                                      }));
+                                      if (e.target.value) {
+                                        setSkuOverrides((prev) => ({
+                                          ...prev,
+                                          [overrideKey]: e.target.value,
+                                        }));
+                                      }
                                     }}
-                                    className="text-xs border border-gray-300 rounded px-1.5 py-1 w-full"
+                                    className="text-xs border border-red-300 rounded px-1.5 py-1 w-full bg-red-50 text-red-700"
                                   >
-                                    <option value="">— Select PO —</option>
-                                    {result.availablePOs.map((po) => (
-                                      <option key={po.id} value={po.id}>
-                                        {po.poNumber}
+                                    <option value="">Select SKU...</option>
+                                    {result.availableItems.map((item) => (
+                                      <option key={item.id} value={item.id}>
+                                        {item.standardSku}
                                       </option>
                                     ))}
                                   </select>
-                                  {receipt.matchedPO && !poOverrides[idx] && (
-                                    <span className="text-[10px] text-green-600 whitespace-nowrap">Auto</span>
-                                  )}
-                                </div>
-                              )}
-                            </td>
-                          </tr>
-                        ));
-                      })}
+                                )}
+                              </td>
+                              {/* Qty Received */}
+                              <td className="px-3 py-2.5 text-right font-mono text-gray-900">
+                                {line.qtyReceived.toLocaleString()}
+                              </td>
+                              {/* Delete */}
+                              <td className="px-3 py-2.5 text-center">
+                                <button
+                                  onClick={() => {
+                                    setDeletedLines((prev) => {
+                                      const next = new Set(prev);
+                                      next.add(lineKey);
+                                      return next;
+                                    });
+                                  }}
+                                  className="text-gray-300 hover:text-red-500 transition-colors"
+                                  title="Remove this line"
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                  </svg>
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
                     </tbody>
                   </table>
                 </div>
 
+                {/* Info banner */}
+                <div className="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-3">
+                  <p className="text-sm text-blue-800">
+                    Receipts will be created as <strong>Unmatched</strong>. Use{" "}
+                    <button
+                      onClick={() => router.push("/receipts/matching")}
+                      className="underline font-medium hover:text-blue-900"
+                    >
+                      Receipt Matching
+                    </button>{" "}
+                    to link them to Purchase Orders after import.
+                  </p>
+                </div>
+
                 {/* Submit Button */}
-                <div className="mt-6 flex items-center justify-between">
+                <div className="mt-4 flex items-center justify-between">
                   <p className="text-sm text-gray-500">
-                    {result.receipts.length} receipt(s) will be created in Airtable
+                    {(() => {
+                      const activeReceipts = result.receipts.filter((_, idx) =>
+                        result.receipts[idx].lines.some((_, lineIdx) => !deletedLines.has(`${idx}-${lineIdx}`))
+                      ).length;
+                      const totalDeleted = deletedLines.size;
+                      return (
+                        <>
+                          {activeReceipts} receipt(s) will be created in Airtable
+                          {totalDeleted > 0 && (
+                            <span className="text-gray-400 ml-1">({totalDeleted} line(s) removed)</span>
+                          )}
+                        </>
+                      );
+                    })()}
                   </p>
                   {submitted ? (
                     <div className="flex items-center gap-3">
@@ -478,10 +500,10 @@ export default function DataIngestionPage() {
                         Receipts created successfully
                       </span>
                       <button
-                        onClick={() => router.push("/receipts")}
+                        onClick={() => router.push("/receipts/matching")}
                         className="bg-gray-900 text-white px-4 py-2 text-sm rounded-md hover:bg-gray-800"
                       >
-                        View Receipts
+                        Go to Receipt Matching
                       </button>
                     </div>
                   ) : (
@@ -492,7 +514,9 @@ export default function DataIngestionPage() {
                     >
                       {submitting
                         ? "Creating..."
-                        : `Create ${result.receipts.length} Receipt(s) in Airtable`}
+                        : `Create ${result.receipts.filter((_, idx) =>
+                            result.receipts[idx].lines.some((_, lineIdx) => !deletedLines.has(`${idx}-${lineIdx}`))
+                          ).length} Receipt(s)`}
                     </button>
                   )}
                 </div>

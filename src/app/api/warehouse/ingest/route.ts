@@ -37,11 +37,8 @@ interface ParsedReceipt {
     lotNumber: string | null;
     standardSku: string | null;
     airtableSkuId: string | null;
-    uom: string | null;
     skuMapped: boolean;
   }[];
-  matchedPO: { id: string; poNumber: string } | null;
-  poMatchAttempted: boolean;
 }
 
 interface ClassificationSummary {
@@ -173,45 +170,14 @@ export async function POST(request: NextRequest) {
       expectedByOrder[key][row.sku] += row.adjustedQuantity;
     }
 
-    // Fetch existing POs, line items, and items (for UOM)
-    const [existingPOs, poLineItems, allItems] = await Promise.all([
-      getRecords(TABLES.PURCHASE_ORDERS, {
-        sort: [{ field: "PO Number", direction: "desc" }],
-      }),
-      getRecords(TABLES.PO_LINE_ITEMS),
-      getRecords(TABLES.SKUS),
-    ]);
-
-    // Build item UOM lookup: item record ID -> UOM
+    // Fetch items for UOM lookup (still needed for SKU mapping context)
+    const allItems = await getRecords(TABLES.SKUS);
     const itemUOM: Record<string, string> = {};
     for (const item of allItems) {
       itemUOM[item.id] = (item.fields["UOM"] as string) || "Each";
     }
 
-    // Build PO line items grouped by PO record ID
-    const poLinesByPO: Record<string, { skuId: string; qtySticks: number; qtyCartons: number | null }[]> = {};
-    for (const li of poLineItems) {
-      const poLinks = li.fields["Purchase Order"] as string[] | undefined;
-      const skuLinks = li.fields["SKU"] as string[] | undefined;
-      if (!poLinks?.[0] || !skuLinks?.[0]) continue;
-      const poId = poLinks[0];
-      if (!poLinesByPO[poId]) poLinesByPO[poId] = [];
-      poLinesByPO[poId].push({
-        skuId: skuLinks[0],
-        qtySticks: (li.fields["Qty Sticks"] as number) || 0,
-        qtyCartons: (li.fields["Qty Cartons"] as number) || null,
-      });
-    }
-
-    const poList = existingPOs
-      .filter((r) => r.fields["Status"] === "Issued")
-      .map((r) => ({
-        id: r.id,
-        poNumber: r.fields["PO Number"] as string,
-        lineItems: poLinesByPO[r.id] || [],
-      }));
-
-    // Build parsed receipts
+    // Build parsed receipts — no PO matching
     const parsedReceipts: ParsedReceipt[] = [];
 
     for (const [orderNumber, orderRows] of Object.entries(receiptGroups)) {
@@ -245,25 +211,19 @@ export async function POST(request: NextRequest) {
           lotNumber: Array.from(agg.lotNumbers).join(", ") || null,
           standardSku: mapping?.standardSku || null,
           airtableSkuId: mapping?.airtableId || null,
-          uom: mapping?.airtableId ? (itemUOM[mapping.airtableId] || null) : null,
           skuMapped: mapping !== undefined,
         };
       });
-
-      // Attempt PO matching
-      const matchedPO = attemptPOMatch(orderNumber, poList);
 
       parsedReceipts.push({
         orderNumber,
         receivedDate: earliestDate ? earliestDate.toISOString().split("T")[0] : "",
         facility,
         lines,
-        matchedPO,
-        poMatchAttempted: true,
       });
     }
 
-    // Get date range (avoid spread operator — large arrays overflow the call stack)
+    // Get date range
     let minDate: Date | null = null;
     let maxDate: Date | null = null;
     for (const row of rows) {
@@ -274,6 +234,16 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Build items list for SKU mapping dropdown
+    const availableItems = allItems
+      .filter((item) => (item.fields["Status"] as string) !== "Inactive")
+      .map((item) => ({
+        id: item.id,
+        standardSku: (item.fields["Standard SKU"] as string) || "",
+        category: (item.fields["Category"] as string) || "",
+      }))
+      .sort((a, b) => a.standardSku.localeCompare(b.standardSku));
+
     return NextResponse.json({
       fileName: file.name,
       totalRows: rows.length,
@@ -283,7 +253,7 @@ export async function POST(request: NextRequest) {
       },
       classification,
       receipts: parsedReceipts,
-      availablePOs: poList,
+      availableItems,
     });
   } catch (error) {
     console.error("Ingestion error:", error);
@@ -292,37 +262,4 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
-}
-
-function attemptPOMatch(
-  orderNumber: string,
-  poList: { id: string; poNumber: string }[]
-): { id: string; poNumber: string } | null {
-  if (!orderNumber) return null;
-
-  // Try exact match first (e.g., "PO-10001")
-  const exactMatch = poList.find(
-    (po) => po.poNumber.toLowerCase() === orderNumber.toLowerCase()
-  );
-  if (exactMatch) return exactMatch;
-
-  // Extract leading number from order number (e.g., "36 - Blue Ice" -> "36")
-  const numMatch = orderNumber.match(/^(\d+)/);
-  if (numMatch) {
-    const num = numMatch[1];
-    // Try matching PO-XXXXX format
-    const poMatch = poList.find((po) => po.poNumber === `PO-${num}`);
-    if (poMatch) return poMatch;
-  }
-
-  // Try extracting PO number from various formats
-  // "ANS PO 27-4 Bulk Sticks..." -> try "PO-27"
-  const ansPOMatch = orderNumber.match(/(?:ANS\s+)?PO\s+(\d+)/i);
-  if (ansPOMatch) {
-    const num = ansPOMatch[1];
-    const poMatch = poList.find((po) => po.poNumber === `PO-${num}`);
-    if (poMatch) return poMatch;
-  }
-
-  return null;
 }
