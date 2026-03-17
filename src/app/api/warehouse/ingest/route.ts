@@ -263,12 +263,16 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Get date range
-    const dates = rows
-      .map((r) => r.adjustmentDate)
-      .filter((d) => d instanceof Date && !isNaN(d.getTime()));
-    const minDate = dates.length > 0 ? new Date(Math.min(...dates.map((d) => d.getTime()))) : null;
-    const maxDate = dates.length > 0 ? new Date(Math.max(...dates.map((d) => d.getTime()))) : null;
+    // Get date range (avoid spread operator — large arrays overflow the call stack)
+    let minDate: Date | null = null;
+    let maxDate: Date | null = null;
+    for (const row of rows) {
+      const d = row.adjustmentDate;
+      if (d instanceof Date && !isNaN(d.getTime())) {
+        if (!minDate || d < minDate) minDate = d;
+        if (!maxDate || d > maxDate) maxDate = d;
+      }
+    }
 
     return NextResponse.json({
       fileName: file.name,
