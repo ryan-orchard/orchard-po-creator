@@ -19,6 +19,8 @@ export const TABLES = {
   RECEIPTS: "tbl2jmxFtJYFDFALa",
   RECEIPT_LINES: "tbllMDF4pUw5T4q8T",
   WAREHOUSES: "tblbqGnSNW73ERvtb",
+  INVOICES: "tblsqhIIwY94HPW4j",
+  INVOICE_LINES: "tblmVy4gKNijRTFEm",
 };
 
 export interface AirtableRecord {
@@ -66,6 +68,9 @@ export async function createRecord(
     body: JSON.stringify({ records: [{ fields }] }),
   });
   const data = await res.json();
+  if (data.error) {
+    throw new Error(`Airtable error: ${data.error.message || data.error.type || JSON.stringify(data.error)}`);
+  }
   return data.records[0];
 }
 
@@ -83,6 +88,9 @@ export async function createRecords(
       body: JSON.stringify({ records: batch }),
     });
     const data = await res.json();
+    if (data.error) {
+      throw new Error(`Airtable error: ${data.error.message || data.error.type || JSON.stringify(data.error)}`);
+    }
     allCreated.push(...(data.records || []));
   }
   return allCreated;

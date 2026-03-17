@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "next": "16.1.6",
+    "pdf2json": "^4.0.2",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "xlsx": "^0.18.5"

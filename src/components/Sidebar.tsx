@@ -6,8 +6,7 @@ import { usePathname } from "next/navigation";
 const NAV_SECTIONS = [
   {
     items: [
-      { name: "Dashboard", href: "/dashboard", icon: HomeIcon },
-      { name: "Notifications", href: "/notifications", icon: BellIcon, soon: true, badge: 3 },
+      { name: "Dashboard", href: "/dashboard", icon: HomeIcon, badge: 3 },
     ],
   },
   {
@@ -29,13 +28,14 @@ const NAV_SECTIONS = [
     label: "FINANCE",
     items: [
       { name: "Landed Costs", href: "/landed-costs", icon: CalculatorIcon, soon: true },
-      { name: "Invoices", href: "/invoices", icon: DocumentIcon, soon: true },
+      { name: "Invoices", href: "/invoices", icon: DocumentIcon },
     ],
   },
   {
     label: "ADMIN",
     items: [
       { name: "Data Ingestion", href: "/warehouse/data-ingestion", icon: UploadIcon },
+      { name: "Invoice Audit", href: "/invoice-audit", icon: ClipboardIcon, soon: true },
       { name: "Items", href: "/items", icon: TagIcon },
     ],
   },

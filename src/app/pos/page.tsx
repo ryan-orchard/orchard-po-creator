@@ -139,6 +139,31 @@ export default function POListPage() {
           </div>
         </div>
 
+        {/* Summary Cards */}
+        {!loading && (
+          <div className="grid grid-cols-4 gap-4 mb-6">
+            <div className="bg-gray-900 text-white rounded-lg px-5 py-4">
+              <p className="text-xs font-medium uppercase tracking-wider opacity-70">Total POs</p>
+              <p className="text-2xl font-bold mt-1 tabular-nums">{pos.length}</p>
+              <p className="text-xs opacity-50 mt-1">
+                {pos.reduce((s, p) => s + (p.grandTotal || 0), 0).toLocaleString("en-US", { style: "currency", currency: "USD" })}
+              </p>
+            </div>
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-5 py-4">
+              <p className="text-xs font-medium uppercase tracking-wider text-yellow-700">Draft</p>
+              <p className="text-2xl font-bold mt-1 tabular-nums text-yellow-900">{tabCounts["Draft"]}</p>
+            </div>
+            <div className="bg-blue-50 border border-blue-200 rounded-lg px-5 py-4">
+              <p className="text-xs font-medium uppercase tracking-wider text-blue-700">Issued</p>
+              <p className="text-2xl font-bold mt-1 tabular-nums text-blue-900">{tabCounts["Issued"]}</p>
+            </div>
+            <div className="bg-green-50 border border-green-200 rounded-lg px-5 py-4">
+              <p className="text-xs font-medium uppercase tracking-wider text-green-700">Received</p>
+              <p className="text-2xl font-bold mt-1 tabular-nums text-green-900">{tabCounts["Received"]}</p>
+            </div>
+          </div>
+        )}
+
         {/* Status tabs */}
         <div className="flex items-center gap-1 mb-4 border-b border-gray-200">
           {STATUS_TABS.map((tab) => (
