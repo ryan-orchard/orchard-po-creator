@@ -1,5 +1,31 @@
 import { NextResponse } from "next/server";
-import { getRecords, TABLES } from "@/lib/airtable";
+import { getRecords, createRecord, TABLES } from "@/lib/airtable";
+
+export async function POST(req: Request) {
+  const body = await req.json();
+  const fields: Record<string, unknown> = {
+    "Standard SKU": body.standardSku,
+    "Category": body.category,
+    "Flavor": body.flavor,
+    "UOM": body.uom,
+    "Description": body.description,
+    "Status": body.status,
+  };
+  if (body.uom === "Carton" && body.count != null) {
+    fields["Sticks per Carton"] = Number(body.count);
+  }
+  const record = await createRecord(TABLES.SKUS, fields);
+  return NextResponse.json({
+    id: record.id,
+    standardSku: record.fields["Standard SKU"],
+    category: record.fields["Category"],
+    flavor: record.fields["Flavor"],
+    uom: record.fields["UOM"],
+    count: record.fields["Sticks per Carton"],
+    description: record.fields["Description"],
+    status: record.fields["Status"],
+  });
+}
 
 export async function GET() {
   const records = await getRecords(TABLES.SKUS, {
