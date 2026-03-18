@@ -141,17 +141,22 @@ function DocumentIcon({ className }: { className?: string }) {
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const [unmatchedCount, setUnmatchedCount] = useState<number | null>(null);
+  const [unmatchedReceiptCount, setUnmatchedReceiptCount] = useState<number | null>(null);
+  const [unmatchedInvoiceCount, setUnmatchedInvoiceCount] = useState<number | null>(null);
 
   useEffect(() => {
-    const fetchCount = () => {
+    const fetchCounts = () => {
       fetch("/api/receipts/count")
         .then((r) => r.json())
-        .then((d) => setUnmatchedCount(d.unmatched ?? null))
+        .then((d) => setUnmatchedReceiptCount(d.unmatched ?? null))
+        .catch(() => {});
+      fetch("/api/invoices/count")
+        .then((r) => r.json())
+        .then((d) => setUnmatchedInvoiceCount(d.unmatched ?? null))
         .catch(() => {});
     };
-    fetchCount();
-    const interval = setInterval(fetchCount, 60_000); // refresh every minute
+    fetchCounts();
+    const interval = setInterval(fetchCounts, 60_000); // refresh every minute
     return () => clearInterval(interval);
   }, []);
 
@@ -182,7 +187,9 @@ export default function Sidebar() {
                 const Icon = item.icon;
                 const staticBadge = "badge" in item ? (item.badge as number) : undefined;
                 const badge = item.href === "/receipts"
-                  ? (unmatchedCount ?? staticBadge)
+                  ? (unmatchedReceiptCount ?? staticBadge)
+                  : item.href === "/invoices"
+                  ? (unmatchedInvoiceCount ?? staticBadge)
                   : staticBadge;
 
                 if (isSoon) {

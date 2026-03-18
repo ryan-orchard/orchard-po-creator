@@ -11,19 +11,26 @@ interface Invoice {
   poReference: string;
   salesOrder: string;
   supplier: string | null;
+  purchaseOrder: string | null;
   invoiceAmount: number;
-  status: string;
+  reviewStatus: string;
+  paymentStatus: string;
   lineCount: number;
 }
 
-type SortField = "invoiceNumber" | "supplier" | "invoiceDate" | "poReference" | "salesOrder" | "status" | "lineCount" | "invoiceAmount";
+type SortField = "invoiceNumber" | "supplier" | "invoiceDate" | "poReference" | "salesOrder" | "reviewStatus" | "paymentStatus" | "invoiceAmount";
 type SortDir = "asc" | "desc";
 
-const statusColors: Record<string, string> = {
-  "Pending Review": "bg-yellow-100 text-yellow-800",
-  Matched: "bg-blue-100 text-blue-800",
+const reviewStatusColors: Record<string, string> = {
+  Pending: "bg-yellow-100 text-yellow-800",
+  Matched: "bg-green-100 text-green-800",
   Discrepancy: "bg-red-100 text-red-800",
-  Paid: "bg-green-100 text-green-800",
+};
+
+const paymentStatusColors: Record<string, string> = {
+  Unpaid: "bg-gray-100 text-gray-700",
+  Paid: "bg-blue-100 text-blue-800",
+  Disputed: "bg-orange-100 text-orange-800",
 };
 
 const COLUMNS: { field: SortField; label: string; align: string }[] = [
@@ -31,9 +38,8 @@ const COLUMNS: { field: SortField; label: string; align: string }[] = [
   { field: "supplier", label: "Supplier", align: "text-left" },
   { field: "invoiceDate", label: "Date", align: "text-left" },
   { field: "poReference", label: "PO Ref", align: "text-left" },
-  { field: "salesOrder", label: "Sales Order", align: "text-left" },
-  { field: "status", label: "Status", align: "text-left" },
-  { field: "lineCount", label: "Lines", align: "text-right" },
+  { field: "reviewStatus", label: "Review", align: "text-left" },
+  { field: "paymentStatus", label: "Payment", align: "text-left" },
   { field: "invoiceAmount", label: "Amount", align: "text-right" },
 ];
 
@@ -44,6 +50,7 @@ export default function InvoicesPage() {
   const [sortField, setSortField] = useState<SortField>("invoiceDate");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [search, setSearch] = useState("");
+  const [activeTab, setActiveTab] = useState<"all" | "unmatched" | "matched">("all");
 
   useEffect(() => {
     fetch("/api/invoices")
@@ -60,21 +67,32 @@ export default function InvoicesPage() {
       setSortDir(sortDir === "asc" ? "desc" : "asc");
     } else {
       setSortField(field);
-      setSortDir(field === "invoiceAmount" || field === "invoiceDate" || field === "lineCount" ? "desc" : "asc");
+      setSortDir(field === "invoiceAmount" || field === "invoiceDate" ? "desc" : "asc");
     }
   };
 
+  const unmatchedCount = useMemo(
+    () => invoices.filter((inv) => !inv.purchaseOrder).length,
+    [invoices]
+  );
+
+  const tabFiltered = useMemo(() => {
+    if (activeTab === "unmatched") return invoices.filter((inv) => !inv.purchaseOrder);
+    if (activeTab === "matched") return invoices.filter((inv) => !!inv.purchaseOrder);
+    return invoices;
+  }, [invoices, activeTab]);
+
   const filtered = useMemo(() => {
-    if (!search.trim()) return invoices;
+    if (!search.trim()) return tabFiltered;
     const q = search.toLowerCase();
-    return invoices.filter((inv) =>
+    return tabFiltered.filter((inv) =>
       inv.invoiceNumber.toLowerCase().includes(q) ||
       (inv.supplier || "").toLowerCase().includes(q) ||
       inv.poReference.toLowerCase().includes(q) ||
-      inv.salesOrder.toLowerCase().includes(q) ||
-      inv.status.toLowerCase().includes(q)
+      inv.reviewStatus.toLowerCase().includes(q) ||
+      inv.paymentStatus.toLowerCase().includes(q)
     );
-  }, [invoices, search]);
+  }, [tabFiltered, search]);
 
   const sorted = useMemo(() => {
     return [...filtered].sort((a, b) => {
@@ -92,14 +110,11 @@ export default function InvoicesPage() {
         case "poReference":
           cmp = a.poReference.localeCompare(b.poReference, undefined, { numeric: true });
           break;
-        case "salesOrder":
-          cmp = a.salesOrder.localeCompare(b.salesOrder, undefined, { numeric: true });
+        case "reviewStatus":
+          cmp = a.reviewStatus.localeCompare(b.reviewStatus);
           break;
-        case "status":
-          cmp = a.status.localeCompare(b.status);
-          break;
-        case "lineCount":
-          cmp = (a.lineCount || 0) - (b.lineCount || 0);
+        case "paymentStatus":
+          cmp = a.paymentStatus.localeCompare(b.paymentStatus);
           break;
         case "invoiceAmount":
           cmp = (a.invoiceAmount || 0) - (b.invoiceAmount || 0);
@@ -120,13 +135,50 @@ export default function InvoicesPage() {
               {invoices.length} {invoices.length === 1 ? "invoice" : "invoices"}
             </p>
           </div>
-          <Link
-            href="/invoices/import"
-            className="bg-gray-900 text-white px-4 py-2 text-sm rounded-md hover:bg-gray-800"
-          >
-            + Import Invoice
-          </Link>
+          <div className="flex items-center gap-3">
+            {unmatchedCount > 0 && (
+              <Link
+                href="/invoices/matching"
+                className="bg-amber-500 text-white px-4 py-2 text-sm rounded-md hover:bg-amber-600 font-medium"
+              >
+                Match Invoices ({unmatchedCount})
+              </Link>
+            )}
+            <Link
+              href="/invoices/import"
+              className="bg-gray-900 text-white px-4 py-2 text-sm rounded-md hover:bg-gray-800"
+            >
+              + Import Invoice
+            </Link>
+          </div>
         </div>
+
+        {/* Tabs */}
+        {!loading && invoices.length > 0 && (
+          <div className="flex gap-1 mb-4">
+            {(["all", "unmatched", "matched"] as const).map((tab) => {
+              const count =
+                tab === "all"
+                  ? invoices.length
+                  : tab === "unmatched"
+                  ? unmatchedCount
+                  : invoices.length - unmatchedCount;
+              return (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                    activeTab === tab
+                      ? "bg-gray-900 text-white"
+                      : "text-gray-600 hover:bg-gray-100"
+                  }`}
+                >
+                  {tab.charAt(0).toUpperCase() + tab.slice(1)} ({count})
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {/* Search */}
         {!loading && invoices.length > 0 && (
@@ -220,20 +272,23 @@ export default function InvoicesPage() {
                     <td className="px-4 py-3 font-mono text-gray-600 text-xs">
                       {inv.poReference || "—"}
                     </td>
-                    <td className="px-4 py-3 font-mono text-gray-600 text-xs">
-                      {inv.salesOrder || "—"}
+                    <td className="px-4 py-3">
+                      <span
+                        className={`px-2 py-0.5 text-xs font-medium rounded-full ${
+                          reviewStatusColors[inv.reviewStatus] || "bg-gray-100 text-gray-700"
+                        }`}
+                      >
+                        {inv.reviewStatus}
+                      </span>
                     </td>
                     <td className="px-4 py-3">
                       <span
                         className={`px-2 py-0.5 text-xs font-medium rounded-full ${
-                          statusColors[inv.status] || "bg-gray-100 text-gray-700"
+                          paymentStatusColors[inv.paymentStatus] || "bg-gray-100 text-gray-700"
                         }`}
                       >
-                        {inv.status}
+                        {inv.paymentStatus}
                       </span>
-                    </td>
-                    <td className="px-4 py-3 text-right text-gray-600">
-                      {inv.lineCount}
                     </td>
                     <td className="px-4 py-3 text-right font-mono font-medium text-gray-900">
                       {inv.invoiceAmount
@@ -247,7 +302,7 @@ export default function InvoicesPage() {
                 ))}
                 {sorted.length === 0 && search && (
                   <tr>
-                    <td colSpan={8} className="px-4 py-8 text-center text-gray-400">
+                    <td colSpan={7} className="px-4 py-8 text-center text-gray-400">
                       No invoices match &ldquo;{search}&rdquo;
                     </td>
                   </tr>

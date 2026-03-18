@@ -28,6 +28,7 @@ export async function GET() {
 
     const invoices = records.map((r) => {
       const supplierId = (r.fields["Supplier"] as string[] | undefined)?.[0];
+      const poLink = (r.fields["Purchase Order"] as string[] | undefined)?.[0];
       return {
         id: r.id,
         invoiceNumber: (r.fields["Invoice Number"] as string) || "",
@@ -35,8 +36,10 @@ export async function GET() {
         supplier: supplierId ? supplierMap[supplierId] || null : null,
         poReference: (r.fields["PO Reference"] as string) || "",
         salesOrder: (r.fields["Sales Order"] as string) || "",
+        purchaseOrder: poLink || null,
         invoiceAmount: (r.fields["Total Amount"] as number) || 0,
-        status: (r.fields["Status"] as string) || "Pending",
+        reviewStatus: (r.fields["Review Status"] as string) || "Pending",
+        paymentStatus: (r.fields["Payment Status"] as string) || "Unpaid",
         lineCount: (r.fields["Invoice Lines"] as string[])?.length || 0,
       };
     });
@@ -89,7 +92,8 @@ export async function POST(request: NextRequest) {
       Freight: body.freight || 0,
       Tax: body.tax || 0,
       "Total Amount": body.invoiceAmount || 0,
-      Status: "Pending Review",
+      "Review Status": "Pending",
+      "Payment Status": "Unpaid",
     };
 
     if (supplierId) {

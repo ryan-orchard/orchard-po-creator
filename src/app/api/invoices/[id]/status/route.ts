@@ -7,16 +7,24 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
-    const { status } = await request.json();
+    const body = await request.json();
+    const { reviewStatus, paymentStatus } = body as {
+      reviewStatus?: string;
+      paymentStatus?: string;
+    };
 
-    if (!status) {
+    if (!reviewStatus && !paymentStatus) {
       return NextResponse.json(
-        { error: "Status is required" },
+        { error: "reviewStatus or paymentStatus is required" },
         { status: 400 }
       );
     }
 
-    await updateRecord(TABLES.INVOICES, id, { Status: status });
+    const fields: Record<string, unknown> = {};
+    if (reviewStatus) fields["Review Status"] = reviewStatus;
+    if (paymentStatus) fields["Payment Status"] = paymentStatus;
+
+    await updateRecord(TABLES.INVOICES, id, fields);
 
     return NextResponse.json({ success: true });
   } catch (error) {

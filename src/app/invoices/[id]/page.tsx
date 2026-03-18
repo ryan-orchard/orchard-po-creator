@@ -17,6 +17,25 @@ interface InvoiceLine {
   batchNumber: string;
 }
 
+interface ReceiptLine {
+  sku: string;
+  qtyReceived: number;
+}
+
+interface Receipt {
+  id: string;
+  receiptNumber: string;
+  receivedDate: string;
+  lines: ReceiptLine[];
+}
+
+interface Shipment {
+  id: string;
+  shipmentNumber: string;
+  shipDate: string;
+  status: string;
+}
+
 interface InvoiceDetail {
   id: string;
   invoiceNumber: string;
@@ -32,17 +51,28 @@ interface InvoiceDetail {
   freight: number;
   tax: number;
   invoiceAmount: number;
-  status: string;
+  reviewStatus: string;
+  paymentStatus: string;
   notes: string;
   lines: InvoiceLine[];
+  purchaseOrder: { id: string; poNumber: string; status: string } | null;
+  receipts: Receipt[];
+  shipments: Shipment[];
 }
 
-const STATUSES = ["Pending Review", "Matched", "Discrepancy", "Paid"];
-const statusColors: Record<string, string> = {
-  "Pending Review": "bg-yellow-100 text-yellow-800",
-  Matched: "bg-blue-100 text-blue-800",
+const REVIEW_STATUSES = ["Pending", "Matched", "Discrepancy"];
+const PAYMENT_STATUSES = ["Unpaid", "Paid", "Disputed"];
+
+const reviewStatusColors: Record<string, string> = {
+  Pending: "bg-yellow-100 text-yellow-800",
+  Matched: "bg-green-100 text-green-800",
   Discrepancy: "bg-red-100 text-red-800",
-  Paid: "bg-green-100 text-green-800",
+};
+
+const paymentStatusColors: Record<string, string> = {
+  Unpaid: "bg-gray-100 text-gray-700",
+  Paid: "bg-blue-100 text-blue-800",
+  Disputed: "bg-orange-100 text-orange-800",
 };
 
 function formatCurrency(n: number): string {
@@ -81,20 +111,37 @@ export default function InvoiceDetailPage() {
     fetchInvoice();
   }, [params.id, router]);
 
-  const handleStatusChange = async (newStatus: string) => {
+  const handleReviewStatusChange = async (newStatus: string) => {
     if (!invoice) return;
-    const prev = invoice.status;
-    setInvoice({ ...invoice, status: newStatus });
+    const prev = invoice.reviewStatus;
+    setInvoice({ ...invoice, reviewStatus: newStatus });
 
     try {
       const res = await fetch(`/api/invoices/${invoice.id}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: newStatus }),
+        body: JSON.stringify({ reviewStatus: newStatus }),
       });
       if (!res.ok) throw new Error();
     } catch {
-      setInvoice({ ...invoice, status: prev });
+      setInvoice({ ...invoice, reviewStatus: prev });
+    }
+  };
+
+  const handlePaymentStatusChange = async (newStatus: string) => {
+    if (!invoice) return;
+    const prev = invoice.paymentStatus;
+    setInvoice({ ...invoice, paymentStatus: newStatus });
+
+    try {
+      const res = await fetch(`/api/invoices/${invoice.id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentStatus: newStatus }),
+      });
+      if (!res.ok) throw new Error();
+    } catch {
+      setInvoice({ ...invoice, paymentStatus: prev });
     }
   };
 
@@ -107,6 +154,8 @@ export default function InvoiceDetailPage() {
   }
 
   if (!invoice) return null;
+
+  const isMatched = !!invoice.purchaseOrder;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -143,21 +192,135 @@ export default function InvoiceDetailPage() {
             </div>
           </div>
           <div className="flex items-center gap-3">
+            {/* Review status dropdown */}
             <select
-              value={invoice.status}
-              onChange={(e) => handleStatusChange(e.target.value)}
+              value={invoice.reviewStatus}
+              onChange={(e) => handleReviewStatusChange(e.target.value)}
               className={`text-sm font-medium rounded-md px-3 py-1.5 border-0 ${
-                statusColors[invoice.status] || "bg-gray-100 text-gray-800"
+                reviewStatusColors[invoice.reviewStatus] || "bg-gray-100 text-gray-800"
               }`}
             >
-              {STATUSES.map((s) => (
+              {REVIEW_STATUSES.map((s) => (
                 <option key={s} value={s}>
                   {s}
                 </option>
               ))}
             </select>
+            {/* Payment status dropdown */}
+            <select
+              value={invoice.paymentStatus}
+              onChange={(e) => handlePaymentStatusChange(e.target.value)}
+              className={`text-sm font-medium rounded-md px-3 py-1.5 border-0 ${
+                paymentStatusColors[invoice.paymentStatus] || "bg-gray-100 text-gray-800"
+              }`}
+            >
+              {PAYMENT_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+            {/* Match button for unmatched invoices */}
+            {!isMatched && (
+              <Link
+                href={`/invoices/matching?invoice=${invoice.id}`}
+                className="bg-amber-500 text-white px-4 py-1.5 text-sm rounded-md hover:bg-amber-600 font-medium"
+              >
+                Match to PO
+              </Link>
+            )}
           </div>
         </div>
+
+        {/* Matched PO Banner */}
+        {isMatched && invoice.purchaseOrder && (
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
+            <div className="flex items-center gap-3">
+              <svg className="w-5 h-5 text-green-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <div>
+                <p className="text-sm font-medium text-green-800">
+                  Matched to{" "}
+                  <Link href={`/pos/${invoice.purchaseOrder.id}`} className="underline hover:text-green-900">
+                    {invoice.purchaseOrder.poNumber}
+                  </Link>
+                </p>
+                <p className="text-xs text-green-600 mt-0.5">
+                  PO Status: {invoice.purchaseOrder.status}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Receipt & Shipment Info (when matched) */}
+        {isMatched && (invoice.receipts.length > 0 || invoice.shipments.length > 0) && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            {/* Receipts */}
+            {invoice.receipts.length > 0 && (
+              <div className="bg-white rounded-lg border border-gray-200 p-4">
+                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
+                  Receipts
+                </h3>
+                <div className="space-y-3">
+                  {invoice.receipts.map((receipt) => (
+                    <div key={receipt.id}>
+                      <div className="flex items-center justify-between mb-1">
+                        <Link
+                          href={`/receipts/${receipt.id}`}
+                          className="text-sm font-medium text-gray-900 hover:underline"
+                        >
+                          {receipt.receiptNumber || "Receipt"}
+                        </Link>
+                        <span className="text-xs text-gray-500">
+                          {formatDate(receipt.receivedDate)}
+                        </span>
+                      </div>
+                      <div className="space-y-0.5">
+                        {receipt.lines.map((line, i) => (
+                          <div key={i} className="flex items-center justify-between text-xs text-gray-600">
+                            <span className="font-mono">{line.sku}</span>
+                            <span className="font-mono">{line.qtyReceived.toLocaleString()} received</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Shipments */}
+            {invoice.shipments.length > 0 && (
+              <div className="bg-white rounded-lg border border-gray-200 p-4">
+                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
+                  Shipments
+                </h3>
+                <div className="space-y-2">
+                  {invoice.shipments.map((shipment) => (
+                    <div key={shipment.id} className="flex items-center justify-between">
+                      <Link
+                        href={`/shipments/${shipment.id}`}
+                        className="text-sm font-medium text-gray-900 hover:underline"
+                      >
+                        {shipment.shipmentNumber || "Shipment"}
+                      </Link>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-500">
+                          {formatDate(shipment.shipDate)}
+                        </span>
+                        <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-gray-100 text-gray-600">
+                          {shipment.status}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Info Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
