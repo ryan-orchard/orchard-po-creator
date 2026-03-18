@@ -29,9 +29,14 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+@page {
+  margin: 0;
+}
+
 @media print {
   body {
     background: white !important;
+    padding: 12mm 15mm !important;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }

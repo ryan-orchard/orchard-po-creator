@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
+import { MAGNA } from "@/config/magna";
 
 interface PODetail {
   id: string;
@@ -37,7 +38,8 @@ interface PODetail {
     sku: {
       standardSku: string;
       flavor: string;
-      count: string;
+      count: number | null;
+      uom: string;
       category: string;
       supplierItemName: string;
     } | null;
@@ -763,7 +765,7 @@ export default function PODetailPage() {
     <div className="min-h-screen bg-gray-50" onClick={() => setShowStatusMenu(false)}>
       <div className="max-w-6xl mx-auto px-6 py-8">
         {justCreated && (
-          <div className="mb-6 bg-green-50 border border-green-200 rounded-lg px-4 py-3 text-sm text-green-800">
+          <div className="print:hidden mb-6 bg-green-50 border border-green-200 rounded-lg px-4 py-3 text-sm text-green-800">
             PO <span className="font-semibold">{po.poNumber}</span> created
             successfully.
           </div>
@@ -776,7 +778,7 @@ export default function PODetailPage() {
               <h1 className="text-2xl font-bold text-gray-900 font-mono">
                 {po.poNumber}
               </h1>
-              <div className="relative" onClick={(e) => e.stopPropagation()}>
+              <div className="relative print:hidden" onClick={(e) => e.stopPropagation()}>
                 <button
                   onClick={() => setShowStatusMenu(!showStatusMenu)}
                   disabled={updatingStatus}
@@ -814,7 +816,7 @@ export default function PODetailPage() {
           </div>
           <div className="flex items-center gap-3 print:hidden">
             <button
-              onClick={() => window.print()}
+              onClick={() => window.open(`/pos/${params.id}/print`, "_blank")}
               className="px-4 py-2 text-sm font-medium text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50"
             >
               Save as PDF
@@ -835,7 +837,18 @@ export default function PODetailPage() {
         </div>
 
         {/* PO Details */}
-        <div className="grid grid-cols-2 gap-6 mb-6">
+        <div className="grid grid-cols-3 gap-6 mb-6">
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
+              From
+            </h2>
+            <p className="font-semibold text-gray-900">{MAGNA.companyName}</p>
+            <p className="text-sm text-gray-600 mt-1">
+              {MAGNA.address}
+              <br />
+              {MAGNA.city}, {MAGNA.state} {MAGNA.zip}
+            </p>
+          </div>
           <div className="bg-white rounded-lg border border-gray-200 p-6">
             <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
               Supplier
@@ -881,7 +894,7 @@ export default function PODetailPage() {
 
         {/* Terms */}
         <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
-          <div className="grid grid-cols-4 gap-6">
+          <div className="flex gap-10">
             <div>
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
                 Delivery Date
@@ -902,7 +915,7 @@ export default function PODetailPage() {
                 {po.paymentTerms || "\u2014"}
               </p>
             </div>
-            <div>
+            <div className={!po.shippingTerms ? "print:hidden" : ""}>
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
                 Shipping Terms
               </p>
@@ -910,7 +923,7 @@ export default function PODetailPage() {
                 {po.shippingTerms || "\u2014"}
               </p>
             </div>
-            <div>
+            <div className={!po.notes ? "print:hidden" : ""}>
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
                 Notes
               </p>
@@ -924,22 +937,22 @@ export default function PODetailPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-900 text-white">
-                <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider">
+                <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap">
                   Product
                 </th>
-                <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider">
+                <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap">
                   Carton Count
                 </th>
-                <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider">
+                <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap">
                   Qty (Sticks)
                 </th>
-                <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider">
+                <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap">
                   Qty (Cartons)
                 </th>
-                <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider">
+                <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap">
                   Unit Cost
                 </th>
-                <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider">
+                <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap">
                   Total Price
                 </th>
               </tr>
@@ -972,11 +985,11 @@ export default function PODetailPage() {
                       {/* Line items */}
                       {items.map((item) => (
                         <tr key={item.id} className="border-b border-gray-100">
-                          <td className="px-4 py-2.5 text-gray-900">
+                          <td className="px-4 py-2.5 text-gray-900 whitespace-nowrap">
                             {item.sku?.supplierItemName || item.sku?.flavor || item.sku?.standardSku || "\u2014"}
                           </td>
                           <td className="px-4 py-2.5 text-gray-600">
-                            {item.sku?.count === "Stick" ? "Bulk" : `${item.sku?.count} CT`}
+                            {item.sku?.uom === "Carton" ? `${item.sku.count} CT` : item.sku?.uom === "Stick" ? "Bulk" : "\u2014"}
                           </td>
                           <td className="px-4 py-2.5 text-right tabular-nums">
                             {item.qtySticks?.toLocaleString() || "\u2014"}

@@ -54,7 +54,8 @@ export async function GET(
             ? {
                 standardSku: sku.fields["Standard SKU"] as string,
                 flavor: sku.fields["Flavor"] as string,
-                count: sku.fields["Count"] as string,
+                count: sku.fields["Sticks per Carton"] as number,
+                uom: sku.fields["UOM"] as string,
                 category: sku.fields["Category"] as string,
                 supplierItemName: sku.fields["Supplier Item Name"] as string,
               }
