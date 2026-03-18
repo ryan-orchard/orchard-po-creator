@@ -20,7 +20,6 @@ const NAV_SECTIONS = [
     label: "WAREHOUSE",
     items: [
       { name: "Receipts", href: "/receipts", icon: InboxIcon },
-      { name: "Receipt Matching", href: "/receipts/matching", icon: LinkIcon },
       { name: "On-Hand Inventory", href: "/warehouse/on-hand", icon: CubeIcon, soon: true },
       { name: "Work Orders", href: "/work-orders", icon: WrenchIcon, soon: true },
     ],

@@ -3,6 +3,17 @@
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 
+// Default date range: last 30 days
+function defaultDateRange() {
+  const to = new Date();
+  const from = new Date();
+  from.setDate(from.getDate() - 30);
+  return {
+    from: from.toISOString().split("T")[0],
+    to: to.toISOString().split("T")[0],
+  };
+}
+
 interface ReceiptLine {
   stordSku: string;
   productName: string;
@@ -56,6 +67,10 @@ export default function DataIngestionPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
+  // Stord API fetch state
+  const [stordFetching, setStordFetching] = useState(false);
+  const [stordDates, setStordDates] = useState(defaultDateRange);
+
   // SKU overrides: key = "receiptIdx-lineIdx", value = airtable item ID
   const [skuOverrides, setSkuOverrides] = useState<Record<string, string>>({});
   // Deleted lines: set of "receiptIdx-lineIdx" keys
@@ -89,6 +104,35 @@ export default function DataIngestionPage() {
       setError(err instanceof Error ? err.message : "Upload failed");
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleStordFetch = async () => {
+    setStordFetching(true);
+    setError(null);
+    setResult(null);
+    setSubmitted(false);
+    setSkuOverrides({});
+    setDeletedLines(new Set());
+
+    try {
+      const params = new URLSearchParams({
+        from: `${stordDates.from}T00:00:00Z`,
+        to: `${stordDates.to}T23:59:59Z`,
+      });
+      const response = await fetch(`/api/stord/sync?${params}`);
+
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || "Stord fetch failed");
+      }
+
+      const data = await response.json();
+      setResult(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Stord fetch failed");
+    } finally {
+      setStordFetching(false);
     }
   };
 
@@ -174,56 +218,79 @@ export default function DataIngestionPage() {
           </p>
         </div>
 
-        {/* Upload Section */}
+        {/* Import Options */}
         {!result && (
-          <div
-            onDrop={handleDrop}
-            onDragOver={(e) => e.preventDefault()}
-            className="bg-white rounded-lg border-2 border-dashed border-gray-300 p-12 text-center hover:border-gray-400 transition-colors"
-          >
-            {uploading ? (
-              <div>
-                <p className="text-gray-600 mb-2">Parsing file...</p>
-                <p className="text-sm text-gray-400">This may take a moment for large files</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Option 1: Fetch from Stord API */}
+            <div className="bg-white rounded-lg border border-gray-200 p-6">
+              <div className="flex items-center gap-2 mb-1">
+                <h2 className="text-base font-semibold text-gray-900">Fetch from Stord</h2>
+                <span className="text-xs bg-green-100 text-green-700 font-medium px-2 py-0.5 rounded-full">Recommended</span>
               </div>
-            ) : (
-              <>
-                <svg
-                  className="mx-auto h-12 w-12 text-gray-400 mb-4"
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={1}
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"
-                  />
-                </svg>
-                <p className="text-gray-600 mb-2">
-                  Drag and drop your Stord XLSX file here, or
-                </p>
+              <p className="text-sm text-gray-500 mb-4">Pull inventory adjustments directly from the Stord API.</p>
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">From</label>
+                    <input
+                      type="date"
+                      value={stordDates.from}
+                      onChange={(e) => setStordDates((d) => ({ ...d, from: e.target.value }))}
+                      className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">To</label>
+                    <input
+                      type="date"
+                      value={stordDates.to}
+                      onChange={(e) => setStordDates((d) => ({ ...d, to: e.target.value }))}
+                      className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm"
+                    />
+                  </div>
+                </div>
                 <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="bg-gray-900 text-white px-4 py-2 text-sm rounded-md hover:bg-gray-800"
+                  onClick={handleStordFetch}
+                  disabled={stordFetching}
+                  className="w-full bg-gray-900 text-white px-4 py-2 text-sm rounded-md hover:bg-gray-800 disabled:opacity-50"
                 >
-                  Choose File
+                  {stordFetching ? "Fetching from Stord..." : "Fetch Adjustments"}
                 </button>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".xlsx,.csv"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) handleFileUpload(file);
-                  }}
-                />
-                <p className="text-xs text-gray-400 mt-3">Accepts .xlsx and .csv files</p>
-              </>
-            )}
+              </div>
+            </div>
+
+            {/* Option 2: Upload file */}
+            <div
+              onDrop={handleDrop}
+              onDragOver={(e) => e.preventDefault()}
+              className="bg-white rounded-lg border border-dashed border-gray-300 p-6 text-center hover:border-gray-400 transition-colors"
+            >
+              <h2 className="text-base font-semibold text-gray-900 mb-1">Upload File</h2>
+              <p className="text-sm text-gray-500 mb-4">Upload a Stord Inventory Adjustments XLSX export.</p>
+              {uploading ? (
+                <p className="text-sm text-gray-500">Parsing file...</p>
+              ) : (
+                <>
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="bg-white border border-gray-300 text-gray-700 px-4 py-2 text-sm rounded-md hover:bg-gray-50"
+                  >
+                    Choose File
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".xlsx,.csv"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleFileUpload(file);
+                    }}
+                  />
+                  <p className="text-xs text-gray-400 mt-3">Drag & drop or choose .xlsx / .csv</p>
+                </>
+              )}
+            </div>
           </div>
         )}
 
@@ -251,7 +318,7 @@ export default function DataIngestionPage() {
                   }}
                   className="text-sm text-gray-500 hover:text-gray-700"
                 >
-                  Upload different file
+                  ← Start over
                 </button>
               </div>
               <div className="grid grid-cols-4 gap-4 text-sm">
