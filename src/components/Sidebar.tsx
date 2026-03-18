@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 const NAV_SECTIONS = [
   {
     items: [
-      { name: "Dashboard", href: "/dashboard", icon: HomeIcon, badge: 3 },
+      { name: "Dashboard", href: "/dashboard", icon: HomeIcon },
     ],
   },
   {
@@ -24,6 +24,7 @@ const NAV_SECTIONS = [
     items: [
       { name: "On-Hand Inventory", href: "/warehouse/on-hand", icon: CubeIcon, soon: true },
       { name: "Work Orders", href: "/work-orders", icon: WrenchIcon, soon: true },
+      { name: "Invoice Audit", href: "/invoice-audit", icon: ClipboardIcon, soon: true },
     ],
   },
   {
@@ -36,7 +37,6 @@ const NAV_SECTIONS = [
     label: "ADMIN",
     items: [
       { name: "Data Ingestion", href: "/warehouse/data-ingestion", icon: UploadIcon },
-      { name: "Invoice Audit", href: "/invoice-audit", icon: ClipboardIcon, soon: true },
       { name: "Items", href: "/items", icon: TagIcon },
     ],
   },
@@ -180,7 +180,7 @@ export default function Sidebar() {
                 const isActive = pathname.startsWith(item.href);
                 const isSoon = "soon" in item && item.soon;
                 const Icon = item.icon;
-                const staticBadge = "badge" in item ? item.badge : undefined;
+                const staticBadge = "badge" in item ? (item.badge as number) : undefined;
                 const badge = item.href === "/receipts"
                   ? (unmatchedCount ?? staticBadge)
                   : staticBadge;

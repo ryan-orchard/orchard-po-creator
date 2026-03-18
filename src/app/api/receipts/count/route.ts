@@ -4,7 +4,6 @@ import { getRecords, TABLES } from "@/lib/airtable";
 export async function GET() {
   const unmatched = await getRecords(TABLES.RECEIPTS, {
     filterByFormula: `NOT({Purchase Order})`,
-    fields: ["Receipt Number"],
   });
 
   return NextResponse.json({ unmatched: unmatched.length });
