@@ -72,7 +72,7 @@ export async function POST(request: NextRequest) {
 
   // Only handle receipt confirmation events (Svix may or may not prefix with "v1.")
   if (!payload.type.includes("receipt_confirmation.created")) {
-    return NextResponse.json({ received: true, skipped: true });
+    return NextResponse.json({ received: true, skipped: true, type: payload.type });
   }
 
   const { data } = payload;
@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
     });
     if (existing.length > 0) {
       console.log(`Receipt ${data.receipt_confirmation_id} already exists — skipping`);
-      return NextResponse.json({ received: true, skipped: true, reason: "duplicate" });
+      return NextResponse.json({ received: true, skipped: true, reason: "duplicate", id: data.receipt_confirmation_id });
     }
 
     // Resolve warehouse
