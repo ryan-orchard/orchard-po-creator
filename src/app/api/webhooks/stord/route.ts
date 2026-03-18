@@ -70,8 +70,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 
-  // Only handle receipt confirmation events (Svix prefixes event types with "v1.")
-  if (payload.type !== "v1.receipt_confirmation.created") {
+  // Only handle receipt confirmation events (Svix may or may not prefix with "v1.")
+  if (!payload.type.includes("receipt_confirmation.created")) {
     return NextResponse.json({ received: true, skipped: true });
   }
 
