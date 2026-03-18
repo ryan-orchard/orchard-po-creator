@@ -49,12 +49,12 @@ export async function POST(request: NextRequest) {
   // Read raw body — required for Svix signature verification
   const rawBody = await request.text();
 
-  // Verify signature
-  const svixId = request.headers.get("svix-id");
-  const svixTimestamp = request.headers.get("svix-timestamp");
-  const svixSignature = request.headers.get("svix-signature");
+  // Verify signature — Stord uses webhook-* headers (Svix also supports svix-*)
+  const msgId = request.headers.get("webhook-id") ?? request.headers.get("svix-id");
+  const msgTimestamp = request.headers.get("webhook-timestamp") ?? request.headers.get("svix-timestamp");
+  const msgSignature = request.headers.get("webhook-signature") ?? request.headers.get("svix-signature");
 
-  if (!svixId || !svixTimestamp || !svixSignature) {
+  if (!msgId || !msgTimestamp || !msgSignature) {
     return NextResponse.json({ error: "Missing Svix headers" }, { status: 400 });
   }
 
@@ -62,9 +62,9 @@ export async function POST(request: NextRequest) {
   try {
     const wh = new Webhook(secret);
     payload = wh.verify(rawBody, {
-      "svix-id": svixId,
-      "svix-timestamp": svixTimestamp,
-      "svix-signature": svixSignature,
+      "svix-id": msgId,
+      "svix-timestamp": msgTimestamp,
+      "svix-signature": msgSignature,
     }) as ReceiptConfirmationPayload;
   } catch {
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
