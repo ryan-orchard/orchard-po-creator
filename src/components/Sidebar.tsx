@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 
 const NAV_SECTIONS = [
   {
@@ -140,6 +141,19 @@ function DocumentIcon({ className }: { className?: string }) {
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const [unmatchedCount, setUnmatchedCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    const fetchCount = () => {
+      fetch("/api/receipts/count")
+        .then((r) => r.json())
+        .then((d) => setUnmatchedCount(d.unmatched ?? null))
+        .catch(() => {});
+    };
+    fetchCount();
+    const interval = setInterval(fetchCount, 60_000); // refresh every minute
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <aside className="w-56 bg-white border-r border-gray-200 flex flex-col h-screen fixed left-0 top-0 print:hidden">
@@ -166,7 +180,10 @@ export default function Sidebar() {
                 const isActive = pathname.startsWith(item.href);
                 const isSoon = "soon" in item && item.soon;
                 const Icon = item.icon;
-                const badge = "badge" in item ? item.badge : undefined;
+                const staticBadge = "badge" in item ? item.badge : undefined;
+                const badge = item.href === "/receipts"
+                  ? (unmatchedCount ?? staticBadge)
+                  : staticBadge;
 
                 if (isSoon) {
                   return (
