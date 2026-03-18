@@ -15,12 +15,13 @@ const NAV_SECTIONS = [
     items: [
       { name: "Purchase Orders", href: "/pos", icon: ClipboardIcon },
       { name: "Shipments", href: "/shipments", icon: TruckIcon },
+      { name: "Receipts", href: "/receipts", icon: InboxIcon },
+      { name: "Invoices", href: "/invoices", icon: DocumentIcon },
     ],
   },
   {
     label: "WAREHOUSE",
     items: [
-      { name: "Receipts", href: "/receipts", icon: InboxIcon },
       { name: "On-Hand Inventory", href: "/warehouse/on-hand", icon: CubeIcon, soon: true },
       { name: "Work Orders", href: "/work-orders", icon: WrenchIcon, soon: true },
     ],
@@ -29,7 +30,6 @@ const NAV_SECTIONS = [
     label: "FINANCE",
     items: [
       { name: "Landed Costs", href: "/landed-costs", icon: CalculatorIcon, soon: true },
-      { name: "Invoices", href: "/invoices", icon: DocumentIcon },
     ],
   },
   {
