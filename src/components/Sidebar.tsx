@@ -30,7 +30,7 @@ const NAV_SECTIONS = [
   {
     label: "FINANCE",
     items: [
-      { name: "Landed Costs", href: "/landed-costs", icon: CalculatorIcon, soon: true },
+      { name: "Landed Costs", href: "/landed-costs", icon: CalculatorIcon },
     ],
   },
   {
