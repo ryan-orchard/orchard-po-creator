@@ -49,8 +49,7 @@ export default function ItemsListPage() {
       item.standardSku?.toLowerCase().includes(q) ||
       item.flavor?.toLowerCase().includes(q) ||
       item.category?.toLowerCase().includes(q) ||
-      item.description?.toLowerCase().includes(q) ||
-      item.supplierItemName?.toLowerCase().includes(q)
+      item.description?.toLowerCase().includes(q)
     );
   });
 

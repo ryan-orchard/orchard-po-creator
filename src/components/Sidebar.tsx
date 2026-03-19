@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 const NAV_SECTIONS = [
@@ -141,6 +141,7 @@ function DocumentIcon({ className }: { className?: string }) {
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const [unmatchedReceiptCount, setUnmatchedReceiptCount] = useState<number | null>(null);
   const [unmatchedInvoiceCount, setUnmatchedInvoiceCount] = useState<number | null>(null);
 
@@ -235,10 +236,20 @@ export default function Sidebar() {
       </nav>
 
       {/* Footer */}
-      <div className="px-5 py-3 border-t border-gray-100">
-        <p className="text-[10px] text-gray-400 tracking-wide">
+      <div className="px-3 py-3 border-t border-gray-100 flex items-center justify-between">
+        <p className="text-[10px] text-gray-400 tracking-wide px-2">
           Powered by <span className="font-semibold text-gray-500">Orchard</span>
         </p>
+        <button
+          onClick={async () => {
+            await fetch("/api/auth/logout", { method: "POST" });
+            router.push("/login");
+          }}
+          className="text-[10px] text-gray-400 hover:text-gray-600 transition-colors px-2"
+          title="Sign out"
+        >
+          Sign out
+        </button>
       </div>
     </aside>
   );

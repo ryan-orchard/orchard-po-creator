@@ -36,11 +36,13 @@ interface PODetail {
     id: string;
     skuId: string | null;
     sku: {
+      id: string;
       standardSku: string;
       flavor: string;
       count: number | null;
       uom: string;
       category: string;
+      description: string;
       supplierItemName: string;
     } | null;
     section: string;
@@ -65,7 +67,8 @@ interface SKU {
   standardSku: string;
   category: string;
   flavor: string;
-  count: string;
+  uom: string;
+  count: number | null;
   description: string;
   supplierItemName: string;
 }
@@ -203,8 +206,9 @@ export default function PODetailPage() {
               standardSku: li.sku.standardSku,
               category: li.sku.category,
               flavor: li.sku.flavor,
+              uom: li.sku.uom,
               count: li.sku.count,
-              description: "",
+              description: li.sku.description || "",
               supplierItemName: li.sku.supplierItemName || "",
             }
           : undefined,
@@ -235,11 +239,11 @@ export default function PODetailPage() {
             const sku = skus.find((s) => s.id === updates.skuId);
             if (sku) {
               updated.sku = sku;
-              const count = parseInt(sku.count);
-              if (sku.count === "Stick") {
+              const count = sku.count;
+              if (sku.uom === "Stick") {
                 updated.costBasis = "Per Stick";
                 updated.section = "Bulk Sticks";
-              } else if (!isNaN(count)) {
+              } else if (count != null) {
                 updated.costBasis = "Per Carton";
                 if (count === 28) updated.section = "28CT Packout";
                 else if (count === 10) updated.section = "10CT Retail";
@@ -264,8 +268,8 @@ export default function PODetailPage() {
             }
 
             if (updated.sku && updated.qtySticks > 0) {
-              const count = parseInt(updated.sku.count);
-              if (!isNaN(count) && count > 0) {
+              const count = updated.sku.count;
+              if (count != null && count > 0) {
                 updated.qtyCartons = Math.ceil(updated.qtySticks / count);
               }
             }

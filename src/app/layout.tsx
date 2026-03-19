@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import { Geist, Geist_Mono } from "next/font/google";
 import Sidebar from "@/components/Sidebar";
+import { AUTH_COOKIE_NAME } from "@/lib/auth";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -18,18 +20,21 @@ export const metadata: Metadata = {
   description: "Inventory management by Orchard",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const cookieStore = await cookies();
+  const isAuthenticated = cookieStore.has(AUTH_COOKIE_NAME);
+
   return (
     <html lang="en">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <Sidebar />
-        <main className="ml-56 print:ml-0">
+        {isAuthenticated && <Sidebar />}
+        <main className={isAuthenticated ? "ml-56 print:ml-0" : ""}>
           {children}
         </main>
       </body>
