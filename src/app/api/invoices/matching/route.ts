@@ -237,6 +237,7 @@ export async function GET() {
       id: string;
       invoiceNumber: string;
       invoiceDate: string;
+      dueDate: string;
       supplier: string;
       poReference: string;
       invoiceAmount: number;
@@ -399,11 +400,17 @@ export async function GET() {
       }
 
       const supplierId = (inv.fields["Supplier"] as string[] | undefined)?.[0];
+      const invoiceDate = (inv.fields["Invoice Date"] as string) || "";
+      const paymentTerms = (inv.fields["Payment Terms"] as string) || "";
+      const dueDate =
+        (inv.fields["Invoice Due Date"] as string) ||
+        computeDueDate(invoiceDate, paymentTerms);
 
       invoices.push({
         id: inv.id,
         invoiceNumber: (inv.fields["Invoice Number"] as string) || "",
-        invoiceDate: (inv.fields["Invoice Date"] as string) || "",
+        invoiceDate,
+        dueDate,
         supplier: supplierId ? supplierMap[supplierId] || "" : "",
         poReference,
         invoiceAmount: (inv.fields["Total Amount"] as number) || 0,
@@ -569,4 +576,18 @@ interface ComparisonLine {
   invoiceLineId: string;
   receiptLineId: string;
   poLineItemId: string;
+}
+
+/**
+ * Compute due date from invoice date + payment terms.
+ * Supports "Net X" format (e.g., "Net 30" → invoice date + 30 days).
+ */
+function computeDueDate(invoiceDate: string, paymentTerms: string): string {
+  if (!invoiceDate) return "";
+  const netMatch = paymentTerms.match(/^Net\s+(\d+)$/i);
+  if (!netMatch) return "";
+  const days = parseInt(netMatch[1], 10);
+  const date = new Date(invoiceDate + "T00:00:00");
+  date.setDate(date.getDate() + days);
+  return date.toISOString().split("T")[0];
 }

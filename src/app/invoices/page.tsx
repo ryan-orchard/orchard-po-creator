@@ -19,6 +19,7 @@ interface InvoiceMatch {
   id: string;
   invoiceNumber: string;
   invoiceDate: string;
+  dueDate: string;
   supplier: string;
   poReference: string;
   invoiceAmount: number;
@@ -46,7 +47,7 @@ interface InvoiceMatch {
 
 type Tab = "open" | "matched" | "discrepancy" | "paid";
 
-type SortKey = "invoiceNumber" | "invoiceDate" | "poReference" | "invoiceAmount" | "paymentStatus";
+type SortKey = "invoiceNumber" | "invoiceDate" | "dueDate" | "poReference" | "invoiceAmount" | "paymentStatus";
 type SortDir = "asc" | "desc";
 
 // --- Helpers ---
@@ -138,6 +139,9 @@ export default function InvoicesPage() {
         case "invoiceDate":
           cmp = a.invoiceDate.localeCompare(b.invoiceDate);
           break;
+        case "dueDate":
+          cmp = (a.dueDate || "").localeCompare(b.dueDate || "");
+          break;
         case "poReference":
           cmp = (a.poReference || "").localeCompare(b.poReference || "");
           break;
@@ -155,6 +159,7 @@ export default function InvoicesPage() {
 
   // Summary stats
   const summaryStats = useMemo(() => {
+    const today = new Date().toISOString().split("T")[0];
     const unpaidInvoices = invoices.filter((i) => i.paymentStatus !== "Paid");
     const totalUnpaid = unpaidInvoices.reduce(
       (sum, i) => sum + i.invoiceAmount,
@@ -167,16 +172,28 @@ export default function InvoicesPage() {
       (sum, i) => sum + i.invoiceAmount,
       0
     );
-    const needsReview = invoices.filter(
-      (i) =>
-        i.matchStatus === "discrepancy" ||
-        (i.matchStatus === "open" && i.paymentStatus !== "Paid")
+    const pastDue = unpaidInvoices.filter(
+      (i) => i.dueDate && i.dueDate < today
     );
-    const totalNeedsReview = needsReview.reduce(
+    const totalPastDue = pastDue.reduce(
       (sum, i) => sum + i.invoiceAmount,
       0
     );
-    return { totalUnpaid, totalReadyToPay, totalNeedsReview };
+    const upcoming = unpaidInvoices.filter(
+      (i) => i.dueDate && i.dueDate >= today
+    );
+    const totalUpcoming = upcoming.reduce(
+      (sum, i) => sum + i.invoiceAmount,
+      0
+    );
+    return {
+      totalUnpaid,
+      totalReadyToPay,
+      totalPastDue,
+      pastDueCount: pastDue.length,
+      totalUpcoming,
+      upcomingCount: upcoming.length,
+    };
   }, [invoices]);
 
   const handleSort = (key: SortKey) => {
@@ -258,7 +275,7 @@ export default function InvoicesPage() {
 
         {/* Summary Cards */}
         {!loading && invoices.length > 0 && (
-          <div className="grid grid-cols-3 gap-4 mb-6">
+          <div className="grid grid-cols-4 gap-4 mb-6">
             <div className="bg-white rounded-lg border border-gray-200 px-5 py-4">
               <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Total Unpaid
@@ -267,20 +284,34 @@ export default function InvoicesPage() {
                 {formatCurrency(summaryStats.totalUnpaid)}
               </p>
             </div>
+            <div className="bg-white rounded-lg border border-red-200 px-5 py-4">
+              <p className="text-xs font-medium text-red-500 uppercase tracking-wider">
+                Past Due
+              </p>
+              <p className="text-2xl font-bold text-red-600 mt-1">
+                {formatCurrency(summaryStats.totalPastDue)}
+              </p>
+              <p className="text-xs text-red-400 mt-0.5">
+                {summaryStats.pastDueCount} invoice{summaryStats.pastDueCount !== 1 ? "s" : ""}
+              </p>
+            </div>
+            <div className="bg-white rounded-lg border border-gray-200 px-5 py-4">
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Upcoming
+              </p>
+              <p className="text-2xl font-bold text-amber-600 mt-1">
+                {formatCurrency(summaryStats.totalUpcoming)}
+              </p>
+              <p className="text-xs text-gray-400 mt-0.5">
+                {summaryStats.upcomingCount} invoice{summaryStats.upcomingCount !== 1 ? "s" : ""}
+              </p>
+            </div>
             <div className="bg-white rounded-lg border border-gray-200 px-5 py-4">
               <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Ready to Pay
               </p>
               <p className="text-2xl font-bold text-green-700 mt-1">
                 {formatCurrency(summaryStats.totalReadyToPay)}
-              </p>
-            </div>
-            <div className="bg-white rounded-lg border border-gray-200 px-5 py-4">
-              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Needs Review
-              </p>
-              <p className="text-2xl font-bold text-amber-600 mt-1">
-                {formatCurrency(summaryStats.totalNeedsReview)}
               </p>
             </div>
           </div>
@@ -382,11 +413,12 @@ export default function InvoicesPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200">
-                    <SortableHeader label="Invoice #" sortKey="invoiceNumber" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[18%]" />
-                    <SortableHeader label="Date" sortKey="invoiceDate" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[10%]" />
-                    <SortableHeader label="PO Ref" sortKey="poReference" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[14%]" />
-                    <SortableHeader label="Amount" sortKey="invoiceAmount" currentKey={sortKey} dir={sortDir} onSort={handleSort} align="right" className="w-[14%]" />
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-[18%]">
+                    <SortableHeader label="Invoice #" sortKey="invoiceNumber" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[16%]" />
+                    <SortableHeader label="Date" sortKey="invoiceDate" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[9%]" />
+                    <SortableHeader label="Due" sortKey="dueDate" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[9%]" />
+                    <SortableHeader label="PO Ref" sortKey="poReference" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[12%]" />
+                    <SortableHeader label="Amount" sortKey="invoiceAmount" currentKey={sortKey} dir={sortDir} onSort={handleSort} align="right" className="w-[12%]" />
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-[16%]">
                       Review Status
                     </th>
                     <SortableHeader label="Payment" sortKey="paymentStatus" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[12%]" />
@@ -471,6 +503,22 @@ function InvoiceRow({
         </td>
         <td className="px-4 py-3 text-gray-600">
           {formatDate(invoice.invoiceDate)}
+        </td>
+        <td className="px-4 py-3">
+          {invoice.dueDate ? (
+            <span
+              className={
+                invoice.paymentStatus !== "Paid" &&
+                invoice.dueDate < new Date().toISOString().split("T")[0]
+                  ? "text-red-600 font-medium"
+                  : "text-gray-600"
+              }
+            >
+              {formatDate(invoice.dueDate)}
+            </span>
+          ) : (
+            <span className="text-gray-300 text-xs">&mdash;</span>
+          )}
         </td>
         <td className="px-4 py-3">
           {invoice.poReference ? (
@@ -558,7 +606,7 @@ function InvoiceRow({
       {/* Expanded panel — Matched tab only (read-only comparison) */}
       {isExpanded && activeTab === "matched" && invoice.comparison && (
         <tr>
-          <td colSpan={7} className="p-0">
+          <td colSpan={8} className="p-0">
             <div className="bg-gray-50 border-t border-gray-200 px-6 py-5">
               <div className="flex justify-between items-center mb-3">
                 <div className="flex items-center gap-3">
