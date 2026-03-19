@@ -28,12 +28,6 @@ const NAV_SECTIONS = [
     ],
   },
   {
-    label: "FINANCE",
-    items: [
-      { name: "Landed Costs", href: "/landed-costs", icon: CalculatorIcon },
-    ],
-  },
-  {
     label: "ADMIN",
     items: [
       { name: "Data Ingestion", href: "/warehouse/data-ingestion", icon: UploadIcon },

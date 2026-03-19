@@ -14,21 +14,20 @@ interface OnHandItem {
   incoming: number;
   damaged: number;
   totalOnHand: number;
+  unitCost: number | null;
+  extendedValue: number | null;
   outOfStock: boolean;
-}
-
-interface OnHandSummary {
-  totalSkus: number;
-  totalOnHand: number;
-  totalAvailable: number;
-  totalAllocated: number;
-  totalIncoming: number;
-  outOfStockCount: number;
 }
 
 interface OnHandResponse {
   items: OnHandItem[];
-  summary: OnHandSummary;
+  summary: {
+    totalSkus: number;
+    totalOnHand: number;
+    totalValue: number;
+    totalIncoming: number;
+  };
+  costEffectiveDate: string;
   fetchedAt: string;
 }
 
@@ -36,9 +35,9 @@ type SortField =
   | "sku"
   | "category"
   | "stordSku"
-  | "available"
-  | "allocated"
   | "totalOnHand"
+  | "unitCost"
+  | "extendedValue"
   | "incoming";
 type SortDir = "asc" | "desc";
 
@@ -47,8 +46,8 @@ export default function OnHandInventoryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [sortField, setSortField] = useState<SortField>("sku");
-  const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [sortField, setSortField] = useState<SortField>("extendedValue");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [showZero, setShowZero] = useState(false);
 
   const fetchData = async () => {
@@ -78,7 +77,11 @@ export default function OnHandInventoryPage() {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
       setSortField(field);
-      setSortDir(field === "sku" || field === "category" || field === "stordSku" ? "asc" : "desc");
+      setSortDir(
+        field === "sku" || field === "category" || field === "stordSku"
+          ? "asc"
+          : "desc"
+      );
     }
   };
 
@@ -104,15 +107,17 @@ export default function OnHandInventoryPage() {
             ) * dir
           );
         case "category":
-          return (a.category || "zzz").localeCompare(b.category || "zzz") * dir;
+          return (
+            (a.category || "zzz").localeCompare(b.category || "zzz") * dir
+          );
         case "stordSku":
           return a.stordSku.localeCompare(b.stordSku) * dir;
-        case "available":
-          return (a.available - b.available) * dir;
-        case "allocated":
-          return (a.allocated - b.allocated) * dir;
         case "totalOnHand":
           return (a.totalOnHand - b.totalOnHand) * dir;
+        case "unitCost":
+          return ((a.unitCost ?? 0) - (b.unitCost ?? 0)) * dir;
+        case "extendedValue":
+          return ((a.extendedValue ?? 0) - (b.extendedValue ?? 0)) * dir;
         case "incoming":
           return (a.incoming - b.incoming) * dir;
         default:
@@ -137,10 +142,18 @@ export default function OnHandInventoryPage() {
     >
       {label}
       {sortField === field && (
-        <span className="ml-1">{sortDir === "asc" ? "\u2191" : "\u2193"}</span>
+        <span className="ml-1">
+          {sortDir === "asc" ? "\u2191" : "\u2193"}
+        </span>
       )}
     </th>
   );
+
+  const fmt = (n: number) =>
+    n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+
+  const fmtCompact = (n: number) =>
+    n >= 1000 ? "$" + (n / 1000).toFixed(1) + "k" : fmt(n);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -152,15 +165,27 @@ export default function OnHandInventoryPage() {
               On-Hand Inventory
             </h1>
             <p className="text-sm text-gray-500 mt-1">
-              Live inventory from Stord (Reno warehouse)
+              Live inventory from Stord — quantities and valuation
               {data && (
-                <span className="ml-2 text-gray-400">
-                  Updated{" "}
-                  {new Date(data.fetchedAt).toLocaleTimeString("en-US", {
-                    hour: "numeric",
-                    minute: "2-digit",
-                  })}
-                </span>
+                <>
+                  <span className="ml-2 text-gray-400">
+                    Costs as of{" "}
+                    {new Date(
+                      data.costEffectiveDate + "T00:00:00"
+                    ).toLocaleDateString("en-US", {
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                    })}
+                  </span>
+                  <span className="ml-2 text-gray-400">
+                    &middot; Updated{" "}
+                    {new Date(data.fetchedAt).toLocaleTimeString("en-US", {
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                </>
               )}
             </p>
           </div>
@@ -182,31 +207,31 @@ export default function OnHandInventoryPage() {
 
         {/* Summary Cards */}
         {data && (
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-            <SummaryCard
-              label="Total SKUs"
-              value={data.summary.totalSkus}
-              muted
-            />
-            <SummaryCard
-              label="Total On-Hand"
-              value={data.summary.totalOnHand}
-            />
-            <SummaryCard
-              label="Available"
-              value={data.summary.totalAvailable}
-              color="green"
-            />
-            <SummaryCard
-              label="Allocated"
-              value={data.summary.totalAllocated}
-              color="blue"
-            />
-            <SummaryCard
-              label="Incoming"
-              value={data.summary.totalIncoming}
-              color="amber"
-            />
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <div className="bg-white rounded-lg border border-gray-200 px-4 py-3">
+              <p className="text-xs text-gray-500 mb-1">SKUs</p>
+              <p className="text-xl font-semibold text-gray-500">
+                {data.summary.totalSkus.toLocaleString()}
+              </p>
+            </div>
+            <div className="bg-white rounded-lg border border-gray-200 px-4 py-3">
+              <p className="text-xs text-gray-500 mb-1">Units on Hand</p>
+              <p className="text-xl font-semibold text-gray-900">
+                {data.summary.totalOnHand.toLocaleString()}
+              </p>
+            </div>
+            <div className="bg-white rounded-lg border border-gray-200 px-4 py-3">
+              <p className="text-xs text-gray-500 mb-1">Total Value</p>
+              <p className="text-xl font-semibold text-gray-900">
+                {fmt(data.summary.totalValue)}
+              </p>
+            </div>
+            <div className="bg-white rounded-lg border border-gray-200 px-4 py-3">
+              <p className="text-xs text-gray-500 mb-1">Incoming</p>
+              <p className="text-xl font-semibold text-amber-700">
+                {data.summary.totalIncoming.toLocaleString()}
+              </p>
+            </div>
           </div>
         )}
 
@@ -215,7 +240,7 @@ export default function OnHandInventoryPage() {
           <div className="flex items-center gap-4 mb-4">
             <input
               type="text"
-              placeholder="Search by SKU or product name..."
+              placeholder="Search by SKU, product, or category..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full max-w-sm px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-gray-400 focus:border-gray-400"
@@ -252,18 +277,18 @@ export default function OnHandInventoryPage() {
                   <SortHeader field="category" label="Category" />
                   <SortHeader field="stordSku" label="Stord SKU" />
                   <SortHeader
-                    field="available"
-                    label="Available"
-                    align="right"
-                  />
-                  <SortHeader
-                    field="allocated"
-                    label="Allocated"
-                    align="right"
-                  />
-                  <SortHeader
                     field="totalOnHand"
                     label="On-Hand"
+                    align="right"
+                  />
+                  <SortHeader
+                    field="unitCost"
+                    label="Unit Cost"
+                    align="right"
+                  />
+                  <SortHeader
+                    field="extendedValue"
+                    label="Value"
                     align="right"
                   />
                   <SortHeader
@@ -271,20 +296,21 @@ export default function OnHandInventoryPage() {
                     label="Incoming"
                     align="right"
                   />
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                    Status
-                  </th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((item) => {
                   const displaySku = item.standardSku || item.stordSku;
                   const isMapped = !!item.standardSku;
+                  const missingCost =
+                    item.unitCost === null && item.totalOnHand > 0;
 
                   return (
                     <tr
                       key={`${item.facility}-${item.stordSku}`}
-                      className="border-b border-gray-100 hover:bg-gray-50"
+                      className={`border-b border-gray-100 hover:bg-gray-50 ${
+                        missingCost ? "bg-red-50/40" : ""
+                      }`}
                     >
                       {/* SKU */}
                       <td className="px-4 py-3">
@@ -299,56 +325,65 @@ export default function OnHandInventoryPage() {
                       </td>
                       {/* Category */}
                       <td className="px-4 py-3 text-gray-500 text-xs">
-                        {item.category || "—"}
+                        {item.category || "\u2014"}
                       </td>
                       {/* Stord SKU */}
                       <td className="px-4 py-3 font-mono text-gray-500 text-xs">
                         {item.stordSku}
                       </td>
-                      {/* Available */}
-                      <td className="px-4 py-3 text-right font-mono text-green-700 font-medium">
-                        {item.available.toLocaleString()}
-                      </td>
-                      {/* Allocated */}
-                      <td className="px-4 py-3 text-right font-mono text-blue-600">
-                        {item.allocated > 0
-                          ? item.allocated.toLocaleString()
-                          : "—"}
-                      </td>
-                      {/* Total On-Hand */}
+                      {/* On-Hand */}
                       <td className="px-4 py-3 text-right font-mono text-gray-900 font-semibold">
                         {item.totalOnHand.toLocaleString()}
+                      </td>
+                      {/* Unit Cost */}
+                      <td className="px-4 py-3 text-right font-mono">
+                        {item.unitCost !== null ? (
+                          <span className="text-gray-700">
+                            {fmt(item.unitCost)}
+                          </span>
+                        ) : missingCost ? (
+                          <span className="text-red-500 text-xs font-medium">
+                            Missing
+                          </span>
+                        ) : (
+                          <span className="text-gray-300">{"\u2014"}</span>
+                        )}
+                      </td>
+                      {/* Value */}
+                      <td className="px-4 py-3 text-right font-mono font-semibold">
+                        {item.extendedValue !== null ? (
+                          <span className="text-gray-900">
+                            {fmtCompact(item.extendedValue)}
+                          </span>
+                        ) : (
+                          <span className="text-gray-300">{"\u2014"}</span>
+                        )}
                       </td>
                       {/* Incoming */}
                       <td className="px-4 py-3 text-right font-mono text-amber-600">
                         {item.incoming > 0
                           ? item.incoming.toLocaleString()
-                          : "—"}
-                      </td>
-                      {/* Status */}
-                      <td className="px-4 py-3">
-                        {item.outOfStock ? (
-                          <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-red-50 text-red-700">
-                            Out of Stock
-                          </span>
-                        ) : item.available <= 0 && item.totalOnHand > 0 ? (
-                          <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-amber-50 text-amber-700">
-                            Locked
-                          </span>
-                        ) : item.totalOnHand > 0 ? (
-                          <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-green-50 text-green-700">
-                            In Stock
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-500">
-                            Zero
-                          </span>
-                        )}
+                          : "\u2014"}
                       </td>
                     </tr>
                   );
                 })}
               </tbody>
+              {/* Total row */}
+              <tfoot>
+                <tr className="bg-gray-50 border-t-2 border-gray-300">
+                  <td
+                    colSpan={5}
+                    className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider"
+                  >
+                    Total Inventory Value
+                  </td>
+                  <td className="px-4 py-3 text-right font-mono font-bold text-gray-900 text-base">
+                    {data ? fmt(data.summary.totalValue) : "\u2014"}
+                  </td>
+                  <td></td>
+                </tr>
+              </tfoot>
             </table>
           </div>
         )}
@@ -364,39 +399,6 @@ export default function OnHandInventoryPage() {
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-function SummaryCard({
-  label,
-  value,
-  color,
-  muted,
-}: {
-  label: string;
-  value: number;
-  color?: "green" | "blue" | "amber" | "red";
-  muted?: boolean;
-}) {
-  const valueColor = muted
-    ? "text-gray-500"
-    : color === "green"
-    ? "text-green-700"
-    : color === "blue"
-    ? "text-blue-700"
-    : color === "amber"
-    ? "text-amber-700"
-    : color === "red"
-    ? "text-red-700"
-    : "text-gray-900";
-
-  return (
-    <div className="bg-white rounded-lg border border-gray-200 px-4 py-3">
-      <p className="text-xs text-gray-500 mb-1">{label}</p>
-      <p className={`text-xl font-semibold ${valueColor}`}>
-        {value.toLocaleString()}
-      </p>
     </div>
   );
 }

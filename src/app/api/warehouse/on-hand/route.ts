@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { getRecords, TABLES } from "@/lib/airtable";
 
 import skuMappingData from "@/../clients/magna/config/stord-sku-mapping.json";
+import unitCostData from "@/../clients/magna/config/unit-costs-2026-02.json";
+
+const UNIT_COSTS: Record<string, number> = unitCostData as Record<string, number>;
 const SKU_MAPPING: Record<
   string,
   { standardSku: string; airtableId: string } | null
@@ -46,6 +49,8 @@ export interface OnHandItem {
   incoming: number;
   damaged: number;
   totalOnHand: number;
+  unitCost: number | null;
+  extendedValue: number | null;
   outOfStock: boolean;
 }
 
@@ -54,11 +59,10 @@ export interface OnHandResponse {
   summary: {
     totalSkus: number;
     totalOnHand: number;
-    totalAvailable: number;
-    totalAllocated: number;
+    totalValue: number;
     totalIncoming: number;
-    outOfStockCount: number;
   };
+  costEffectiveDate: string;
   fetchedAt: string;
 }
 
@@ -144,6 +148,12 @@ export async function GET() {
           ? categoryByRecordId.get(mapping.airtableId) || null
           : null;
 
+        const unitCost = UNIT_COSTS[b.sku] ?? null;
+        const extendedValue =
+          unitCost !== null && totalOnHand > 0
+            ? Math.round(unitCost * totalOnHand * 100) / 100
+            : null;
+
         return {
           stordSku: b.sku,
           standardSku: mapping?.standardSku || null,
@@ -156,6 +166,8 @@ export async function GET() {
           incoming,
           damaged,
           totalOnHand,
+          unitCost,
+          extendedValue,
           outOfStock: b.inventory_alerts.out_of_stock,
         };
       })
@@ -171,15 +183,14 @@ export async function GET() {
     const summary = {
       totalSkus: items.length,
       totalOnHand: items.reduce((sum, i) => sum + i.totalOnHand, 0),
-      totalAvailable: items.reduce((sum, i) => sum + i.available, 0),
-      totalAllocated: items.reduce((sum, i) => sum + i.allocated, 0),
+      totalValue: items.reduce((sum, i) => sum + (i.extendedValue ?? 0), 0),
       totalIncoming: items.reduce((sum, i) => sum + i.incoming, 0),
-      outOfStockCount: items.filter((i) => i.outOfStock).length,
     };
 
     const response: OnHandResponse = {
       items,
       summary,
+      costEffectiveDate: "2026-02-28",
       fetchedAt: new Date().toISOString(),
     };
 
