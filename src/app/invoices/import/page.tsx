@@ -256,7 +256,7 @@ export default function InvoiceImportPage() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                 <div>
                   <p className="text-gray-500">Invoice Number</p>
-                  <p className="font-medium text-gray-900 font-mono">{inv.invoiceNumber || "—"}</p>
+                  <p className="font-medium text-gray-900">{inv.invoiceNumber || "—"}</p>
                 </div>
                 <div>
                   <p className="text-gray-500">Invoice Date</p>
@@ -264,11 +264,11 @@ export default function InvoiceImportPage() {
                 </div>
                 <div>
                   <p className="text-gray-500">Sales Order</p>
-                  <p className="font-medium text-gray-900 font-mono">{inv.salesOrder || "—"}</p>
+                  <p className="font-medium text-gray-900">{inv.salesOrder || "—"}</p>
                 </div>
                 <div>
                   <p className="text-gray-500">PO Reference</p>
-                  <p className="font-medium text-gray-900 font-mono">{inv.poReference || "—"}</p>
+                  <p className="font-medium text-gray-900">{inv.poReference || "—"}</p>
                 </div>
                 <div>
                   <p className="text-gray-500">Payment Terms</p>
@@ -276,7 +276,7 @@ export default function InvoiceImportPage() {
                 </div>
                 <div>
                   <p className="text-gray-500">Tracking Number</p>
-                  <p className="font-medium text-gray-900 font-mono text-xs">{inv.trackingNumber || "—"}</p>
+                  <p className="font-medium text-gray-900 text-xs">{inv.trackingNumber || "—"}</p>
                 </div>
                 <div>
                   <p className="text-gray-500">Delivery Terms</p>
@@ -370,7 +370,7 @@ export default function InvoiceImportPage() {
                             </span>
                           )}
                         </td>
-                        <td className="px-3 py-2.5 font-mono text-gray-900 text-xs">
+                        <td className="px-3 py-2.5 text-gray-900 text-xs">
                           {line.ansItemNumber}
                         </td>
                         <td className="px-3 py-2.5 text-gray-900">
@@ -378,21 +378,21 @@ export default function InvoiceImportPage() {
                         </td>
                         <td className="px-3 py-2.5">
                           {line.standardSku ? (
-                            <span className="font-mono text-gray-900 text-xs">{line.standardSku}</span>
+                            <span className="text-gray-900 text-xs">{line.standardSku}</span>
                           ) : (
                             <span className="text-burgundy-500 font-medium text-xs">Unmapped</span>
                           )}
                         </td>
-                        <td className="px-3 py-2.5 text-right font-mono text-gray-900">
+                        <td className="px-3 py-2.5 text-right text-gray-900">
                           {line.quantity.toLocaleString()}
                         </td>
-                        <td className="px-3 py-2.5 text-right font-mono text-gray-900">
+                        <td className="px-3 py-2.5 text-right text-gray-900">
                           {formatCurrency(line.unitPrice)}
                         </td>
-                        <td className="px-3 py-2.5 text-right font-mono text-gray-900">
+                        <td className="px-3 py-2.5 text-right text-gray-900">
                           {formatCurrency(line.amount)}
                         </td>
-                        <td className="px-3 py-2.5 font-mono text-gray-500 text-xs">
+                        <td className="px-3 py-2.5 text-gray-500 text-xs">
                           {line.batchNumber || "—"}
                         </td>
                       </tr>
@@ -403,7 +403,7 @@ export default function InvoiceImportPage() {
                       <td colSpan={6} className="px-3 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase">
                         Total
                       </td>
-                      <td className="px-3 py-2.5 text-right font-mono font-semibold text-gray-900">
+                      <td className="px-3 py-2.5 text-right font-semibold text-gray-900">
                         {formatCurrency(inv.invoiceAmount)}
                       </td>
                       <td></td>

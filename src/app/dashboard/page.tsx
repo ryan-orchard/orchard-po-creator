@@ -195,20 +195,20 @@ export default function DashboardPage() {
                         onClick={() => router.push(`/invoices/${inv.id}`)}
                         className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
                       >
-                        <td className="px-4 py-2.5 font-mono font-semibold text-gray-900">{inv.invoiceNumber}</td>
+                        <td className="px-4 py-2.5 font-semibold text-gray-900">{inv.invoiceNumber}</td>
                         <td className="px-4 py-2.5 text-gray-600">{inv.supplier || "—"}</td>
                         <td className="px-4 py-2.5 text-gray-600">
                           {inv.invoiceDate
                             ? new Date(inv.invoiceDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
                             : "—"}
                         </td>
-                        <td className="px-4 py-2.5 font-mono text-gray-600 text-xs">{inv.poReference || "—"}</td>
+                        <td className="px-4 py-2.5 text-gray-600 text-xs">{inv.poReference || "—"}</td>
                         <td className="px-4 py-2.5">
                           <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-warm-100 text-warm-800">
                             {inv.status}
                           </span>
                         </td>
-                        <td className="px-4 py-2.5 text-right font-mono font-medium text-gray-900">
+                        <td className="px-4 py-2.5 text-right font-medium text-gray-900">
                           {inv.invoiceAmount
                             ? inv.invoiceAmount.toLocaleString("en-US", { style: "currency", currency: "USD" })
                             : "—"}

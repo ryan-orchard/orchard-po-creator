@@ -103,7 +103,7 @@ export default function POPrintPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-white" style={{ fontFamily: "var(--font-geist-sans), system-ui, sans-serif" }}>
+    <div className="min-h-screen bg-white">
 
       {/* ── Screen-only toolbar ── */}
       <div className="print:hidden border-b border-gray-200 px-10 py-3 flex items-center gap-4 bg-white">

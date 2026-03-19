@@ -301,12 +301,12 @@ function ReceiptMatchingPage() {
                           {receipt.lines.map((l, i) => (
                             <div key={i} className="flex items-center justify-between text-xs text-gray-600">
                               <span>{l.sku || l.threePlSku || "Unknown"}</span>
-                              <span className="font-mono text-gray-500">{l.qtyReceived.toLocaleString()}</span>
+                              <span className="text-gray-500">{l.qtyReceived.toLocaleString()}</span>
                             </div>
                           ))}
                         </div>
                         <div className="mt-1.5 text-right">
-                          <span className="text-xs font-mono text-gray-500">
+                          <span className="text-xs text-gray-500">
                             {totalUnits.toLocaleString()} total units
                           </span>
                         </div>
@@ -383,7 +383,7 @@ function ReceiptMatchingPage() {
                               </div>
                             ) : (
                               <div className="flex items-center gap-1.5">
-                                <span className={`font-mono text-sm font-medium ${
+                                <span className={`text-sm font-medium ${
                                   line.matched ? "text-sage-700" : "text-gray-900"
                                 }`}>
                                   {line.skuName || line.threePlSku || "Unknown"}
@@ -439,7 +439,7 @@ function ReceiptMatchingPage() {
                             >
                               <div className="flex items-center justify-between mb-1">
                                 <div className="flex items-center gap-2">
-                                  <span className="font-mono font-semibold text-sm text-gray-900">
+                                  <span className="font-semibold text-sm text-gray-900">
                                     {po.poNumber}
                                   </span>
                                   <span className={`px-1.5 py-0.5 text-[10px] font-medium rounded ${
@@ -501,7 +501,7 @@ function ReceiptMatchingPage() {
                                     : "border-gray-100 hover:border-gray-200 hover:bg-gray-50"
                                 }`}
                               >
-                                <span className="font-mono font-medium text-gray-700">{po.poNumber}</span>
+                                <span className="font-medium text-gray-700">{po.poNumber}</span>
                                 <span className="text-gray-400 ml-2">{po.status}</span>
                                 <span className="text-gray-400 ml-2">{po.skuNames.join(", ")}</span>
                               </button>
@@ -586,25 +586,25 @@ function ReceiptMatchingPage() {
                                         />
                                       </td>
                                       <td className="px-3 py-2">
-                                        <span className="font-mono text-xs text-gray-900">{line.skuName}</span>
+                                        <span className="text-xs text-gray-900">{line.skuName}</span>
                                         {!line.poLineItemId && (
                                           <span className="ml-1.5 text-[10px] bg-warm-100 text-warm-700 px-1 py-0.5 rounded">
                                             Not on PO
                                           </span>
                                         )}
                                       </td>
-                                      <td className="px-3 py-2 text-right font-mono text-gray-600">
+                                      <td className="px-3 py-2 text-right text-gray-600">
                                         {line.qtyOrdered > 0 ? line.qtyOrdered.toLocaleString() : "—"}
                                       </td>
-                                      <td className="px-3 py-2 text-right font-mono text-gray-600">
+                                      <td className="px-3 py-2 text-right text-gray-600">
                                         {line.qtyAlreadyReceived > 0 ? line.qtyAlreadyReceived.toLocaleString() : "—"}
                                       </td>
-                                      <td className="px-3 py-2 text-right font-mono text-gray-900 font-medium">
+                                      <td className="px-3 py-2 text-right text-gray-900 font-medium">
                                         {line.qtyThisReceipt > 0 ? line.qtyThisReceipt.toLocaleString() : "—"}
                                       </td>
                                       <td className="px-3 py-2 text-right">
                                         <span
-                                          className={`font-mono text-xs font-medium ${
+                                          className={`text-xs font-medium ${
                                             line.variance === 0
                                               ? "text-sage-600"
                                               : line.variance > 0
@@ -634,8 +634,8 @@ function ReceiptMatchingPage() {
                           <div className="space-y-1">
                             {matchData.comparison.otherLines.map((line, idx) => (
                               <div key={idx} className="flex items-center justify-between px-3 py-1.5 text-xs text-gray-400">
-                                <span className="font-mono">{line.skuName}</span>
-                                <span className="font-mono">{line.qtyOrdered.toLocaleString()} ordered</span>
+                                <span className="">{line.skuName}</span>
+                                <span className="">{line.qtyOrdered.toLocaleString()} ordered</span>
                               </div>
                             ))}
                           </div>

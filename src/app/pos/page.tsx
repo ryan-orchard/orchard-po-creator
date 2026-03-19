@@ -233,7 +233,7 @@ export default function POListPage() {
                     onClick={() => router.push(`/pos/${po.id}`)}
                     className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
                   >
-                    <td className="px-4 py-3 font-mono font-semibold text-gray-900">
+                    <td className="px-4 py-3 font-semibold text-gray-900">
                       {po.poNumber}
                     </td>
                     <td className="px-4 py-3 text-gray-600">

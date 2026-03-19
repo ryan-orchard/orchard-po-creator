@@ -571,7 +571,7 @@ export default function NewPOPage() {
                                 setActiveDropdown(null);
                               }}
                             >
-                              <span className="font-mono font-semibold">
+                              <span className="font-semibold">
                                 {sku.standardSku}
                               </span>
                               <span className="text-gray-500 ml-2">

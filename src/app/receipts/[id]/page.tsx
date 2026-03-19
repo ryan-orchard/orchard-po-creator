@@ -121,7 +121,7 @@ export default function ReceiptDetailPage() {
               </span>
             </div>
             {receipt.externalReceiptId && (
-              <p className="text-sm text-gray-500 mt-1 font-mono">
+              <p className="text-sm text-gray-500 mt-1">
                 {receipt.receiptNumber}
               </p>
             )}
@@ -157,7 +157,7 @@ export default function ReceiptDetailPage() {
                   {receipt.purchaseOrderId ? (
                     <button
                       onClick={() => router.push(`/pos/${receipt.purchaseOrderId}`)}
-                      className="font-mono font-semibold text-gold-600 hover:text-gold-800 hover:underline"
+                      className="font-semibold text-gold-600 hover:text-gold-800 hover:underline"
                     >
                       {receipt.purchaseOrder}
                     </button>
@@ -203,7 +203,7 @@ export default function ReceiptDetailPage() {
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
                   External Receipt ID
                 </p>
-                <p className="text-sm text-gray-900 font-mono">
+                <p className="text-sm text-gray-900">
                   {receipt.externalReceiptId || "—"}
                 </p>
               </div>
@@ -280,7 +280,7 @@ export default function ReceiptDetailPage() {
                       </select>
                     ) : (
                       <span className="flex items-center gap-2">
-                        <span className="font-mono text-gray-900">
+                        <span className="text-gray-900">
                           {savingLineId === line.id
                             ? "Saving..."
                             : line.sku || (
@@ -299,7 +299,7 @@ export default function ReceiptDetailPage() {
                       </span>
                     )}
                   </td>
-                  <td className="px-6 py-3 text-gray-500 font-mono text-xs">
+                  <td className="px-6 py-3 text-gray-500 text-xs">
                     {line.threePlSku || "—"}
                   </td>
                   <td className="px-6 py-3 text-gray-600">

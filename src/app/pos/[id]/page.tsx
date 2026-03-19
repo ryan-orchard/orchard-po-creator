@@ -467,7 +467,7 @@ export default function PODetailPage() {
         <div className="max-w-6xl mx-auto px-6 py-8">
           <div className="flex items-center justify-between mb-8">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900 font-mono">
+              <h1 className="text-2xl font-bold text-gray-900">
                 {po.poNumber}
               </h1>
               <p className="text-sm text-gray-500 mt-1">Editing</p>
@@ -677,7 +677,7 @@ export default function PODetailPage() {
                             setTimeout(() => setActiveDropdown(null), 200)
                           }
                           placeholder="Search SKU..."
-                          className="w-full border border-gray-300 rounded px-2 py-1 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-black"
+                          className="w-full border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-black"
                         />
                         {activeDropdown === item.key && (
                           <div className="absolute z-50 mt-1 w-96 max-h-60 overflow-y-auto bg-white border border-gray-300 rounded-md shadow-xl">
@@ -697,7 +697,7 @@ export default function PODetailPage() {
                                   setActiveDropdown(null);
                                 }}
                               >
-                                <span className="font-mono font-semibold">
+                                <span className="font-semibold">
                                   {sku.standardSku}
                                 </span>
                                 <span className="text-gray-500 ml-2">
@@ -835,7 +835,7 @@ export default function PODetailPage() {
         <div className="flex items-center justify-between mb-8">
           <div>
             <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-bold text-gray-900 font-mono">
+              <h1 className="text-2xl font-bold text-gray-900">
                 {po.poNumber}
               </h1>
               <div className="relative print:hidden" onClick={(e) => e.stopPropagation()}>

@@ -441,7 +441,7 @@ export default function DataIngestionPage() {
                                 </span>
                               </td>
                               {/* Order # — shown on every line */}
-                              <td className="px-3 py-2.5 font-mono text-gray-600 text-xs">
+                              <td className="px-3 py-2.5 text-gray-600 text-xs">
                                 {receipt.orderNumber}
                               </td>
                               {/* Date — shown on every line */}
@@ -451,18 +451,18 @@ export default function DataIngestionPage() {
                                   : "—"}
                               </td>
                               {/* 3PL SKU */}
-                              <td className="px-3 py-2.5 font-mono text-gray-600 text-xs">
+                              <td className="px-3 py-2.5 text-gray-600 text-xs">
                                 {line.stordSku}
                               </td>
                               {/* Mapped SKU — editable for unmapped */}
                               <td className="px-3 py-2.5">
                                 {line.standardSku ? (
-                                  <span className="font-mono text-gray-900 text-xs">{line.standardSku}</span>
+                                  <span className="text-gray-900 text-xs">{line.standardSku}</span>
                                 ) : line.skuMapped ? (
                                   <span className="text-gray-400 italic text-xs">Non-inventory</span>
                                 ) : hasOverride ? (
                                   <div className="flex items-center gap-1">
-                                    <span className="font-mono text-gold-700 text-xs">{overrideItem?.standardSku}</span>
+                                    <span className="text-gold-700 text-xs">{overrideItem?.standardSku}</span>
                                     <button
                                       onClick={() => {
                                         setSkuOverrides((prev) => {
@@ -500,7 +500,7 @@ export default function DataIngestionPage() {
                                 )}
                               </td>
                               {/* Qty Received */}
-                              <td className="px-3 py-2.5 text-right font-mono text-gray-900">
+                              <td className="px-3 py-2.5 text-right text-gray-900">
                                 {line.qtyReceived.toLocaleString()}
                               </td>
                               {/* Delete */}

@@ -405,7 +405,7 @@ export default function InvoiceMatchPage() {
               </span>
             </div>
             <div className="p-4">
-              <p className="text-lg font-bold text-gray-900 font-mono">
+              <p className="text-lg font-bold text-gray-900">
                 {invoice.invoiceNumber}
               </p>
               <div className="mt-2 space-y-1 text-sm text-gray-600">
@@ -433,7 +433,7 @@ export default function InvoiceMatchPage() {
             {poDetail ? (
               <div className="p-4">
                 <div className="flex items-center gap-2">
-                  <p className="text-lg font-bold text-gray-900 font-mono">
+                  <p className="text-lg font-bold text-gray-900">
                     {poDetail.poNumber}
                   </p>
                   <span
@@ -493,7 +493,7 @@ export default function InvoiceMatchPage() {
             </div>
             {receiptDetail ? (
               <div className="p-4">
-                <p className="text-lg font-bold text-gray-900 font-mono">
+                <p className="text-lg font-bold text-gray-900">
                   {receiptDetail.receiptNumber}
                 </p>
                 <div className="mt-2 space-y-1 text-sm text-gray-600">
@@ -554,13 +554,13 @@ export default function InvoiceMatchPage() {
                 {rows.map((row) => (
                   <tr key={row.skuName}>
                     <td className="px-4 py-2.5">
-                      <span className="font-mono text-xs font-medium text-gray-900">
+                      <span className="text-xs font-medium text-gray-900">
                         {row.skuName}
                       </span>
                     </td>
                     {/* Invoice */}
                     <td
-                      className={`px-3 py-2.5 text-right font-mono border-l border-gray-100 ${
+                      className={`px-3 py-2.5 text-right border-l border-gray-100 ${
                         row.hasInvoice ? "text-gray-900" : "text-gray-300"
                       }`}
                     >
@@ -569,7 +569,7 @@ export default function InvoiceMatchPage() {
                         : "\u2014"}
                     </td>
                     <td
-                      className={`px-3 py-2.5 text-right font-mono text-xs ${
+                      className={`px-3 py-2.5 text-right text-xs ${
                         row.hasInvoice ? "text-gray-900" : "text-gray-300"
                       }`}
                     >
@@ -579,14 +579,14 @@ export default function InvoiceMatchPage() {
                     </td>
                     {/* PO */}
                     <td
-                      className={`px-3 py-2.5 text-right font-mono border-l border-gray-100 ${
+                      className={`px-3 py-2.5 text-right border-l border-gray-100 ${
                         row.hasPO ? "text-gray-600" : "text-gray-300"
                       }`}
                     >
                       {row.hasPO ? row.poQty.toLocaleString() : "\u2014"}
                     </td>
                     <td
-                      className={`px-3 py-2.5 text-right font-mono text-xs ${
+                      className={`px-3 py-2.5 text-right text-xs ${
                         row.hasPO ? "text-gray-600" : "text-gray-300"
                       }`}
                     >
@@ -594,7 +594,7 @@ export default function InvoiceMatchPage() {
                     </td>
                     {/* Receipt */}
                     <td
-                      className={`px-3 py-2.5 text-right font-mono border-l border-gray-100 ${
+                      className={`px-3 py-2.5 text-right border-l border-gray-100 ${
                         row.hasReceipt ? "text-gray-600" : "text-gray-300"
                       }`}
                     >
@@ -611,7 +611,7 @@ export default function InvoiceMatchPage() {
                           &#10003;
                         </span>
                       ) : (
-                        <span className="text-warm-600 font-mono text-xs font-medium">
+                        <span className="text-warm-600 text-xs font-medium">
                           {row.invoiceQty - row.receiptQty > 0 ? "+" : ""}
                           {(
                             row.invoiceQty - row.receiptQty
@@ -628,7 +628,7 @@ export default function InvoiceMatchPage() {
                           &#10003;
                         </span>
                       ) : (
-                        <span className="text-warm-600 font-mono text-xs font-medium">
+                        <span className="text-warm-600 text-xs font-medium">
                           $
                           {Math.abs(
                             row.invoiceUnitCost - row.poUnitCost

@@ -280,8 +280,8 @@ export default function InvoiceDetailPage() {
                       <div className="space-y-0.5">
                         {receipt.lines.map((line, i) => (
                           <div key={i} className="flex items-center justify-between text-xs text-gray-600">
-                            <span className="font-mono">{line.sku}</span>
-                            <span className="font-mono">{line.qtyReceived.toLocaleString()} received</span>
+                            <span className="">{line.sku}</span>
+                            <span className="">{line.qtyReceived.toLocaleString()} received</span>
                           </div>
                         ))}
                       </div>
@@ -326,13 +326,13 @@ export default function InvoiceDetailPage() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
           <div className="bg-white rounded-lg border border-gray-200 p-4">
             <p className="text-xs text-gray-500 mb-1">PO Reference</p>
-            <p className="text-sm font-medium text-gray-900 font-mono">
+            <p className="text-sm font-medium text-gray-900">
               {invoice.poReference || "—"}
             </p>
           </div>
           <div className="bg-white rounded-lg border border-gray-200 p-4">
             <p className="text-xs text-gray-500 mb-1">Sales Order</p>
-            <p className="text-sm font-medium text-gray-900 font-mono">
+            <p className="text-sm font-medium text-gray-900">
               {invoice.salesOrder || "—"}
             </p>
           </div>
@@ -350,7 +350,7 @@ export default function InvoiceDetailPage() {
           </div>
           <div className="bg-white rounded-lg border border-gray-200 p-4">
             <p className="text-xs text-gray-500 mb-1">Tracking Number</p>
-            <p className="text-sm font-medium text-gray-900 font-mono text-xs">
+            <p className="text-sm font-medium text-gray-900 text-xs">
               {invoice.trackingNumber || "—"}
             </p>
           </div>
@@ -419,7 +419,7 @@ export default function InvoiceDetailPage() {
               <tbody>
                 {invoice.lines.map((line) => (
                   <tr key={line.id} className="border-b border-gray-100">
-                    <td className="px-3 py-2.5 font-mono text-gray-900 text-xs">
+                    <td className="px-3 py-2.5 text-gray-900 text-xs">
                       {line.ansItemNumber}
                     </td>
                     <td className="px-3 py-2.5 text-gray-900">
@@ -427,23 +427,23 @@ export default function InvoiceDetailPage() {
                     </td>
                     <td className="px-3 py-2.5">
                       {line.skuName ? (
-                        <span className="font-mono text-gray-900 text-xs">
+                        <span className="text-gray-900 text-xs">
                           {line.skuName}
                         </span>
                       ) : (
                         <span className="text-gray-400 text-xs">—</span>
                       )}
                     </td>
-                    <td className="px-3 py-2.5 text-right font-mono text-gray-900">
+                    <td className="px-3 py-2.5 text-right text-gray-900">
                       {line.qtyBilled.toLocaleString()}
                     </td>
-                    <td className="px-3 py-2.5 text-right font-mono text-gray-900">
+                    <td className="px-3 py-2.5 text-right text-gray-900">
                       {formatCurrency(line.unitCost)}
                     </td>
-                    <td className="px-3 py-2.5 text-right font-mono text-gray-900">
+                    <td className="px-3 py-2.5 text-right text-gray-900">
                       {formatCurrency(line.amount)}
                     </td>
-                    <td className="px-3 py-2.5 font-mono text-gray-500 text-xs">
+                    <td className="px-3 py-2.5 text-gray-500 text-xs">
                       {line.batchNumber || "—"}
                     </td>
                   </tr>
@@ -457,7 +457,7 @@ export default function InvoiceDetailPage() {
                   >
                     Total
                   </td>
-                  <td className="px-3 py-2.5 text-right font-mono font-semibold text-gray-900">
+                  <td className="px-3 py-2.5 text-right font-semibold text-gray-900">
                     {formatCurrency(invoice.invoiceAmount)}
                   </td>
                   <td></td>

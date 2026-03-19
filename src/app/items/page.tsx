@@ -189,7 +189,7 @@ export default function ItemsListPage() {
                     onClick={() => openEdit(item)}
                     className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
                   >
-                    <td className="px-4 py-3 font-mono font-semibold text-gray-900">
+                    <td className="px-4 py-3 font-semibold text-gray-900">
                       {item.standardSku || "—"}
                     </td>
                     <td className="px-4 py-3 text-gray-600">
@@ -201,7 +201,7 @@ export default function ItemsListPage() {
                     <td className="px-4 py-3 text-gray-600">
                       {item.uom || "—"}
                     </td>
-                    <td className="px-4 py-3 text-right font-mono text-gray-600">
+                    <td className="px-4 py-3 text-right text-gray-600">
                       {item.count || "—"}
                     </td>
                     <td className="px-4 py-3">
@@ -242,7 +242,7 @@ export default function ItemsListPage() {
                     type="text"
                     value={form.standardSku}
                     onChange={(e) => setForm({ ...form, standardSku: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-gray-400 font-mono"
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-gray-400"
                     placeholder="e.g. ANS-STK-28-VAN"
                   />
                 </div>

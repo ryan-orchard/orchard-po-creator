@@ -118,7 +118,7 @@ export default function ShipmentDetailPage() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-bold text-gray-900 font-mono">
+              <h1 className="text-2xl font-bold text-gray-900">
                 {shipment.shipmentNumber}
               </h1>
               {/* Status dropdown */}
@@ -196,7 +196,7 @@ export default function ShipmentDetailPage() {
                       onClick={() =>
                         router.push(`/pos/${shipment.purchaseOrderId}`)
                       }
-                      className="font-mono font-semibold text-gold-600 hover:text-gold-800 hover:underline"
+                      className="font-semibold text-gold-600 hover:text-gold-800 hover:underline"
                     >
                       {shipment.poNumber}
                     </button>
@@ -261,7 +261,7 @@ export default function ShipmentDetailPage() {
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
                   Carrier Reference
                 </p>
-                <p className="text-sm text-gray-900 font-mono">
+                <p className="text-sm text-gray-900">
                   {shipment.carrierReference || "—"}
                 </p>
               </div>
@@ -270,7 +270,7 @@ export default function ShipmentDetailPage() {
                   <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
                     Tracking Number
                   </p>
-                  <p className="text-sm text-gray-900 font-mono">
+                  <p className="text-sm text-gray-900">
                     {shipment.trackingNumber}
                   </p>
                 </div>
@@ -303,7 +303,7 @@ export default function ShipmentDetailPage() {
             <tbody>
               {shipment.lineItems.map((li) => (
                 <tr key={li.id} className="border-b border-gray-100">
-                  <td className="px-6 py-3 font-mono text-gray-900">
+                  <td className="px-6 py-3 text-gray-900">
                     {li.sku?.standardSku || "—"}
                   </td>
                   <td className="px-6 py-3 text-gray-600">

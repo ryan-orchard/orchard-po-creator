@@ -317,7 +317,7 @@ export default function OnHandInventoryPage() {
                     >
                       {/* SKU */}
                       <td className="px-4 py-3">
-                        <span className="font-mono font-semibold text-gray-900 text-xs">
+                        <span className="font-semibold text-gray-900 text-xs">
                           {displaySku}
                         </span>
                         {!isMapped && (
@@ -331,15 +331,15 @@ export default function OnHandInventoryPage() {
                         {item.category || "\u2014"}
                       </td>
                       {/* Stord SKU */}
-                      <td className="px-4 py-3 font-mono text-gray-500 text-xs">
+                      <td className="px-4 py-3 text-gray-500 text-xs">
                         {item.stordSku}
                       </td>
                       {/* On-Hand */}
-                      <td className="px-4 py-3 text-right font-mono text-gray-900 font-semibold">
+                      <td className="px-4 py-3 text-right text-gray-900 font-semibold">
                         {item.totalOnHand.toLocaleString()}
                       </td>
                       {/* Unit Cost */}
-                      <td className="px-4 py-3 text-right font-mono">
+                      <td className="px-4 py-3 text-right">
                         {item.unitCost !== null ? (
                           <span className="text-gray-700">
                             {fmt(item.unitCost)}
@@ -353,7 +353,7 @@ export default function OnHandInventoryPage() {
                         )}
                       </td>
                       {/* Value */}
-                      <td className="px-4 py-3 text-right font-mono font-semibold">
+                      <td className="px-4 py-3 text-right font-semibold">
                         {item.extendedValue !== null ? (
                           <span className="text-gray-900">
                             {fmtCompact(item.extendedValue)}
@@ -363,7 +363,7 @@ export default function OnHandInventoryPage() {
                         )}
                       </td>
                       {/* Incoming */}
-                      <td className="px-4 py-3 text-right font-mono text-amber-600">
+                      <td className="px-4 py-3 text-right text-amber-600">
                         {item.incoming > 0
                           ? item.incoming.toLocaleString()
                           : "\u2014"}
@@ -381,7 +381,7 @@ export default function OnHandInventoryPage() {
                   >
                     Total Inventory Value
                   </td>
-                  <td className="px-4 py-3 text-right font-mono font-bold text-gray-900 text-base">
+                  <td className="px-4 py-3 text-right font-bold text-gray-900 text-base">
                     {data ? fmt(data.summary.totalValue) : "\u2014"}
                   </td>
                   <td></td>

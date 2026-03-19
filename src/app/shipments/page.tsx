@@ -173,10 +173,10 @@ export default function ShipmentsListPage() {
                     onClick={() => router.push(`/shipments/${shipment.id}`)}
                     className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
                   >
-                    <td className="px-4 py-3 font-mono font-semibold text-gray-900">
+                    <td className="px-4 py-3 font-semibold text-gray-900">
                       {shipment.shipmentNumber}
                     </td>
-                    <td className="px-4 py-3 font-mono text-gray-600">
+                    <td className="px-4 py-3 text-gray-600">
                       {shipment.purchaseOrder?.[0] ? poMap[shipment.purchaseOrder[0]] || "—" : "—"}
                     </td>
                     <td className="px-4 py-3">
