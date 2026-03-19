@@ -80,13 +80,24 @@ export async function POST(request: NextRequest) {
   const { data } = payload;
 
   try {
-    // Idempotency — skip if we've already processed this receipt confirmation
-    const existing = await getRecords(TABLES.RECEIPTS, {
+    // Idempotency — skip if we've already processed this receipt
+    // Check both UUID (legacy) and order number (current) as External Receipt ID
+    const orderNum = data.order?.order_number || "";
+    const existingByUuid = await getRecords(TABLES.RECEIPTS, {
       filterByFormula: `{External Receipt ID} = "${data.receipt_confirmation_id}"`,
     });
-    if (existing.length > 0) {
+    if (existingByUuid.length > 0) {
       console.log(`Receipt ${data.receipt_confirmation_id} already exists — skipping`);
       return NextResponse.json({ received: true, skipped: true, reason: "duplicate", id: data.receipt_confirmation_id });
+    }
+    if (orderNum) {
+      const existingByOrder = await getRecords(TABLES.RECEIPTS, {
+        filterByFormula: `{External Receipt ID} = "${orderNum}"`,
+      });
+      if (existingByOrder.length > 0) {
+        console.log(`Receipt with order ${orderNum} already exists — skipping`);
+        return NextResponse.json({ received: true, skipped: true, reason: "duplicate", orderNumber: orderNum });
+      }
     }
 
     // Resolve warehouse
@@ -106,15 +117,18 @@ export async function POST(request: NextRequest) {
     }
     const receiptNumber = `RCP-${maxNum + 1}`;
 
-    // Create receipt header
+    // Create receipt header — use order number as External Receipt ID (the linkable thread),
+    // fall back to receipt_confirmation_id if no order number available
+    const externalId = data.order?.order_number || data.receipt_confirmation_id;
     const receiptFields: Record<string, unknown> = {
       "Receipt Number": receiptNumber,
       "Received Date": data.received_at.split("T")[0],
-      "External Receipt ID": data.receipt_confirmation_id,
+      "External Receipt ID": externalId,
       ...(warehouseId ? { Warehouses: [warehouseId] } : {}),
-      ...(data.order?.order_number
-        ? { Notes: `Order: ${data.order.order_number}${data.bol ? ` | BOL: ${data.bol}` : ""}` }
-        : {}),
+      Notes: [
+        data.order?.order_number ? `Stord ID: ${data.receipt_confirmation_id}` : null,
+        data.bol ? `BOL: ${data.bol}` : null,
+      ].filter(Boolean).join(" | ") || undefined,
     };
 
     const receipt = await createRecord(TABLES.RECEIPTS, receiptFields);

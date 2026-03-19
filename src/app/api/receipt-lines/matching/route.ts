@@ -70,16 +70,24 @@ export async function GET() {
       {
         receivedDate: string;
         externalReceiptId: string;
+        orderNumber: string;
         receiptNumber: string;
         poId: string | null;
       }
     > = {};
     for (const r of allReceipts) {
       const poIds = r.fields["Purchase Order"] as string[] | undefined;
+      const externalId = (r.fields["External Receipt ID"] as string) || "";
+      const notes = (r.fields["Notes"] as string) || "";
+      // Webhook receipts store UUID as External Receipt ID and order number in Notes.
+      // Sync/ingestion receipts store order number as External Receipt ID.
+      // Extract order number from Notes "Order: PO SO570645 | BOL: ..." if present.
+      const notesMatch = notes.match(/^Order:\s*(.+?)(?:\s*\||$)/);
+      const orderNumber = notesMatch ? notesMatch[1].trim() : externalId;
       receiptMap[r.id] = {
         receivedDate: (r.fields["Received Date"] as string) || "",
-        externalReceiptId:
-          (r.fields["External Receipt ID"] as string) || "",
+        externalReceiptId: externalId,
+        orderNumber,
         receiptNumber: (r.fields["Receipt Number"] as string) || "",
         poId: poIds?.[0] || null,
       };
@@ -335,9 +343,9 @@ export async function GET() {
           }
         }
 
-        // Tier 1: PO number from External Receipt ID → suggest that PO
+        // Tier 1: PO number from order number → suggest that PO
         const poMatch = attemptPOMatch(
-          receipt.externalReceiptId,
+          receipt.orderNumber,
           matchablePOCandidates
         );
         if (poMatch) {
@@ -388,7 +396,7 @@ export async function GET() {
         id: rl.id,
         receiptId: receiptIds[0],
         receiptDate: receipt.receivedDate,
-        orderNumber: receipt.externalReceiptId,
+        orderNumber: receipt.orderNumber,
         receiptNumber: receipt.receiptNumber,
         sku: item?.name || threePlSku || "Unknown",
         skuId,

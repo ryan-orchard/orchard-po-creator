@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { useRouter } from "next/navigation";
 
 // --- Types ---
 
@@ -79,7 +78,6 @@ function formatFullDate(d: string) {
 // --- Main Page ---
 
 export default function ReceiptsPage() {
-  const router = useRouter();
   const [lines, setLines] = useState<MatchingLine[]>([]);
   const [counts, setCounts] = useState({
     open: 0,
@@ -94,6 +92,9 @@ export default function ReceiptsPage() {
   const [confirming, setConfirming] = useState<string | null>(null);
   const [excluding, setExcluding] = useState<string | null>(null);
   const [unmatching, setUnmatching] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const [syncResult, setSyncResult] = useState<{ created: number } | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
@@ -111,6 +112,28 @@ export default function ReceiptsPage() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  const handleSync = async () => {
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const res = await fetch("/api/receipts/sync", { method: "POST" });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Sync failed");
+      }
+      const data = await res.json();
+      setLastSyncedAt(data.syncedAt);
+      if (data.created > 0) {
+        setSyncResult({ created: data.created });
+      }
+      await fetchData();
+    } catch (err) {
+      console.error("Sync failed:", err);
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const filteredLines = useMemo(() => {
     let result = lines.filter((l) => l.status === activeTab);
@@ -271,13 +294,29 @@ export default function ReceiptsPage() {
             <h1 className="text-2xl font-bold text-gray-900">Receipts</h1>
             <p className="text-sm text-gray-500 mt-1">
               Match receipt lines to purchase orders
+              {lastSyncedAt && (
+                <span className="ml-2 text-gray-400">
+                  &middot; Updated{" "}
+                  {new Date(lastSyncedAt).toLocaleTimeString("en-US", {
+                    hour: "numeric",
+                    minute: "2-digit",
+                  })}
+                </span>
+              )}
+              {syncResult && syncResult.created > 0 && (
+                <span className="ml-2 text-sage-600">
+                  &middot; {syncResult.created} new receipt
+                  {syncResult.created !== 1 ? "s" : ""} added
+                </span>
+              )}
             </p>
           </div>
           <button
-            onClick={() => router.push("/warehouse/data-ingestion")}
-            className="bg-gray-900 text-white px-4 py-2 text-sm rounded-md hover:bg-gray-800"
+            onClick={handleSync}
+            disabled={syncing || loading}
+            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
           >
-            + Import from Stord
+            {syncing ? "Syncing..." : "Refresh"}
           </button>
         </div>
 
@@ -287,14 +326,14 @@ export default function ReceiptsPage() {
           <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
             <p className="text-gray-500 mb-4">No receipts yet.</p>
             <p className="text-sm text-gray-400 mb-4">
-              Import warehouse data from the Data Ingestion page to create
-              receipt records.
+              Click Refresh to pull the latest receipts from Stord.
             </p>
             <button
-              onClick={() => router.push("/warehouse/data-ingestion")}
-              className="bg-gray-900 text-white px-4 py-2 text-sm rounded-md hover:bg-gray-800"
+              onClick={handleSync}
+              disabled={syncing}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
             >
-              Go to Data Ingestion
+              {syncing ? "Syncing..." : "Refresh"}
             </button>
           </div>
         ) : (
