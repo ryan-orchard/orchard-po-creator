@@ -94,6 +94,7 @@ export async function POST(request: NextRequest) {
       "Total Amount": body.invoiceAmount || 0,
       "Review Status": "Pending",
       "Payment Status": "Unpaid",
+      "Match Status": "Open",
     };
 
     if (supplierId) {

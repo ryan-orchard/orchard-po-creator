@@ -8,14 +8,16 @@ export async function PATCH(
   try {
     const { id } = await params;
     const body = await request.json();
-    const { reviewStatus, paymentStatus } = body as {
+    const { reviewStatus, paymentStatus, matchStatus, reviewNotes } = body as {
       reviewStatus?: string;
       paymentStatus?: string;
+      matchStatus?: string;
+      reviewNotes?: string;
     };
 
-    if (!reviewStatus && !paymentStatus) {
+    if (!reviewStatus && !paymentStatus && !matchStatus && reviewNotes === undefined) {
       return NextResponse.json(
-        { error: "reviewStatus or paymentStatus is required" },
+        { error: "At least one status field is required" },
         { status: 400 }
       );
     }
@@ -23,6 +25,8 @@ export async function PATCH(
     const fields: Record<string, unknown> = {};
     if (reviewStatus) fields["Review Status"] = reviewStatus;
     if (paymentStatus) fields["Payment Status"] = paymentStatus;
+    if (matchStatus) fields["Match Status"] = matchStatus;
+    if (reviewNotes !== undefined) fields["Review Notes"] = reviewNotes;
 
     await updateRecord(TABLES.INVOICES, id, fields);
 
