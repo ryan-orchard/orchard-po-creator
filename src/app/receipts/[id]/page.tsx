@@ -113,8 +113,8 @@ export default function ReceiptDetailPage() {
               <span
                 className={`px-2.5 py-0.5 text-xs font-medium rounded-full ${
                   isMatched
-                    ? "bg-green-100 text-green-800"
-                    : "bg-amber-100 text-amber-800"
+                    ? "bg-sage-100 text-sage-800"
+                    : "bg-warm-100 text-warm-800"
                 }`}
               >
                 {isMatched ? "Matched" : "Unmatched"}
@@ -130,7 +130,7 @@ export default function ReceiptDetailPage() {
             {!isMatched && unmatchedLineCount > 0 && (
               <button
                 onClick={() => router.push(`/receipts/matching?receipt=${receipt.id}`)}
-                className="bg-amber-500 text-white px-4 py-2 text-sm rounded-md hover:bg-amber-600"
+                className="bg-gold-500 text-white px-4 py-2 text-sm rounded-md hover:bg-gold-600"
               >
                 Match to PO
               </button>
@@ -157,12 +157,12 @@ export default function ReceiptDetailPage() {
                   {receipt.purchaseOrderId ? (
                     <button
                       onClick={() => router.push(`/pos/${receipt.purchaseOrderId}`)}
-                      className="font-mono font-semibold text-blue-600 hover:text-blue-800 hover:underline"
+                      className="font-mono font-semibold text-gold-600 hover:text-gold-800 hover:underline"
                     >
                       {receipt.purchaseOrder}
                     </button>
                   ) : (
-                    <span className="text-amber-500 text-xs font-medium">Not matched</span>
+                    <span className="text-warm-600 text-xs font-medium">Not matched</span>
                   )}
                 </p>
               </div>
@@ -213,11 +213,11 @@ export default function ReceiptDetailPage() {
                 </p>
                 <p className="text-sm text-gray-900">
                   {matchedLineCount > 0 && (
-                    <span className="text-green-700">{matchedLineCount} matched</span>
+                    <span className="text-sage-700">{matchedLineCount} matched</span>
                   )}
                   {matchedLineCount > 0 && unmatchedLineCount > 0 && ", "}
                   {unmatchedLineCount > 0 && (
-                    <span className="text-amber-600">{unmatchedLineCount} unmatched</span>
+                    <span className="text-warm-600">{unmatchedLineCount} unmatched</span>
                   )}
                   {receipt.lines.length === 0 && "No lines"}
                 </p>
@@ -284,7 +284,7 @@ export default function ReceiptDetailPage() {
                           {savingLineId === line.id
                             ? "Saving..."
                             : line.sku || (
-                                <span className="text-red-500 text-xs">No SKU</span>
+                                <span className="text-burgundy-500 text-xs">No SKU</span>
                               )}
                         </span>
                         <button
@@ -310,7 +310,7 @@ export default function ReceiptDetailPage() {
                   </td>
                   <td className="px-6 py-3 text-center">
                     {line.matched ? (
-                      <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-green-100 text-green-800">
+                      <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-sage-100 text-sage-800">
                         Matched
                       </span>
                     ) : (

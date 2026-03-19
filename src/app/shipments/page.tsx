@@ -28,9 +28,9 @@ interface Location {
 const STATUS_TABS = ["All", "Created", "In Transit", "Delivered"] as const;
 
 const statusColors: Record<string, string> = {
-  Created: "bg-yellow-100 text-yellow-800",
-  "In Transit": "bg-blue-100 text-blue-800",
-  Delivered: "bg-green-100 text-green-800",
+  Created: "bg-warm-100 text-warm-800",
+  "In Transit": "bg-gold-100 text-gold-800",
+  Delivered: "bg-sage-100 text-sage-800",
 };
 
 export default function ShipmentsListPage() {

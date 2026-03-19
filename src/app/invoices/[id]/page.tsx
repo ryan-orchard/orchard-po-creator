@@ -64,15 +64,15 @@ const REVIEW_STATUSES = ["Pending", "Matched", "Discrepancy"];
 const PAYMENT_STATUSES = ["Unpaid", "Paid", "Disputed"];
 
 const reviewStatusColors: Record<string, string> = {
-  Pending: "bg-yellow-100 text-yellow-800",
-  Matched: "bg-green-100 text-green-800",
-  Discrepancy: "bg-red-100 text-red-800",
+  Pending: "bg-warm-100 text-warm-800",
+  Matched: "bg-sage-100 text-sage-800",
+  Discrepancy: "bg-burgundy-100 text-burgundy-800",
 };
 
 const paymentStatusColors: Record<string, string> = {
   Unpaid: "bg-gray-100 text-gray-700",
-  Paid: "bg-blue-100 text-blue-800",
-  Disputed: "bg-orange-100 text-orange-800",
+  Paid: "bg-gold-100 text-gold-800",
+  Disputed: "bg-burgundy-100 text-burgundy-800",
 };
 
 function formatCurrency(n: number): string {
@@ -224,7 +224,7 @@ export default function InvoiceDetailPage() {
             {!isMatched && (
               <Link
                 href={`/invoices/matching?invoice=${invoice.id}`}
-                className="bg-amber-500 text-white px-4 py-1.5 text-sm rounded-md hover:bg-amber-600 font-medium"
+                className="bg-gold-500 text-white px-4 py-1.5 text-sm rounded-md hover:bg-gold-600 font-medium"
               >
                 Match to PO
               </Link>
@@ -234,19 +234,19 @@ export default function InvoiceDetailPage() {
 
         {/* Matched PO Banner */}
         {isMatched && invoice.purchaseOrder && (
-          <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
+          <div className="bg-sage-50 border border-sage-200 rounded-lg p-4 mb-6">
             <div className="flex items-center gap-3">
-              <svg className="w-5 h-5 text-green-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <svg className="w-5 h-5 text-sage-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
               <div>
-                <p className="text-sm font-medium text-green-800">
+                <p className="text-sm font-medium text-sage-800">
                   Matched to{" "}
-                  <Link href={`/pos/${invoice.purchaseOrder.id}`} className="underline hover:text-green-900">
+                  <Link href={`/pos/${invoice.purchaseOrder.id}`} className="underline hover:text-sage-800">
                     {invoice.purchaseOrder.poNumber}
                   </Link>
                 </p>
-                <p className="text-xs text-green-600 mt-0.5">
+                <p className="text-xs text-sage-600 mt-0.5">
                   PO Status: {invoice.purchaseOrder.status}
                 </p>
               </div>

@@ -57,22 +57,22 @@ export default function DashboardPage() {
                   {totalValue.toLocaleString("en-US", { style: "currency", currency: "USD" })}
                 </p>
               </div>
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-5 py-5">
-                <p className="text-xs font-medium uppercase tracking-wider text-yellow-700">Pending Review</p>
-                <p className="text-3xl font-bold mt-1 tabular-nums text-yellow-900">{pending.length}</p>
-                <p className="text-xs text-yellow-600 mt-1">
+              <div className="bg-warm-50 border border-warm-200 rounded-lg px-5 py-5">
+                <p className="text-xs font-medium uppercase tracking-wider text-warm-700">Pending Review</p>
+                <p className="text-3xl font-bold mt-1 tabular-nums text-warm-900">{pending.length}</p>
+                <p className="text-xs text-warm-600 mt-1">
                   {pendingValue.toLocaleString("en-US", { style: "currency", currency: "USD" })}
                 </p>
               </div>
-              <div className="bg-blue-50 border border-blue-200 rounded-lg px-5 py-5">
-                <p className="text-xs font-medium uppercase tracking-wider text-blue-700">Ready to Pay</p>
-                <p className="text-3xl font-bold mt-1 tabular-nums text-blue-900">{matched.length}</p>
-                <p className="text-xs text-blue-600 mt-1">Passed all checks</p>
+              <div className="bg-gold-50 border border-gold-200 rounded-lg px-5 py-5">
+                <p className="text-xs font-medium uppercase tracking-wider text-gold-700">Ready to Pay</p>
+                <p className="text-3xl font-bold mt-1 tabular-nums text-gold-900">{matched.length}</p>
+                <p className="text-xs text-gold-600 mt-1">Passed all checks</p>
               </div>
-              <div className="bg-green-50 border border-green-200 rounded-lg px-5 py-5">
-                <p className="text-xs font-medium uppercase tracking-wider text-green-700">Paid</p>
-                <p className="text-3xl font-bold mt-1 tabular-nums text-green-900">{paid.length}</p>
-                <p className="text-xs text-green-600 mt-1">Complete</p>
+              <div className="bg-sage-50 border border-sage-200 rounded-lg px-5 py-5">
+                <p className="text-xs font-medium uppercase tracking-wider text-sage-700">Paid</p>
+                <p className="text-3xl font-bold mt-1 tabular-nums text-sage-800">{paid.length}</p>
+                <p className="text-xs text-sage-600 mt-1">Complete</p>
               </div>
             </div>
 
@@ -86,8 +86,8 @@ export default function DashboardPage() {
               >
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-yellow-100 flex items-center justify-center">
-                      <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-yellow-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <div className="w-8 h-8 rounded-full bg-warm-100 flex items-center justify-center">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-warm-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
                       </svg>
                     </div>
@@ -97,7 +97,7 @@ export default function DashboardPage() {
                     </div>
                   </div>
                   {pending.length > 0 && (
-                    <span className="bg-yellow-100 text-yellow-800 text-xs font-bold px-2.5 py-1 rounded-full tabular-nums">
+                    <span className="bg-warm-100 text-warm-800 text-xs font-bold px-2.5 py-1 rounded-full tabular-nums">
                       {pending.length}
                     </span>
                   )}
@@ -112,8 +112,8 @@ export default function DashboardPage() {
               >
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center">
-                      <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <div className="w-8 h-8 rounded-full bg-plum-100 flex items-center justify-center">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-plum-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5M9 11.25v1.5M12 9v3.75m3-6v6" />
                       </svg>
                     </div>
@@ -123,7 +123,7 @@ export default function DashboardPage() {
                     </div>
                   </div>
                   {pending.length > 0 && (
-                    <span className="bg-purple-100 text-purple-800 text-xs font-bold px-2.5 py-1 rounded-full tabular-nums">
+                    <span className="bg-plum-100 text-plum-800 text-xs font-bold px-2.5 py-1 rounded-full tabular-nums">
                       {pending.length}
                     </span>
                   )}
@@ -136,8 +136,8 @@ export default function DashboardPage() {
             <div className="grid grid-cols-2 gap-4 mb-8">
               <div className="bg-white rounded-lg border border-gray-200 p-4 flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="w-7 h-7 rounded-full bg-green-100 flex items-center justify-center">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <div className="w-7 h-7 rounded-full bg-sage-100 flex items-center justify-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5 text-sage-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
                   </div>
@@ -146,13 +146,13 @@ export default function DashboardPage() {
                     <p className="text-xs text-gray-500">Passed all checks</p>
                   </div>
                 </div>
-                <span className="text-lg font-bold tabular-nums text-green-700">{matched.length}</span>
+                <span className="text-lg font-bold tabular-nums text-sage-700">{matched.length}</span>
               </div>
 
               <div className="bg-white rounded-lg border border-gray-200 p-4 flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="w-7 h-7 rounded-full bg-red-100 flex items-center justify-center">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <div className="w-7 h-7 rounded-full bg-burgundy-100 flex items-center justify-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5 text-burgundy-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
                     </svg>
                   </div>
@@ -161,7 +161,7 @@ export default function DashboardPage() {
                     <p className="text-xs text-gray-500">Needs manual review</p>
                   </div>
                 </div>
-                <span className="text-lg font-bold tabular-nums text-red-700">{discrepancy.length}</span>
+                <span className="text-lg font-bold tabular-nums text-burgundy-700">{discrepancy.length}</span>
               </div>
             </div>
 
@@ -204,7 +204,7 @@ export default function DashboardPage() {
                         </td>
                         <td className="px-4 py-2.5 font-mono text-gray-600 text-xs">{inv.poReference || "—"}</td>
                         <td className="px-4 py-2.5">
-                          <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-yellow-100 text-yellow-800">
+                          <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-warm-100 text-warm-800">
                             {inv.status}
                           </span>
                         </td>

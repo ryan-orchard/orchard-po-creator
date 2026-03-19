@@ -252,7 +252,7 @@ function ReceiptMatchingPage() {
           <p className="text-gray-500">Loading...</p>
         ) : receipts.length === 0 && !selectedReceiptId ? (
           <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
-            <div className="text-green-500 mb-3">
+            <div className="text-sage-500 mb-3">
               <svg className="w-12 h-12 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
@@ -283,7 +283,7 @@ function ReceiptMatchingPage() {
                         onClick={() => handleSelectReceipt(receipt.id)}
                         className={`w-full text-left px-4 py-3 transition-colors ${
                           isSelected
-                            ? "bg-blue-50 border-l-2 border-l-blue-500"
+                            ? "bg-gold-50 border-l-2 border-l-gold-500"
                             : "hover:bg-gray-50 border-l-2 border-l-transparent"
                         }`}
                       >
@@ -350,7 +350,7 @@ function ReceiptMatchingPage() {
                             key={line.id}
                             className={`rounded-md px-3 py-2 border ${
                               line.matched
-                                ? "bg-green-50 border-green-200"
+                                ? "bg-sage-50 border-sage-200"
                                 : "bg-gray-50 border-gray-200"
                             }`}
                           >
@@ -384,7 +384,7 @@ function ReceiptMatchingPage() {
                             ) : (
                               <div className="flex items-center gap-1.5">
                                 <span className={`font-mono text-sm font-medium ${
-                                  line.matched ? "text-green-700" : "text-gray-900"
+                                  line.matched ? "text-sage-700" : "text-gray-900"
                                 }`}>
                                   {line.skuName || line.threePlSku || "Unknown"}
                                 </span>
@@ -392,7 +392,7 @@ function ReceiptMatchingPage() {
                                   {line.qtyReceived.toLocaleString()} {line.uom || "units"}
                                 </span>
                                 {line.matched && (
-                                  <span className="text-[10px] text-green-600">Matched</span>
+                                  <span className="text-[10px] text-sage-600">Matched</span>
                                 )}
                                 {!line.matched && (
                                   <button
@@ -433,7 +433,7 @@ function ReceiptMatchingPage() {
                               onClick={() => handleSelectPO(po.id)}
                               className={`w-full text-left rounded-lg border p-3 transition-colors ${
                                 isSelected
-                                  ? "border-blue-400 bg-blue-50"
+                                  ? "border-gold-400 bg-gold-50"
                                   : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
                               }`}
                             >
@@ -444,13 +444,13 @@ function ReceiptMatchingPage() {
                                   </span>
                                   <span className={`px-1.5 py-0.5 text-[10px] font-medium rounded ${
                                     po.status === "Issued"
-                                      ? "bg-blue-100 text-blue-700"
-                                      : "bg-amber-100 text-amber-700"
+                                      ? "bg-gold-100 text-gold-700"
+                                      : "bg-warm-100 text-warm-700"
                                   }`}>
                                     {po.status}
                                   </span>
                                   {isSuggested && (
-                                    <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-green-100 text-green-700">
+                                    <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-green-100 text-sage-700">
                                       PO # Match
                                     </span>
                                   )}
@@ -497,7 +497,7 @@ function ReceiptMatchingPage() {
                                 onClick={() => handleSelectPO(po.id)}
                                 className={`w-full text-left rounded border px-3 py-2 text-xs transition-colors ${
                                   selectedPOId === po.id
-                                    ? "border-blue-400 bg-blue-50"
+                                    ? "border-gold-400 bg-gold-50"
                                     : "border-gray-100 hover:border-gray-200 hover:bg-gray-50"
                                 }`}
                               >
@@ -521,8 +521,8 @@ function ReceiptMatchingPage() {
                         </h3>
                         <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${
                           matchData.comparison.poStatus === "Issued"
-                            ? "bg-blue-100 text-blue-800"
-                            : "bg-amber-100 text-amber-800"
+                            ? "bg-gold-100 text-gold-800"
+                            : "bg-warm-100 text-warm-800"
                         }`}>
                           {matchData.comparison.poStatus}
                         </span>
@@ -588,7 +588,7 @@ function ReceiptMatchingPage() {
                                       <td className="px-3 py-2">
                                         <span className="font-mono text-xs text-gray-900">{line.skuName}</span>
                                         {!line.poLineItemId && (
-                                          <span className="ml-1.5 text-[10px] bg-yellow-100 text-yellow-700 px-1 py-0.5 rounded">
+                                          <span className="ml-1.5 text-[10px] bg-warm-100 text-warm-700 px-1 py-0.5 rounded">
                                             Not on PO
                                           </span>
                                         )}
@@ -606,10 +606,10 @@ function ReceiptMatchingPage() {
                                         <span
                                           className={`font-mono text-xs font-medium ${
                                             line.variance === 0
-                                              ? "text-green-600"
+                                              ? "text-sage-600"
                                               : line.variance > 0
-                                              ? "text-blue-600"
-                                              : "text-amber-600"
+                                              ? "text-gold-600"
+                                              : "text-warm-600"
                                           }`}
                                         >
                                           {line.variance > 0 ? "+" : ""}

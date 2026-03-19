@@ -20,9 +20,9 @@ interface Supplier {
 const STATUS_TABS = ["All", "Draft", "Issued", "Received", "Closed"] as const;
 
 const statusColors: Record<string, string> = {
-  Draft: "bg-yellow-100 text-yellow-800",
-  Issued: "bg-blue-100 text-blue-800",
-  Received: "bg-green-100 text-green-800",
+  Draft: "bg-warm-100 text-warm-800",
+  Issued: "bg-gold-100 text-gold-800",
+  Received: "bg-sage-100 text-sage-800",
   Closed: "bg-gray-100 text-gray-600",
 };
 
@@ -149,17 +149,17 @@ export default function POListPage() {
                 {pos.reduce((s, p) => s + (p.grandTotal || 0), 0).toLocaleString("en-US", { style: "currency", currency: "USD" })}
               </p>
             </div>
-            <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-5 py-4">
-              <p className="text-xs font-medium uppercase tracking-wider text-yellow-700">Draft</p>
-              <p className="text-2xl font-bold mt-1 tabular-nums text-yellow-900">{tabCounts["Draft"]}</p>
+            <div className="bg-warm-50 border border-warm-200 rounded-lg px-5 py-4">
+              <p className="text-xs font-medium uppercase tracking-wider text-warm-700">Draft</p>
+              <p className="text-2xl font-bold mt-1 tabular-nums text-warm-900">{tabCounts["Draft"]}</p>
             </div>
-            <div className="bg-blue-50 border border-blue-200 rounded-lg px-5 py-4">
-              <p className="text-xs font-medium uppercase tracking-wider text-blue-700">Issued</p>
-              <p className="text-2xl font-bold mt-1 tabular-nums text-blue-900">{tabCounts["Issued"]}</p>
+            <div className="bg-gold-50 border border-gold-200 rounded-lg px-5 py-4">
+              <p className="text-xs font-medium uppercase tracking-wider text-gold-700">Issued</p>
+              <p className="text-2xl font-bold mt-1 tabular-nums text-gold-900">{tabCounts["Issued"]}</p>
             </div>
-            <div className="bg-green-50 border border-green-200 rounded-lg px-5 py-4">
-              <p className="text-xs font-medium uppercase tracking-wider text-green-700">Received</p>
-              <p className="text-2xl font-bold mt-1 tabular-nums text-green-900">{tabCounts["Received"]}</p>
+            <div className="bg-sage-50 border border-sage-200 rounded-lg px-5 py-4">
+              <p className="text-xs font-medium uppercase tracking-wider text-sage-700">Received</p>
+              <p className="text-2xl font-bold mt-1 tabular-nums text-sage-800">{tabCounts["Received"]}</p>
             </div>
           </div>
         )}

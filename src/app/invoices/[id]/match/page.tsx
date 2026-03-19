@@ -387,7 +387,7 @@ export default function InvoiceMatchPage() {
           {matchInfo?.flags && matchInfo.flags.length > 0 && (
             <div className="mt-2">
               {matchInfo.flags.map((flag, i) => (
-                <p key={i} className="text-sm text-amber-600 font-medium">
+                <p key={i} className="text-sm text-warm-600 font-medium">
                   {flag}
                 </p>
               ))}
@@ -425,7 +425,7 @@ export default function InvoiceMatchPage() {
 
           {/* PO Card */}
           <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-            <div className="bg-blue-600 px-4 py-2">
+            <div className="bg-gold-600 px-4 py-2">
               <span className="text-xs font-semibold text-white uppercase tracking-wider">
                 Purchase Order
               </span>
@@ -439,10 +439,10 @@ export default function InvoiceMatchPage() {
                   <span
                     className={`px-2 py-0.5 text-[10px] font-medium rounded-full ${
                       poDetail.status === "Received"
-                        ? "bg-green-100 text-green-700"
+                        ? "bg-sage-100 text-sage-700"
                         : poDetail.status === "Issued"
-                        ? "bg-blue-100 text-blue-700"
-                        : "bg-amber-100 text-amber-700"
+                        ? "bg-gold-100 text-gold-700"
+                        : "bg-warm-100 text-warm-700"
                     }`}
                   >
                     {poDetail.status}
@@ -470,7 +470,7 @@ export default function InvoiceMatchPage() {
 
           {/* Receipt Card */}
           <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-            <div className="bg-green-600 px-4 py-2 flex items-center justify-between">
+            <div className="bg-sage-600 px-4 py-2 flex items-center justify-between">
               <span className="text-xs font-semibold text-white uppercase tracking-wider">
                 Receipt
               </span>
@@ -481,7 +481,7 @@ export default function InvoiceMatchPage() {
                     value={selectedReceiptId || ""}
                     onChange={(e) => handleReceiptChange(e.target.value)}
                     onClick={(e) => e.stopPropagation()}
-                    className="text-xs bg-green-700 text-white border border-green-500 rounded px-1.5 py-0.5 focus:outline-none"
+                    className="text-xs bg-sage-700 text-white border border-sage-500 rounded px-1.5 py-0.5 focus:outline-none"
                   >
                     {matchInfo.receiptOptions.map((r) => (
                       <option key={r.receiptId} value={r.receiptId}>
@@ -607,11 +607,11 @@ export default function InvoiceMatchPage() {
                       {!row.hasInvoice || !row.hasReceipt ? (
                         <span className="text-gray-300">\u2014</span>
                       ) : row.qtyMatch ? (
-                        <span className="text-green-600 font-medium">
+                        <span className="text-sage-600 font-medium">
                           &#10003;
                         </span>
                       ) : (
-                        <span className="text-amber-600 font-mono text-xs font-medium">
+                        <span className="text-warm-600 font-mono text-xs font-medium">
                           {row.invoiceQty - row.receiptQty > 0 ? "+" : ""}
                           {(
                             row.invoiceQty - row.receiptQty
@@ -624,11 +624,11 @@ export default function InvoiceMatchPage() {
                       {!row.hasInvoice || !row.hasPO || row.poUnitCost === 0 ? (
                         <span className="text-gray-300">\u2014</span>
                       ) : row.priceMatch ? (
-                        <span className="text-green-600 font-medium">
+                        <span className="text-sage-600 font-medium">
                           &#10003;
                         </span>
                       ) : (
-                        <span className="text-amber-600 font-mono text-xs font-medium">
+                        <span className="text-warm-600 font-mono text-xs font-medium">
                           $
                           {Math.abs(
                             row.invoiceUnitCost - row.poUnitCost
@@ -646,13 +646,13 @@ export default function InvoiceMatchPage() {
               <div
                 className={`px-4 py-3 border-t ${
                   allPass
-                    ? "bg-green-50 border-green-100"
-                    : "bg-amber-50 border-amber-100"
+                    ? "bg-sage-50 border-sage-100"
+                    : "bg-warm-50 border-warm-100"
                 }`}
               >
                 <p
                   className={`text-sm font-medium ${
-                    allPass ? "text-green-700" : "text-amber-700"
+                    allPass ? "text-sage-700" : "text-warm-700"
                   }`}
                 >
                   {allPass
@@ -696,8 +696,8 @@ export default function InvoiceMatchPage() {
                 disabled={confirming}
                 className={`text-white px-6 py-2 text-sm font-semibold rounded-md transition-colors disabled:opacity-50 ${
                   allPass
-                    ? "bg-green-600 hover:bg-green-700"
-                    : "bg-amber-500 hover:bg-amber-600"
+                    ? "bg-sage-600 hover:bg-sage-700"
+                    : "bg-gold-500 hover:bg-gold-600"
                 }`}
               >
                 {confirming

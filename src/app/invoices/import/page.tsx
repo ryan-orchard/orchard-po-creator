@@ -217,8 +217,8 @@ export default function InvoiceImportPage() {
 
         {/* Error */}
         {error && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
-            <p className="text-red-800 text-sm">{error}</p>
+          <div className="bg-burgundy-50 border border-burgundy-200 rounded-lg p-4 mb-6">
+            <p className="text-burgundy-800 text-sm">{error}</p>
           </div>
         )}
 
@@ -229,8 +229,8 @@ export default function InvoiceImportPage() {
             <div className="flex-1 min-w-0 space-y-6">
             {/* Duplicate Warning */}
             {result.isDuplicate && (
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                <p className="text-yellow-800 text-sm font-medium">
+              <div className="bg-warm-50 border border-warm-200 rounded-lg p-4">
+                <p className="text-warm-800 text-sm font-medium">
                   Invoice {inv.invoiceNumber} already exists in Airtable. Submitting will create a duplicate.
                 </p>
               </div>
@@ -311,11 +311,11 @@ export default function InvoiceImportPage() {
 
             {/* Unmapped Items Warning */}
             {result.unmappedItems.length > 0 && (
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                <p className="text-yellow-800 text-sm">
+              <div className="bg-warm-50 border border-warm-200 rounded-lg p-4">
+                <p className="text-warm-800 text-sm">
                   <span className="font-medium">{result.unmappedItems.length} unmapped ANS item number(s):</span>{" "}
                   {result.unmappedItems.join(", ")}. These lines will be created without a SKU link.
-                  Add them to <code className="bg-yellow-100 px-1 rounded text-xs">ans-sku-mapping.json</code> to
+                  Add them to <code className="bg-warm-100 px-1 rounded text-xs">ans-sku-mapping.json</code> to
                   link them.
                 </p>
               </div>
@@ -361,11 +361,11 @@ export default function InvoiceImportPage() {
                       <tr key={idx} className="border-b border-gray-100">
                         <td className="px-3 py-2.5">
                           {line.skuMapped ? (
-                            <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-green-100 text-green-800">
+                            <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-sage-100 text-sage-800">
                               Ready
                             </span>
                           ) : (
-                            <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-red-100 text-red-800">
+                            <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-burgundy-100 text-burgundy-800">
                               Unmapped
                             </span>
                           )}
@@ -380,7 +380,7 @@ export default function InvoiceImportPage() {
                           {line.standardSku ? (
                             <span className="font-mono text-gray-900 text-xs">{line.standardSku}</span>
                           ) : (
-                            <span className="text-red-500 font-medium text-xs">Unmapped</span>
+                            <span className="text-burgundy-500 font-medium text-xs">Unmapped</span>
                           )}
                         </td>
                         <td className="px-3 py-2.5 text-right font-mono text-gray-900">
@@ -419,7 +419,7 @@ export default function InvoiceImportPage() {
                 </p>
                 {submitted ? (
                   <div className="flex items-center gap-3">
-                    <span className="text-green-600 text-sm font-medium">
+                    <span className="text-sage-600 text-sm font-medium">
                       Invoice created successfully
                     </span>
                     <button

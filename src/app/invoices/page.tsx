@@ -68,8 +68,8 @@ function formatCurrency(n: number) {
 
 const paymentStatusColors: Record<string, string> = {
   Unpaid: "bg-gray-100 text-gray-600",
-  Paid: "bg-green-100 text-green-700",
-  Disputed: "bg-orange-100 text-orange-700",
+  Paid: "bg-sage-100 text-sage-700",
+  Disputed: "bg-burgundy-100 text-burgundy-700",
 };
 
 // --- Main Page ---
@@ -284,14 +284,14 @@ export default function InvoicesPage() {
                 {formatCurrency(summaryStats.totalUnpaid)}
               </p>
             </div>
-            <div className="bg-white rounded-lg border border-red-200 px-5 py-4">
-              <p className="text-xs font-medium text-red-500 uppercase tracking-wider">
+            <div className="bg-white rounded-lg border border-burgundy-200 px-5 py-4">
+              <p className="text-xs font-medium text-burgundy-500 uppercase tracking-wider">
                 Past Due
               </p>
-              <p className="text-2xl font-bold text-red-600 mt-1">
+              <p className="text-2xl font-bold text-burgundy-600 mt-1">
                 {formatCurrency(summaryStats.totalPastDue)}
               </p>
-              <p className="text-xs text-red-400 mt-0.5">
+              <p className="text-xs text-burgundy-300 mt-0.5">
                 {summaryStats.pastDueCount} invoice{summaryStats.pastDueCount !== 1 ? "s" : ""}
               </p>
             </div>
@@ -299,7 +299,7 @@ export default function InvoicesPage() {
               <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Upcoming
               </p>
-              <p className="text-2xl font-bold text-amber-600 mt-1">
+              <p className="text-2xl font-bold text-warm-600 mt-1">
                 {formatCurrency(summaryStats.totalUpcoming)}
               </p>
               <p className="text-xs text-gray-400 mt-0.5">
@@ -310,7 +310,7 @@ export default function InvoicesPage() {
               <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Ready to Pay
               </p>
-              <p className="text-2xl font-bold text-green-700 mt-1">
+              <p className="text-2xl font-bold text-sage-700 mt-1">
                 {formatCurrency(summaryStats.totalReadyToPay)}
               </p>
             </div>
@@ -383,7 +383,7 @@ export default function InvoicesPage() {
                   placeholder="Search by invoice #, PO, or receipt..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  className="pl-9 pr-4 py-2 text-sm border border-gray-300 rounded-md w-72 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  className="pl-9 pr-4 py-2 text-sm border border-gray-300 rounded-md w-72 focus:outline-none focus:ring-2 focus:ring-gold-500 focus:border-gold-500"
                 />
                 {search && (
                   <button
@@ -489,7 +489,7 @@ function InvoiceRow({
     <>
       <tr
         className={`cursor-pointer transition-colors ${
-          isExpanded ? "bg-blue-50" : "hover:bg-gray-50"
+          isExpanded ? "bg-gold-50" : "hover:bg-gray-50"
         }`}
         onClick={onClick}
       >
@@ -510,7 +510,7 @@ function InvoiceRow({
               className={
                 invoice.paymentStatus !== "Paid" &&
                 invoice.dueDate < new Date().toISOString().split("T")[0]
-                  ? "text-red-600 font-medium"
+                  ? "text-burgundy-600 font-medium"
                   : "text-gray-600"
               }
             >
@@ -539,13 +539,13 @@ function InvoiceRow({
           invoice.matchedReceipt ? (
             <span
               className={`font-medium ${
-                activeTab === "matched" ? "text-green-700" : "text-amber-700"
+                activeTab === "matched" ? "text-sage-700" : "text-warm-700"
               }`}
             >
               {invoice.matchedReceipt.receiptNumber}
             </span>
           ) : invoice.flags.length > 0 ? (
-            <span className="text-amber-600 text-xs font-medium">
+            <span className="text-warm-600 text-xs font-medium">
               {invoice.flags[0]}
             </span>
           ) : invoice.suggestedReceipt ? (
@@ -576,12 +576,12 @@ function InvoiceRow({
         {/* Action */}
         <td className="px-4 py-3 text-right">
           {activeTab === "open" && (
-            <span className="text-xs text-blue-600 font-medium">
+            <span className="text-xs text-gold-600 font-medium">
               Review &rarr;
             </span>
           )}
           {activeTab === "discrepancy" && (
-            <span className="text-xs text-amber-600 font-medium">
+            <span className="text-xs text-warm-600 font-medium">
               Review &rarr;
             </span>
           )}
@@ -736,11 +736,11 @@ function ComparisonTable({ lines }: { lines: ComparisonLine[] }) {
             </td>
             <td className="px-4 py-2.5 text-center">
               {line.qtyMatch ? (
-                <span className="text-green-600 font-medium text-xs">
+                <span className="text-sage-600 font-medium text-xs">
                   &#10003;
                 </span>
               ) : (
-                <span className="text-amber-600 text-xs font-medium">
+                <span className="text-warm-600 text-xs font-medium">
                   {line.invoiceQty - line.receiptQty > 0 ? "+" : ""}
                   {(line.invoiceQty - line.receiptQty).toLocaleString()}
                 </span>
@@ -760,11 +760,11 @@ function ComparisonTable({ lines }: { lines: ComparisonLine[] }) {
               {line.poUnitCost === 0 ? (
                 <span className="text-gray-300">&mdash;</span>
               ) : line.priceMatch ? (
-                <span className="text-green-600 font-medium text-xs">
+                <span className="text-sage-600 font-medium text-xs">
                   &#10003;
                 </span>
               ) : (
-                <span className="text-amber-600 text-xs font-medium">
+                <span className="text-warm-600 text-xs font-medium">
                   $
                   {Math.abs(line.invoiceUnitCost - line.poUnitCost).toFixed(2)}
                 </span>

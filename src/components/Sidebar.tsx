@@ -156,11 +156,11 @@ export default function Sidebar() {
   }, []);
 
   return (
-    <aside className="w-56 bg-white border-r border-gray-200 flex flex-col h-screen fixed left-0 top-0 print:hidden">
+    <aside className="w-56 bg-sidebar-bg flex flex-col h-screen fixed left-0 top-0 print:hidden">
       {/* Client name */}
-      <div className="px-5 py-5 border-b border-gray-100">
+      <div className="px-5 py-5 border-b border-sidebar-border">
         <Link href="/dashboard" className="block">
-          <span className="text-lg font-bold text-gray-900 tracking-tight">
+          <span className="text-lg font-bold text-sidebar-text-active tracking-tight">
             Magna
           </span>
         </Link>
@@ -171,7 +171,7 @@ export default function Sidebar() {
         {NAV_SECTIONS.map((section, idx) => (
           <div key={section.label || idx}>
             {section.label && (
-              <p className="px-2 text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
+              <p className="px-2 text-[10px] font-semibold text-sidebar-section uppercase tracking-wider mb-1.5">
                 {section.label}
               </p>
             )}
@@ -190,11 +190,11 @@ export default function Sidebar() {
                 if (isSoon) {
                   return (
                     <li key={item.href}>
-                      <span className="flex items-center gap-2.5 px-2 py-1.5 text-sm text-gray-300 cursor-default rounded-md">
+                      <span className="flex items-center gap-2.5 px-2 py-1.5 text-sm text-sidebar-text-muted cursor-default rounded-md">
                         <Icon className="w-4 h-4" />
                         <span className="flex-1">{item.name}</span>
                         {badge && (
-                          <span className="bg-red-100 text-red-600 text-[10px] font-semibold px-1.5 py-0.5 rounded-full">
+                          <span className="bg-badge-bg text-badge-text text-[10px] font-semibold px-1.5 py-0.5 rounded-full">
                             {badge}
                           </span>
                         )}
@@ -209,14 +209,14 @@ export default function Sidebar() {
                       href={item.href}
                       className={`flex items-center gap-2.5 px-2 py-1.5 text-sm rounded-md transition-colors ${
                         isActive
-                          ? "bg-gray-100 text-gray-900 font-medium"
-                          : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                          ? "bg-sidebar-bg-active text-sidebar-text-active font-medium"
+                          : "text-sidebar-text hover:bg-sidebar-bg-hover hover:text-sidebar-text-active"
                       }`}
                     >
                       <Icon className="w-4 h-4" />
                       <span className="flex-1">{item.name}</span>
                       {badge && (
-                        <span className="bg-red-100 text-red-600 text-[10px] font-semibold px-1.5 py-0.5 rounded-full">
+                        <span className="bg-badge-bg text-badge-text text-[10px] font-semibold px-1.5 py-0.5 rounded-full">
                           {badge}
                         </span>
                       )}
@@ -230,16 +230,16 @@ export default function Sidebar() {
       </nav>
 
       {/* Footer */}
-      <div className="px-3 py-3 border-t border-gray-100 flex items-center justify-between">
-        <p className="text-[10px] text-gray-400 tracking-wide px-2">
-          Powered by <span className="font-semibold text-gray-500">Orchard</span>
+      <div className="px-3 py-3 border-t border-sidebar-border flex items-center justify-between">
+        <p className="text-[10px] text-sidebar-text-muted tracking-wide px-2">
+          Powered by <span className="font-semibold text-sidebar-text">Orchard</span>
         </p>
         <button
           onClick={async () => {
             await fetch("/api/auth/logout", { method: "POST" });
             router.push("/login");
           }}
-          className="text-[10px] text-gray-400 hover:text-gray-600 transition-colors px-2"
+          className="text-[10px] text-sidebar-text-muted hover:text-sidebar-text-active transition-colors px-2"
           title="Sign out"
         >
           Sign out

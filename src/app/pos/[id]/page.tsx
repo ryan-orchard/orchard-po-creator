@@ -107,9 +107,9 @@ interface EditLineItem {
 const STATUSES = ["Draft", "Issued", "Received", "Closed"] as const;
 
 const statusColors: Record<string, string> = {
-  Draft: "bg-yellow-100 text-yellow-800",
-  Issued: "bg-blue-100 text-blue-800",
-  Received: "bg-green-100 text-green-800",
+  Draft: "bg-warm-100 text-warm-800",
+  Issued: "bg-gold-100 text-gold-800",
+  Received: "bg-sage-100 text-sage-800",
   Closed: "bg-gray-100 text-gray-600",
 };
 
@@ -423,17 +423,17 @@ export default function PODetailPage() {
   };
 
   const getActionDotColor = (action: string) => {
-    if (action.includes("matched")) return "bg-blue-500";
+    if (action.includes("matched")) return "bg-gold-500";
     if (action.includes("status")) return "bg-gray-400";
     if (action.includes("edited")) return "bg-gray-400";
-    return "bg-green-500"; // creates (po, shipment, receipt, invoice)
+    return "bg-sage-500"; // creates (po, shipment, receipt, invoice)
   };
 
   const getActionDotRing = (action: string) => {
-    if (action.includes("matched")) return "ring-blue-100";
+    if (action.includes("matched")) return "ring-gold-100";
     if (action.includes("status")) return "ring-gray-200";
     if (action.includes("edited")) return "ring-gray-200";
-    return "ring-green-100";
+    return "ring-sage-100";
   };
 
   if (loading) {
@@ -825,7 +825,7 @@ export default function PODetailPage() {
     <div className="min-h-screen bg-gray-50" onClick={() => setShowStatusMenu(false)}>
       <div className="max-w-6xl mx-auto px-6 py-8">
         {justCreated && (
-          <div className="print:hidden mb-6 bg-green-50 border border-green-200 rounded-lg px-4 py-3 text-sm text-green-800">
+          <div className="print:hidden mb-6 bg-sage-50 border border-sage-200 rounded-lg px-4 py-3 text-sm text-sage-800">
             PO <span className="font-semibold">{po.poNumber}</span> created
             successfully.
           </div>
@@ -883,7 +883,7 @@ export default function PODetailPage() {
             </button>
             <button
               onClick={startEditing}
-              className="px-4 py-2 text-sm font-medium bg-green-50 text-green-700 border border-green-200 rounded-md hover:bg-green-100"
+              className="px-4 py-2 text-sm font-medium bg-sage-50 text-sage-700 border border-sage-200 rounded-md hover:bg-sage-100"
             >
               Edit
             </button>
@@ -1152,13 +1152,13 @@ export default function PODetailPage() {
                         <span
                           className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full ${
                             entry.actor === "Orchard AI"
-                              ? "bg-purple-50 text-purple-700"
+                              ? "bg-plum-50 text-plum-700"
                               : "bg-gray-100 text-gray-600"
                           }`}
                         >
                           <span
                             className={`w-1.5 h-1.5 rounded-full ${
-                              entry.actor === "Orchard AI" ? "bg-purple-500" : "bg-gray-400"
+                              entry.actor === "Orchard AI" ? "bg-plum-500" : "bg-gray-400"
                             }`}
                           />
                           {entry.actor}

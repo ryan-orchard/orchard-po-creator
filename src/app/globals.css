@@ -1,22 +1,131 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #faf8f5;
+  --foreground: #2c2c2c;
+
+  /* Orchard palette — inspired by warm, muted interiors */
+  --sidebar-bg: #3d4a3d;
+  --sidebar-bg-hover: #4a5a4a;
+  --sidebar-bg-active: #344234;
+  --sidebar-text: #c8c0b4;
+  --sidebar-text-active: #e8e2d8;
+  --sidebar-text-muted: #8a8278;
+  --sidebar-border: #4a5a4a;
+  --sidebar-section: #8a8278;
+
+  --accent-burgundy: #8b4049;
+  --accent-burgundy-light: #a85460;
+  --accent-gold: #b89b5e;
+  --accent-gold-light: #d4b87a;
+
+  --badge-bg: #6b3a3f;
+  --badge-text: #e8c8cb;
+
+  /* Semantic status colors — sage, gold, warm, burgundy */
+  --sage-50: #f2f5f2;
+  --sage-100: #dfe8df;
+  --sage-200: #c2d4c2;
+  --sage-500: #5c7a5c;
+  --sage-600: #4a6a4a;
+  --sage-700: #3d5a3d;
+  --sage-800: #2e4a2e;
+
+  --gold-50: #faf6ec;
+  --gold-100: #f0e6cc;
+  --gold-200: #e0d0a8;
+  --gold-400: #c4a854;
+  --gold-500: #b89b5e;
+  --gold-600: #9a8040;
+  --gold-700: #7a6530;
+  --gold-800: #5c4c22;
+  --gold-900: #3e3415;
+
+  --warm-50: #f8f4ed;
+  --warm-100: #ede4d0;
+  --warm-200: #ddd0b4;
+  --warm-600: #8a7545;
+  --warm-700: #6e5d38;
+  --warm-800: #544830;
+  --warm-900: #3a3020;
+
+  --burgundy-50: #f8f0f0;
+  --burgundy-100: #ecd8da;
+  --burgundy-200: #d8b8bc;
+  --burgundy-300: #b88088;
+  --burgundy-500: #8b4049;
+  --burgundy-600: #7c3238;
+  --burgundy-700: #6b2a30;
+  --burgundy-800: #5a2228;
+
+  --plum-50: #f2eff5;
+  --plum-100: #e0d8ea;
+  --plum-500: #6a5080;
+  --plum-700: #4a3060;
+  --plum-800: #3a2050;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-sidebar-bg: var(--sidebar-bg);
+  --color-sidebar-bg-hover: var(--sidebar-bg-hover);
+  --color-sidebar-bg-active: var(--sidebar-bg-active);
+  --color-sidebar-text: var(--sidebar-text);
+  --color-sidebar-text-active: var(--sidebar-text-active);
+  --color-sidebar-text-muted: var(--sidebar-text-muted);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-section: var(--sidebar-section);
+  --color-accent-burgundy: var(--accent-burgundy);
+  --color-accent-burgundy-light: var(--accent-burgundy-light);
+  --color-accent-gold: var(--accent-gold);
+  --color-accent-gold-light: var(--accent-gold-light);
+  --color-badge-bg: var(--badge-bg);
+  --color-badge-text: var(--badge-text);
+
+  --color-sage-50: var(--sage-50);
+  --color-sage-100: var(--sage-100);
+  --color-sage-200: var(--sage-200);
+  --color-sage-500: var(--sage-500);
+  --color-sage-600: var(--sage-600);
+  --color-sage-700: var(--sage-700);
+  --color-sage-800: var(--sage-800);
+
+  --color-gold-50: var(--gold-50);
+  --color-gold-100: var(--gold-100);
+  --color-gold-200: var(--gold-200);
+  --color-gold-400: var(--gold-400);
+  --color-gold-500: var(--gold-500);
+  --color-gold-600: var(--gold-600);
+  --color-gold-700: var(--gold-700);
+  --color-gold-800: var(--gold-800);
+  --color-gold-900: var(--gold-900);
+
+  --color-warm-50: var(--warm-50);
+  --color-warm-100: var(--warm-100);
+  --color-warm-200: var(--warm-200);
+  --color-warm-600: var(--warm-600);
+  --color-warm-700: var(--warm-700);
+  --color-warm-800: var(--warm-800);
+  --color-warm-900: var(--warm-900);
+
+  --color-burgundy-50: var(--burgundy-50);
+  --color-burgundy-100: var(--burgundy-100);
+  --color-burgundy-200: var(--burgundy-200);
+  --color-burgundy-300: var(--burgundy-300);
+  --color-burgundy-500: var(--burgundy-500);
+  --color-burgundy-600: var(--burgundy-600);
+  --color-burgundy-700: var(--burgundy-700);
+  --color-burgundy-800: var(--burgundy-800);
+
+  --color-plum-50: var(--plum-50);
+  --color-plum-100: var(--plum-100);
+  --color-plum-500: var(--plum-500);
+  --color-plum-700: var(--plum-700);
+  --color-plum-800: var(--plum-800);
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 button {

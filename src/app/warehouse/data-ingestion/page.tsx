@@ -202,9 +202,9 @@ export default function DataIngestionPage() {
   };
 
   const statusConfig = {
-    ready: { label: "Ready", color: "bg-green-100 text-green-800" },
-    unmapped: { label: "Unmapped SKU", color: "bg-red-100 text-red-800" },
-    resolved: { label: "Mapped", color: "bg-blue-100 text-blue-800" },
+    ready: { label: "Ready", color: "bg-sage-100 text-sage-800" },
+    unmapped: { label: "Unmapped SKU", color: "bg-burgundy-100 text-burgundy-800" },
+    resolved: { label: "Mapped", color: "bg-gold-100 text-gold-800" },
   };
 
   return (
@@ -462,7 +462,7 @@ export default function DataIngestionPage() {
                                   <span className="text-gray-400 italic text-xs">Non-inventory</span>
                                 ) : hasOverride ? (
                                   <div className="flex items-center gap-1">
-                                    <span className="font-mono text-blue-700 text-xs">{overrideItem?.standardSku}</span>
+                                    <span className="font-mono text-gold-700 text-xs">{overrideItem?.standardSku}</span>
                                     <button
                                       onClick={() => {
                                         setSkuOverrides((prev) => {
@@ -488,7 +488,7 @@ export default function DataIngestionPage() {
                                         }));
                                       }
                                     }}
-                                    className="text-xs border border-red-300 rounded px-1.5 py-1 w-full bg-red-50 text-red-700"
+                                    className="text-xs border border-burgundy-300 rounded px-1.5 py-1 w-full bg-red-50 text-red-700"
                                   >
                                     <option value="">Select SKU...</option>
                                     {result.availableItems.map((item) => (

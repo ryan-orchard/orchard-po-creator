@@ -348,7 +348,7 @@ export default function ReceiptsPage() {
                   placeholder="Search by order #, SKU, or PO..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  className="pl-9 pr-4 py-2 text-sm border border-gray-300 rounded-md w-72 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  className="pl-9 pr-4 py-2 text-sm border border-gray-300 rounded-md w-72 focus:outline-none focus:ring-2 focus:ring-gold-500 focus:border-gold-500"
                 />
                 {search && (
                   <button
@@ -505,7 +505,7 @@ function ReceiptLineRow({
       {/* Main row */}
       <tr
         className={`cursor-pointer transition-colors ${
-          isExpanded ? "bg-blue-50" : "hover:bg-gray-50"
+          isExpanded ? "bg-gold-50" : "hover:bg-gray-50"
         }`}
         onClick={onToggleExpand}
       >
@@ -529,7 +529,7 @@ function ReceiptLineRow({
         {/* Match To / Note */}
         <td className="px-4 py-3">
           {activeTab === "matched" && line.matchedPO ? (
-            <span className="font-medium text-green-700">
+            <span className="font-medium text-sage-700">
               {line.matchedPO.poNumber}
             </span>
           ) : activeTab === "excluded" ? (
@@ -543,7 +543,7 @@ function ReceiptLineRow({
               {line.suggestedMatch.poNumber}
             </span>
           ) : line.poOptions.length > 0 ? (
-            <span className="text-amber-600 font-medium text-xs">
+            <span className="text-warm-600 font-medium text-xs">
               Needs Review
             </span>
           ) : (
@@ -561,12 +561,12 @@ function ReceiptLineRow({
             </td>
             <td className="px-4 py-3 text-center w-28">
               {receivingStatus === "new" && (
-                <span className="px-2 py-0.5 text-[10px] font-medium rounded-full bg-green-100 text-green-700">
+                <span className="px-2 py-0.5 text-[10px] font-medium rounded-full bg-sage-100 text-sage-700">
                   Not received
                 </span>
               )}
               {receivingStatus === "partial" && (
-                <span className="px-2 py-0.5 text-[10px] font-medium rounded-full bg-amber-100 text-amber-700">
+                <span className="px-2 py-0.5 text-[10px] font-medium rounded-full bg-warm-100 text-warm-700">
                   Partial
                 </span>
               )}
@@ -586,7 +586,7 @@ function ReceiptLineRow({
                 );
               }}
               disabled={isConfirming}
-              className="bg-green-600 text-white px-4 py-1.5 text-xs font-semibold rounded hover:bg-green-700 disabled:opacity-50 transition-colors"
+              className="bg-sage-600 text-white px-4 py-1.5 text-xs font-semibold rounded hover:bg-sage-700 disabled:opacity-50 transition-colors"
             >
               {isConfirming ? "..." : "Confirm"}
             </button>
@@ -752,7 +752,7 @@ function ExpandedPOPanel({
               >
                 {po.poNumber}
                 {isSuggested && (
-                  <span className="ml-1 text-[10px] text-green-600">
+                  <span className="ml-1 text-[10px] text-sage-600">
                     Suggested
                   </span>
                 )}
@@ -773,8 +773,8 @@ function ExpandedPOPanel({
             <span
               className={`px-2 py-0.5 text-[10px] font-medium rounded-full ${
                 selectedPO.poStatus === "Issued"
-                  ? "bg-green-100 text-green-700"
-                  : "bg-amber-100 text-amber-700"
+                  ? "bg-sage-100 text-sage-700"
+                  : "bg-warm-100 text-warm-700"
               }`}
             >
               {selectedPO.poStatus}
@@ -822,7 +822,7 @@ function ExpandedPOPanel({
                     key={li.poLineItemId}
                     className={
                       isMatch
-                        ? "bg-blue-50/50"
+                        ? "bg-gold-50/50"
                         : "text-gray-400"
                     }
                   >
@@ -842,7 +842,7 @@ function ExpandedPOPanel({
                     </td>
                     <td className="px-4 py-2.5 text-right">
                       {li.qtyReceived > 0 ? (
-                        <span className="text-amber-600">
+                        <span className="text-warm-600">
                           {li.qtyReceived.toLocaleString()}
                         </span>
                       ) : (
@@ -862,10 +862,10 @@ function ExpandedPOPanel({
                           disabled={isConfirming}
                           className={`text-white px-4 py-1 text-xs font-semibold rounded transition-colors disabled:opacity-50 ${
                             qtyMatch
-                              ? "bg-green-600 hover:bg-green-700"
+                              ? "bg-green-600 hover:bg-sage-700"
                               : overReceipt
-                              ? "bg-amber-500 hover:bg-amber-600"
-                              : "bg-blue-600 hover:bg-blue-700"
+                              ? "bg-gold-500 hover:bg-gold-600"
+                              : "bg-gold-600 hover:bg-gold-700"
                           }`}
                         >
                           {isConfirming ? "..." : "Match"}
@@ -898,7 +898,7 @@ function ExpandedPOPanel({
               e.stopPropagation();
               setShowFlagForm(!showFlagForm);
             }}
-            className="text-xs text-amber-500 hover:text-amber-700"
+            className="text-xs text-warm-600 hover:text-warm-800"
           >
             Flag for client review
           </button>
@@ -921,7 +921,7 @@ function ExpandedPOPanel({
                 onFlagForReview(flagNote.trim());
               }
             }}
-            className="flex-1 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-amber-400"
+            className="flex-1 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gold-400 focus:border-gold-400"
             autoFocus
           />
           <button
@@ -929,7 +929,7 @@ function ExpandedPOPanel({
               if (flagNote.trim()) onFlagForReview(flagNote.trim());
             }}
             disabled={!flagNote.trim()}
-            className="bg-amber-500 text-white px-4 py-1.5 text-xs font-semibold rounded hover:bg-amber-600 disabled:opacity-50 transition-colors"
+            className="bg-gold-500 text-white px-4 py-1.5 text-xs font-semibold rounded hover:bg-gold-600 disabled:opacity-50 transition-colors"
           >
             Flag
           </button>
