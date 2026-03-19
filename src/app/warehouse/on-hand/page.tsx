@@ -50,11 +50,14 @@ export default function OnHandInventoryPage() {
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [showZero, setShowZero] = useState(false);
 
-  const fetchData = async () => {
+  const fetchData = async (forceRefresh = false) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/warehouse/on-hand");
+      const url = forceRefresh
+        ? "/api/warehouse/on-hand?refresh=1"
+        : "/api/warehouse/on-hand";
+      const res = await fetch(url);
       if (!res.ok) {
         const errData = await res.json();
         throw new Error(errData.error || "Failed to fetch inventory");
@@ -190,7 +193,7 @@ export default function OnHandInventoryPage() {
             </p>
           </div>
           <button
-            onClick={fetchData}
+            onClick={() => fetchData(true)}
             disabled={loading}
             className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
           >

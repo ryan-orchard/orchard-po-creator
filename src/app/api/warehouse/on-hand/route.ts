@@ -101,7 +101,19 @@ async function fetchAllFacilityBalances(
   return results;
 }
 
-export async function GET() {
+// Server-side cache: 24 hours
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+let cachedResponse: OnHandResponse | null = null;
+let cachedAt = 0;
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const forceRefresh = searchParams.get("refresh") === "1";
+
+  // Return cached data if fresh
+  if (!forceRefresh && cachedResponse && Date.now() - cachedAt < CACHE_TTL_MS) {
+    return NextResponse.json(cachedResponse);
+  }
   const apiKey = process.env.STORD_API_KEY;
   const orgId = process.env.STORD_ORG_ID;
   const networkId = process.env.STORD_NETWORK_ID;
@@ -193,6 +205,9 @@ export async function GET() {
       costEffectiveDate: "2026-02-28",
       fetchedAt: new Date().toISOString(),
     };
+
+    cachedResponse = response;
+    cachedAt = Date.now();
 
     return NextResponse.json(response);
   } catch (error) {
