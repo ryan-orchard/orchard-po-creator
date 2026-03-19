@@ -22,7 +22,7 @@ const NAV_SECTIONS = [
   {
     label: "WAREHOUSE",
     items: [
-      { name: "On-Hand Inventory", href: "/warehouse/on-hand", icon: CubeIcon, soon: true },
+      { name: "On-Hand Inventory", href: "/warehouse/on-hand", icon: CubeIcon },
       { name: "Work Orders", href: "/work-orders", icon: WrenchIcon, soon: true },
       { name: "Invoice Audit", href: "/invoice-audit", icon: ClipboardIcon, soon: true },
     ],
