@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Webhook } from "svix";
 import { getRecords, createRecord, createRecords, TABLES } from "@/lib/airtable";
+import { logActivity } from "@/lib/activity-log";
+import { attemptPOMatch } from "@/lib/po-matching";
 
 import skuMappingData from "@/../clients/magna/config/stord-sku-mapping.json";
 const SKU_MAPPING: Record<string, { standardSku: string; airtableId: string } | null> =
@@ -134,6 +136,30 @@ export async function POST(request: NextRequest) {
 
     if (lineItemRecords.length > 0) {
       await createRecords(TABLES.RECEIPT_LINES, lineItemRecords);
+    }
+
+    // Log activity against PO if we can resolve the order number
+    if (data.order?.order_number) {
+      const allPOs = await getRecords(TABLES.PURCHASE_ORDERS);
+      const poList = allPOs.map((p) => ({
+        id: p.id,
+        poNumber: (p.fields["PO Number"] as string) || "",
+      }));
+      const matchedPO = attemptPOMatch(data.order.order_number, poList);
+      if (matchedPO) {
+        const totalQty = data.receipt_confirmation_line_items.reduce(
+          (sum, item) => sum + (parseFloat(item.quantity) || 0),
+          0
+        );
+        logActivity({
+          poId: matchedPO.id,
+          action: "receipt_created",
+          description: `Receipt ${receiptNumber} received at ${facilityCode} — ${totalQty} units via Stord webhook`,
+          actor: "Orchard AI",
+          relatedRecordType: "receipt",
+          relatedRecordId: receipt.id,
+        });
+      }
     }
 
     console.log(`Created receipt ${receiptNumber} from webhook (${data.receipt_confirmation_id})`);

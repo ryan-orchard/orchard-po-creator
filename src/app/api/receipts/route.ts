@@ -6,6 +6,7 @@ import {
   createRecords,
   TABLES,
 } from "@/lib/airtable";
+import { logActivity } from "@/lib/activity-log";
 
 export async function GET() {
   // Fetch receipts with their line items
@@ -142,6 +143,17 @@ export async function POST(request: NextRequest) {
     );
 
     await createRecords(TABLES.RECEIPT_LINES, lineItemRecords);
+  }
+
+  if (body.purchaseOrderId) {
+    logActivity({
+      poId: body.purchaseOrderId,
+      action: "receipt_created",
+      description: `Receipt ${receiptNumber} created`,
+      actor: "Ryan Belanger",
+      relatedRecordType: "receipt",
+      relatedRecordId: receipt.id,
+    });
   }
 
   return NextResponse.json({ id: receipt.id, receiptNumber });

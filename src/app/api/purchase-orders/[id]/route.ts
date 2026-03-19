@@ -6,6 +6,7 @@ import {
   createRecords,
   TABLES,
 } from "@/lib/airtable";
+import { logActivity } from "@/lib/activity-log";
 
 export async function GET(
   _request: NextRequest,
@@ -166,6 +167,15 @@ export async function PUT(
       );
       await createRecords(TABLES.PO_LINE_ITEMS, lineItemRecords);
     }
+
+    logActivity({
+      poId: id,
+      action: "po_edited",
+      description: `Edited ${poNumber}`,
+      actor: "Ryan Belanger",
+      relatedRecordType: "po",
+      relatedRecordId: id,
+    });
 
     return NextResponse.json({ id, poNumber });
   } catch {

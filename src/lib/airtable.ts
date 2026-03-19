@@ -21,10 +21,12 @@ export const TABLES = {
   WAREHOUSES: "tblbqGnSNW73ERvtb",
   INVOICES: "tblsqhIIwY94HPW4j",
   INVOICE_LINES: "tblmVy4gKNijRTFEm",
+  ACTIVITY_LOG: "tbllLQCZQj16oc0zX",
 };
 
 export interface AirtableRecord {
   id: string;
+  createdTime?: string;
   fields: Record<string, unknown>;
 }
 

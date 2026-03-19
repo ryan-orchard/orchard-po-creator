@@ -5,6 +5,7 @@ import {
   createRecords,
   TABLES,
 } from "@/lib/airtable";
+import { logActivity } from "@/lib/activity-log";
 
 export async function GET() {
   try {
@@ -140,6 +141,23 @@ export async function POST(request: NextRequest) {
       );
 
       await createRecords(TABLES.INVOICE_LINES, lineRecords);
+    }
+
+    // Log activity if we can resolve the PO from the reference
+    if (body.poReference) {
+      const poRecords = await getRecords(TABLES.PURCHASE_ORDERS, {
+        filterByFormula: `{PO Number} = "${body.poReference}"`,
+      });
+      if (poRecords.length > 0) {
+        logActivity({
+          poId: poRecords[0].id,
+          action: "invoice_created",
+          description: `Invoice ${body.invoiceNumber} created — $${(body.invoiceAmount || 0).toLocaleString("en-US", { minimumFractionDigits: 2 })}`,
+          actor: "Ryan Belanger",
+          relatedRecordType: "invoice",
+          relatedRecordId: invoice.id,
+        });
+      }
     }
 
     return NextResponse.json({

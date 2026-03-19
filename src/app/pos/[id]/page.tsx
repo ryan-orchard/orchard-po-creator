@@ -54,6 +54,16 @@ interface PODetail {
   }[];
 }
 
+interface ActivityEntry {
+  id: string;
+  action: string;
+  description: string;
+  actor: string;
+  relatedRecordType: string | null;
+  relatedRecordId: string | null;
+  createdTime: string;
+}
+
 interface Supplier {
   id: string;
   name: string;
@@ -112,6 +122,9 @@ export default function PODetailPage() {
   const [error, setError] = useState(false);
   const justCreated = searchParams.get("created") === "1";
 
+  // Activity log
+  const [activities, setActivities] = useState<ActivityEntry[]>([]);
+
   // Status update
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [showStatusMenu, setShowStatusMenu] = useState(false);
@@ -151,6 +164,14 @@ export default function PODetailPage() {
         setError(true);
         setLoading(false);
       });
+  }, [params.id]);
+
+  // Fetch activity log
+  useEffect(() => {
+    fetch(`/api/purchase-orders/${params.id}/activity`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => setActivities(data))
+      .catch(() => setActivities([]));
   }, [params.id]);
 
   const loadRefData = () => {
@@ -378,6 +399,41 @@ export default function PODetailPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const formatRelativeTime = (dateStr: string) => {
+    if (!dateStr) return "";
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMin = Math.floor(diffMs / 60000);
+    const diffHr = Math.floor(diffMs / 3600000);
+    const diffDay = Math.floor(diffMs / 86400000);
+
+    if (diffMin < 1) return "Just now";
+    if (diffMin < 60) return `${diffMin}m ago`;
+    if (diffHr < 24) return `${diffHr}h ago`;
+    if (diffDay === 1) return "Yesterday";
+    if (diffDay < 7) return `${diffDay}d ago`;
+    return date.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: date.getFullYear() !== now.getFullYear() ? "numeric" : undefined,
+    });
+  };
+
+  const getActionDotColor = (action: string) => {
+    if (action.includes("matched")) return "bg-blue-500";
+    if (action.includes("status")) return "bg-gray-400";
+    if (action.includes("edited")) return "bg-gray-400";
+    return "bg-green-500"; // creates (po, shipment, receipt, invoice)
+  };
+
+  const getActionDotRing = (action: string) => {
+    if (action.includes("matched")) return "ring-blue-100";
+    if (action.includes("status")) return "ring-gray-200";
+    if (action.includes("edited")) return "ring-gray-200";
+    return "ring-green-100";
   };
 
   if (loading) {
@@ -1059,6 +1115,65 @@ export default function PODetailPage() {
             </div>
           </div>
         </div>
+
+        {/* Activity Timeline — not shown in print */}
+        {activities.length > 0 && (
+          <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6 print:hidden">
+            <div className="flex items-center gap-2 mb-5">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="text-gray-500">
+                <path d="M8 1.5a6.5 6.5 0 100 13 6.5 6.5 0 000-13zM0 8a8 8 0 1116 0A8 8 0 010 8z" fill="currentColor" fillOpacity="0.4"/>
+                <path d="M8 4a.75.75 0 01.75.75v3.5h2.5a.75.75 0 010 1.5h-3.25a.75.75 0 01-.75-.75v-4.25A.75.75 0 018 4z" fill="currentColor" fillOpacity="0.6"/>
+              </svg>
+              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                Activity
+              </span>
+              <span className="text-[10px] font-semibold text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded-full">
+                {activities.length}
+              </span>
+            </div>
+
+            <div className="relative pl-7">
+              {/* Vertical line */}
+              <div className="absolute left-[7px] top-1 bottom-1 w-0.5 bg-gray-200 rounded-full" />
+
+              {activities.map((entry, idx) => (
+                <div key={entry.id} className={`relative ${idx < activities.length - 1 ? "pb-5" : ""}`}>
+                  {/* Dot */}
+                  <div
+                    className={`absolute -left-7 top-0.5 w-4 h-4 rounded-full ring-2 ring-offset-1 ${getActionDotColor(entry.action)} ${getActionDotRing(entry.action)}`}
+                  />
+
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm text-gray-900 leading-relaxed">
+                        {entry.description}
+                      </p>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span
+                          className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full ${
+                            entry.actor === "Orchard AI"
+                              ? "bg-purple-50 text-purple-700"
+                              : "bg-gray-100 text-gray-600"
+                          }`}
+                        >
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full ${
+                              entry.actor === "Orchard AI" ? "bg-purple-500" : "bg-gray-400"
+                            }`}
+                          />
+                          {entry.actor}
+                        </span>
+                      </div>
+                    </div>
+                    <span className="text-xs text-gray-400 whitespace-nowrap flex-shrink-0 pt-0.5">
+                      {formatRelativeTime(entry.createdTime)}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -5,6 +5,7 @@ import {
   createRecords,
   TABLES,
 } from "@/lib/airtable";
+import { logActivity } from "@/lib/activity-log";
 
 export async function GET() {
   const records = await getRecords(TABLES.SHIPMENTS, {
@@ -73,6 +74,15 @@ export async function POST(request: NextRequest) {
 
     await createRecords(TABLES.SHIPMENT_LINES, lineItemRecords);
   }
+
+  logActivity({
+    poId: body.purchaseOrderId,
+    action: "shipment_created",
+    description: `Shipment ${shipmentNumber} created`,
+    actor: "Ryan Belanger",
+    relatedRecordType: "shipment",
+    relatedRecordId: shipment.id,
+  });
 
   return NextResponse.json({ id: shipment.id, shipmentNumber });
 }

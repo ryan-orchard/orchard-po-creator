@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRecord, getRecords, updateRecord, TABLES } from "@/lib/airtable";
+import { logActivity } from "@/lib/activity-log";
 
 /**
  * PATCH /api/invoices/[id]/match
@@ -85,6 +86,18 @@ export async function PATCH(
     await updateRecord(TABLES.INVOICES, invoiceId, {
       "Purchase Order": [receiptPOLink],
       "Match Status": matchStatus,
+    });
+
+    // Get invoice number for the log
+    const invoiceRecord = await getRecord(TABLES.INVOICES, invoiceId);
+    const invoiceNumber = (invoiceRecord?.fields["Invoice Number"] as string) || invoiceId;
+    logActivity({
+      poId: receiptPOLink,
+      action: "invoice_matched",
+      description: `Invoice ${invoiceNumber} ${matchStatus === "Discrepancy" ? "matched with discrepancy" : "matched"}`,
+      actor: "Ryan Belanger",
+      relatedRecordType: "invoice",
+      relatedRecordId: invoiceId,
     });
 
     return NextResponse.json({

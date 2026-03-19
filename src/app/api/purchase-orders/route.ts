@@ -5,6 +5,7 @@ import {
   createRecords,
   TABLES,
 } from "@/lib/airtable";
+import { logActivity } from "@/lib/activity-log";
 
 export async function GET() {
   const records = await getRecords(TABLES.PURCHASE_ORDERS, {
@@ -90,6 +91,15 @@ export async function POST(request: NextRequest) {
 
     await createRecords(TABLES.PO_LINE_ITEMS, lineItemRecords);
   }
+
+  logActivity({
+    poId: po.id,
+    action: "po_created",
+    description: `Created ${poNumber}`,
+    actor: "Ryan Belanger",
+    relatedRecordType: "po",
+    relatedRecordId: po.id,
+  });
 
   return NextResponse.json({ id: po.id, poNumber });
 }

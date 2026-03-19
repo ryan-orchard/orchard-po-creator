@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRecord, getRecords, updateRecord, TABLES } from "@/lib/airtable";
+import { logActivity } from "@/lib/activity-log";
 
 /**
  * PATCH /api/receipts/[id]/match
@@ -164,6 +165,18 @@ export async function PATCH(
         });
       }
     }
+
+    // Log receipt matched activity
+    const receiptRecord = await getRecord(TABLES.RECEIPTS, receiptId);
+    const receiptNumber = (receiptRecord?.fields["Receipt Number"] as string) || receiptId;
+    logActivity({
+      poId: purchaseOrderId,
+      action: "receipt_matched",
+      description: `Receipt ${receiptNumber} matched`,
+      actor: "Ryan Belanger",
+      relatedRecordType: "receipt",
+      relatedRecordId: receiptId,
+    });
 
     return NextResponse.json({
       success: true,
