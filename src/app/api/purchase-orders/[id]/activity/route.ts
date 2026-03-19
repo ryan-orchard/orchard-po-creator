@@ -14,7 +14,7 @@ export async function GET(
 
   try {
     const records = await getRecords(TABLES.ACTIVITY_LOG, {
-      filterByFormula: `FIND("${id}", ARRAYJOIN({Purchase Order}))`,
+      filterByFormula: `{PO Record ID} = "${id}"`,
     });
 
     const activities = records

@@ -17,6 +17,7 @@ export function logActivity(params: LogActivityParams): void {
   const fields: Record<string, unknown> = {
     Description: params.description,
     "Purchase Order": [params.poId],
+    "PO Record ID": params.poId,
     Action: params.action,
     Actor: params.actor,
   };
