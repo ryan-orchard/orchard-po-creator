@@ -154,15 +154,11 @@ function buildComparison(
     }
   }
 
-  // Collect all SKU names
-  const allSkus = new Set([
-    ...Object.keys(invoiceBySkuName),
-    ...Object.keys(poBySkuName),
-    ...Object.keys(receiptBySkuName),
-  ]);
+  // Only show SKUs from the invoice — it's the anchor document
+  const invoiceSkus = Object.keys(invoiceBySkuName);
 
   // Build comparison rows
-  return [...allSkus].sort().map((skuName) => {
+  return invoiceSkus.map((skuName) => {
     const inv = invoiceBySkuName[skuName];
     const poLine = poBySkuName[skuName];
     const rec = receiptBySkuName[skuName];
