@@ -19,6 +19,7 @@ interface InvoiceMatch {
   id: string;
   invoiceNumber: string;
   invoiceDate: string;
+  supplier: string;
   poReference: string;
   invoiceAmount: number;
   matchStatus: "open" | "matched" | "discrepancy";
@@ -43,7 +44,10 @@ interface InvoiceMatch {
   flags: string[];
 }
 
-type Tab = "open" | "matched" | "discrepancy";
+type Tab = "open" | "matched" | "discrepancy" | "paid";
+
+type SortKey = "invoiceNumber" | "invoiceDate" | "poReference" | "invoiceAmount" | "paymentStatus";
+type SortDir = "asc" | "desc";
 
 // --- Helpers ---
 
@@ -61,6 +65,12 @@ function formatCurrency(n: number) {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 }
 
+const paymentStatusColors: Record<string, string> = {
+  Unpaid: "bg-gray-100 text-gray-600",
+  Paid: "bg-green-100 text-green-700",
+  Disputed: "bg-orange-100 text-orange-700",
+};
+
 // --- Main Page ---
 
 export default function InvoicesPage() {
@@ -76,6 +86,8 @@ export default function InvoicesPage() {
   const [search, setSearch] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [unmatching, setUnmatching] = useState<string | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey>("invoiceDate");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
 
   const fetchData = useCallback(async () => {
     try {
@@ -95,7 +107,16 @@ export default function InvoicesPage() {
   }, [fetchData]);
 
   const filteredInvoices = useMemo(() => {
-    let result = invoices.filter((i) => i.matchStatus === activeTab);
+    let result: InvoiceMatch[];
+    if (activeTab === "paid") {
+      result = invoices.filter((i) => i.paymentStatus === "Paid");
+    } else if (activeTab === "open") {
+      result = invoices.filter(
+        (i) => i.matchStatus === "open" && i.paymentStatus !== "Paid"
+      );
+    } else {
+      result = invoices.filter((i) => i.matchStatus === activeTab);
+    }
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       result = result.filter(
@@ -107,8 +128,78 @@ export default function InvoicesPage() {
           i.suggestedReceipt?.receiptNumber.toLowerCase().includes(q)
       );
     }
+    // Sort
+    result.sort((a, b) => {
+      let cmp = 0;
+      switch (sortKey) {
+        case "invoiceNumber":
+          cmp = a.invoiceNumber.localeCompare(b.invoiceNumber);
+          break;
+        case "invoiceDate":
+          cmp = a.invoiceDate.localeCompare(b.invoiceDate);
+          break;
+        case "poReference":
+          cmp = (a.poReference || "").localeCompare(b.poReference || "");
+          break;
+        case "invoiceAmount":
+          cmp = a.invoiceAmount - b.invoiceAmount;
+          break;
+        case "paymentStatus":
+          cmp = (a.paymentStatus || "").localeCompare(b.paymentStatus || "");
+          break;
+      }
+      return sortDir === "asc" ? cmp : -cmp;
+    });
     return result;
-  }, [invoices, activeTab, search]);
+  }, [invoices, activeTab, search, sortKey, sortDir]);
+
+  // Summary stats
+  const summaryStats = useMemo(() => {
+    const unpaidInvoices = invoices.filter((i) => i.paymentStatus !== "Paid");
+    const totalUnpaid = unpaidInvoices.reduce(
+      (sum, i) => sum + i.invoiceAmount,
+      0
+    );
+    const readyToPay = unpaidInvoices.filter(
+      (i) => i.matchStatus === "matched"
+    );
+    const totalReadyToPay = readyToPay.reduce(
+      (sum, i) => sum + i.invoiceAmount,
+      0
+    );
+    const needsReview = invoices.filter(
+      (i) =>
+        i.matchStatus === "discrepancy" ||
+        (i.matchStatus === "open" && i.paymentStatus !== "Paid")
+    );
+    const totalNeedsReview = needsReview.reduce(
+      (sum, i) => sum + i.invoiceAmount,
+      0
+    );
+    return { totalUnpaid, totalReadyToPay, totalNeedsReview };
+  }, [invoices]);
+
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir(sortDir === "asc" ? "desc" : "asc");
+    } else {
+      setSortKey(key);
+      setSortDir(key === "invoiceAmount" ? "desc" : "asc");
+    }
+  };
+
+  const paidCount = useMemo(
+    () => invoices.filter((i) => i.paymentStatus === "Paid").length,
+    [invoices]
+  );
+
+  const openCount = useMemo(
+    () =>
+      invoices.filter(
+        (i) => i.matchStatus === "open" && i.paymentStatus !== "Paid"
+      ).length,
+    [invoices]
+  );
 
   const handleUnmatch = async (invoiceId: string) => {
     setUnmatching(invoiceId);
@@ -130,8 +221,8 @@ export default function InvoicesPage() {
   };
 
   const handleRowClick = (invoice: InvoiceMatch) => {
-    if (activeTab === "matched") {
-      // Toggle inline expansion for matched invoices
+    if (activeTab === "matched" || activeTab === "paid") {
+      // Toggle inline expansion for matched/paid invoices
       setExpandedId(expandedId === invoice.id ? null : invoice.id);
     } else {
       // Navigate to three-panel match view for open and discrepancy
@@ -140,9 +231,10 @@ export default function InvoicesPage() {
   };
 
   const tabs: { key: Tab; label: string; count: number }[] = [
-    { key: "open", label: "Open", count: counts.open },
+    { key: "open", label: "Open", count: openCount },
     { key: "matched", label: "Matched", count: counts.matched },
     { key: "discrepancy", label: "Discrepancy", count: counts.discrepancy },
+    { key: "paid", label: "Paid", count: paidCount },
   ];
 
   return (
@@ -163,6 +255,36 @@ export default function InvoicesPage() {
             + Import Invoice
           </button>
         </div>
+
+        {/* Summary Cards */}
+        {!loading && invoices.length > 0 && (
+          <div className="grid grid-cols-3 gap-4 mb-6">
+            <div className="bg-white rounded-lg border border-gray-200 px-5 py-4">
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Total Unpaid
+              </p>
+              <p className="text-2xl font-bold text-gray-900 mt-1">
+                {formatCurrency(summaryStats.totalUnpaid)}
+              </p>
+            </div>
+            <div className="bg-white rounded-lg border border-gray-200 px-5 py-4">
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Ready to Pay
+              </p>
+              <p className="text-2xl font-bold text-green-700 mt-1">
+                {formatCurrency(summaryStats.totalReadyToPay)}
+              </p>
+            </div>
+            <div className="bg-white rounded-lg border border-gray-200 px-5 py-4">
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Needs Review
+              </p>
+              <p className="text-2xl font-bold text-amber-600 mt-1">
+                {formatCurrency(summaryStats.totalNeedsReview)}
+              </p>
+            </div>
+          </div>
+        )}
 
         {loading ? (
           <p className="text-gray-500">Loading...</p>
@@ -260,24 +382,15 @@ export default function InvoicesPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200">
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                      Invoice #
+                    <SortableHeader label="Invoice #" sortKey="invoiceNumber" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[18%]" />
+                    <SortableHeader label="Date" sortKey="invoiceDate" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[10%]" />
+                    <SortableHeader label="PO Ref" sortKey="poReference" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[14%]" />
+                    <SortableHeader label="Amount" sortKey="invoiceAmount" currentKey={sortKey} dir={sortDir} onSort={handleSort} align="right" className="w-[14%]" />
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-[18%]">
+                      Review Status
                     </th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-20">
-                      Date
-                    </th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                      PO Ref
-                    </th>
-                    <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-28">
-                      Amount
-                    </th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                      {activeTab === "matched" || activeTab === "discrepancy"
-                        ? "Receipt"
-                        : "Status"}
-                    </th>
-                    <th className="px-4 py-3 w-28"></th>
+                    <SortableHeader label="Payment" sortKey="paymentStatus" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[12%]" />
+                    <th className="px-4 py-3 w-[14%]"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -308,6 +421,8 @@ export default function InvoicesPage() {
                     ? "All invoices have been actioned!"
                     : activeTab === "discrepancy"
                     ? "No invoices with discrepancies."
+                    : activeTab === "paid"
+                    ? "No paid invoices yet."
                     : "No matched invoices yet."}
                 </div>
               )}
@@ -347,26 +462,26 @@ function InvoiceRow({
         onClick={onClick}
       >
         <td className="px-4 py-3">
-          <span className="font-mono font-medium text-gray-900">
+          <div className="font-medium text-gray-900">
             {invoice.invoiceNumber}
-          </span>
-          <span className="text-xs text-gray-400 ml-2">
-            {invoice.lineCount} line{invoice.lineCount !== 1 ? "s" : ""}
-          </span>
+          </div>
+          {invoice.supplier && (
+            <div className="text-xs text-gray-400">{invoice.supplier}</div>
+          )}
         </td>
-        <td className="px-4 py-3 text-gray-600 w-20">
+        <td className="px-4 py-3 text-gray-600">
           {formatDate(invoice.invoiceDate)}
         </td>
         <td className="px-4 py-3">
           {invoice.poReference ? (
-            <span className="font-mono text-xs text-gray-700">
+            <span className="text-gray-700">
               {invoice.poReference}
             </span>
           ) : (
             <span className="text-gray-300 text-xs">No ref</span>
           )}
         </td>
-        <td className="px-4 py-3 text-right font-mono font-medium text-gray-900 w-28">
+        <td className="px-4 py-3 text-right font-medium text-gray-900">
           {formatCurrency(invoice.invoiceAmount)}
         </td>
 
@@ -394,8 +509,24 @@ function InvoiceRow({
           )}
         </td>
 
+        {/* Payment Status */}
+        <td className="px-4 py-3">
+          {invoice.paymentStatus ? (
+            <span
+              className={`px-2 py-0.5 rounded text-xs font-medium ${
+                paymentStatusColors[invoice.paymentStatus] ||
+                "bg-gray-100 text-gray-600"
+              }`}
+            >
+              {invoice.paymentStatus}
+            </span>
+          ) : (
+            <span className="text-gray-300 text-xs">&mdash;</span>
+          )}
+        </td>
+
         {/* Action */}
-        <td className="px-4 py-3 text-right w-28">
+        <td className="px-4 py-3 text-right">
           {activeTab === "open" && (
             <span className="text-xs text-blue-600 font-medium">
               Review &rarr;
@@ -418,13 +549,16 @@ function InvoiceRow({
               {isUnmatching ? "..." : "Unmatch"}
             </button>
           )}
+          {activeTab === "paid" && (
+            <span className="text-xs text-gray-400">Paid</span>
+          )}
         </td>
       </tr>
 
       {/* Expanded panel — Matched tab only (read-only comparison) */}
       {isExpanded && activeTab === "matched" && invoice.comparison && (
         <tr>
-          <td colSpan={6} className="p-0">
+          <td colSpan={7} className="p-0">
             <div className="bg-gray-50 border-t border-gray-200 px-6 py-5">
               <div className="flex justify-between items-center mb-3">
                 <div className="flex items-center gap-3">
@@ -467,6 +601,43 @@ function InvoiceRow({
   );
 }
 
+// --- Sortable Header ---
+
+function SortableHeader({
+  label,
+  sortKey,
+  currentKey,
+  dir,
+  onSort,
+  align = "left",
+  className = "",
+}: {
+  label: string;
+  sortKey: SortKey;
+  currentKey: SortKey;
+  dir: SortDir;
+  onSort: (key: SortKey) => void;
+  align?: "left" | "right";
+  className?: string;
+}) {
+  const isActive = currentKey === sortKey;
+  return (
+    <th
+      className={`text-${align} px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700 select-none ${className}`}
+      onClick={() => onSort(sortKey)}
+    >
+      <span className="inline-flex items-center gap-1">
+        {label}
+        {isActive && (
+          <span className="text-gray-400">
+            {dir === "asc" ? "\u2191" : "\u2193"}
+          </span>
+        )}
+      </span>
+    </th>
+  );
+}
+
 // --- Comparison Table (read-only, for matched inline expansion) ---
 
 function ComparisonTable({ lines }: { lines: ComparisonLine[] }) {
@@ -501,14 +672,14 @@ function ComparisonTable({ lines }: { lines: ComparisonLine[] }) {
         {lines.map((line, idx) => (
           <tr key={idx}>
             <td className="px-4 py-2.5">
-              <span className="font-mono text-xs font-medium text-gray-900">
+              <span className="text-xs font-medium text-gray-900">
                 {line.skuName}
               </span>
             </td>
-            <td className="px-4 py-2.5 text-right font-mono text-gray-900">
+            <td className="px-4 py-2.5 text-right text-gray-900">
               {line.invoiceQty.toLocaleString()}
             </td>
-            <td className="px-4 py-2.5 text-right font-mono text-gray-600">
+            <td className="px-4 py-2.5 text-right text-gray-600">
               {line.receiptQty > 0 ? (
                 line.receiptQty.toLocaleString()
               ) : (
@@ -521,16 +692,16 @@ function ComparisonTable({ lines }: { lines: ComparisonLine[] }) {
                   &#10003;
                 </span>
               ) : (
-                <span className="text-amber-600 font-mono text-xs font-medium">
+                <span className="text-amber-600 text-xs font-medium">
                   {line.invoiceQty - line.receiptQty > 0 ? "+" : ""}
                   {(line.invoiceQty - line.receiptQty).toLocaleString()}
                 </span>
               )}
             </td>
-            <td className="px-4 py-2.5 text-right font-mono text-gray-900 text-xs">
+            <td className="px-4 py-2.5 text-right text-gray-900 text-xs">
               {formatCurrency(line.invoiceUnitCost)}
             </td>
-            <td className="px-4 py-2.5 text-right font-mono text-gray-600 text-xs">
+            <td className="px-4 py-2.5 text-right text-gray-600 text-xs">
               {line.poUnitCost > 0 ? (
                 formatCurrency(line.poUnitCost)
               ) : (
@@ -545,7 +716,7 @@ function ComparisonTable({ lines }: { lines: ComparisonLine[] }) {
                   &#10003;
                 </span>
               ) : (
-                <span className="text-amber-600 font-mono text-xs font-medium">
+                <span className="text-amber-600 text-xs font-medium">
                   $
                   {Math.abs(line.invoiceUnitCost - line.poUnitCost).toFixed(2)}
                 </span>

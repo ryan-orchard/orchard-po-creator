@@ -27,6 +27,7 @@ export async function GET() {
       allReceipts,
       allReceiptLines,
       allItems,
+      allSuppliers,
     ] = await Promise.all([
       getRecords(TABLES.INVOICES, {
         sort: [{ field: "Invoice Date", direction: "desc" }],
@@ -39,6 +40,7 @@ export async function GET() {
       getRecords(TABLES.RECEIPTS),
       getRecords(TABLES.RECEIPT_LINES),
       getRecords(TABLES.SKUS),
+      getRecords(TABLES.SUPPLIERS),
     ]);
 
     // 2. Build lookup maps
@@ -57,6 +59,12 @@ export async function GET() {
         uom: (item.fields["UOM"] as string) || "Each",
         sticksPerCarton: (item.fields["Sticks per Carton"] as number) || null,
       };
+    }
+
+    // Suppliers
+    const supplierMap: Record<string, string> = {};
+    for (const s of allSuppliers) {
+      supplierMap[s.id] = (s.fields["Supplier Name"] as string) || "";
     }
 
     // POs
@@ -229,6 +237,7 @@ export async function GET() {
       id: string;
       invoiceNumber: string;
       invoiceDate: string;
+      supplier: string;
       poReference: string;
       invoiceAmount: number;
       matchStatus: "open" | "matched" | "discrepancy";
@@ -389,10 +398,13 @@ export async function GET() {
         }
       }
 
+      const supplierId = (inv.fields["Supplier"] as string[] | undefined)?.[0];
+
       invoices.push({
         id: inv.id,
         invoiceNumber: (inv.fields["Invoice Number"] as string) || "",
         invoiceDate: (inv.fields["Invoice Date"] as string) || "",
+        supplier: supplierId ? supplierMap[supplierId] || "" : "",
         poReference,
         invoiceAmount: (inv.fields["Total Amount"] as number) || 0,
         matchStatus,
