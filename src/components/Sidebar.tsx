@@ -181,11 +181,12 @@ export default function Sidebar() {
                 const isSoon = "soon" in item && item.soon;
                 const Icon = item.icon;
                 const staticBadge = "badge" in item ? (item.badge as number) : undefined;
-                const badge = item.href === "/receipts"
+                const rawBadge = item.href === "/receipts"
                   ? (unmatchedReceiptCount ?? staticBadge)
                   : item.href === "/invoices"
                   ? (unmatchedInvoiceCount ?? staticBadge)
                   : staticBadge;
+                const badge = rawBadge && rawBadge > 0 ? rawBadge : undefined;
 
                 if (isSoon) {
                   return (

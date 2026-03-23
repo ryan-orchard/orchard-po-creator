@@ -42,7 +42,7 @@ export async function PATCH(
       );
     }
 
-    // 1. Link receipt lines to PO line items (line level)
+    // 1. Link receipt lines to PO line items and set Match Status
     if (lineMatches && lineMatches.length > 0) {
       await Promise.all(
         lineMatches
@@ -50,6 +50,7 @@ export async function PATCH(
           .map((m) =>
             updateRecord(TABLES.RECEIPT_LINES, m.receiptLineId, {
               "PO Line Item": [m.poLineItemId],
+              "Match Status": "Matched",
             })
           )
       );
