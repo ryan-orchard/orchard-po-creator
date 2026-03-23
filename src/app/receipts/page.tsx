@@ -26,11 +26,30 @@ interface POOption {
   lineItems: POOptionLineItem[];
 }
 
+interface WOOptionLineItem {
+  woLineItemId: string;
+  sku: string;
+  skuId: string;
+  qty: number;
+  qtyReceived: number;
+  qtyRemaining: number;
+  isMatchable: boolean;
+}
+
+interface WOOption {
+  woId: string;
+  woNumber: string;
+  woStatus: string;
+  description: string;
+  lineItems: WOOptionLineItem[];
+}
+
 interface SuggestedMatch {
-  poId: string;
-  poNumber: string;
-  poLineItemId: string;
-  poQty: number;
+  type: "po" | "wo";
+  sourceId: string;
+  sourceNumber: string;
+  lineItemId: string;
+  qty: number;
   hasPartialReceipts: boolean;
 }
 
@@ -52,7 +71,13 @@ interface MatchingLine {
     poNumber: string;
     poLineItemId: string;
   } | null;
+  matchedWO: {
+    woId: string;
+    woNumber: string;
+    woLineItemId: string;
+  } | null;
   poOptions: POOption[];
+  woOptions: WOOption[];
 }
 
 type Tab = "open" | "review" | "matched" | "excluded";
@@ -149,8 +174,9 @@ export default function ReceiptsPage() {
           l.receiptNumber?.toLowerCase().includes(q) ||
           l.sku?.toLowerCase().includes(q) ||
           l.threePlSku?.toLowerCase().includes(q) ||
-          l.suggestedMatch?.poNumber?.toLowerCase().includes(q) ||
-          l.matchedPO?.poNumber?.toLowerCase().includes(q)
+          l.suggestedMatch?.sourceNumber?.toLowerCase().includes(q) ||
+          l.matchedPO?.poNumber?.toLowerCase().includes(q) ||
+          l.matchedWO?.woNumber?.toLowerCase().includes(q)
       );
     }
     return result;
@@ -158,20 +184,27 @@ export default function ReceiptsPage() {
 
   const handleConfirm = async (
     line: MatchingLine,
-    poId: string,
-    poLineItemId: string
+    sourceId: string,
+    lineItemId: string,
+    sourceType: "po" | "wo" = "po"
   ) => {
     setConfirming(line.id);
     try {
+      const matchBody =
+        sourceType === "wo"
+          ? {
+              workOrderId: sourceId,
+              lineMatches: [{ receiptLineId: line.id, woLineItemId: lineItemId }],
+            }
+          : {
+              purchaseOrderId: sourceId,
+              lineMatches: [{ receiptLineId: line.id, poLineItemId: lineItemId }],
+            };
+
       const res = await fetch(`/api/receipts/${line.receiptId}/match`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          purchaseOrderId: poId,
-          lineMatches: [
-            { receiptLineId: line.id, poLineItemId },
-          ],
-        }),
+        body: JSON.stringify(matchBody),
       });
       if (!res.ok) {
         const err = await res.json();
@@ -476,8 +509,8 @@ export default function ReceiptsPage() {
                           expandedLineId === line.id ? null : line.id
                         )
                       }
-                      onConfirm={(poId, poLineItemId) =>
-                        handleConfirm(line, poId, poLineItemId)
+                      onConfirm={(sourceId, lineItemId, sourceType) =>
+                        handleConfirm(line, sourceId, lineItemId, sourceType)
                       }
                       onExclude={() => handleExclude(line.id)}
                       onRestore={() => handleRestore(line.id)}
@@ -536,7 +569,7 @@ function ReceiptLineRow({
   isExcluding: boolean;
   activeTab: Tab;
   onToggleExpand: () => void;
-  onConfirm: (poId: string, poLineItemId: string) => void;
+  onConfirm: (sourceId: string, lineItemId: string, sourceType?: "po" | "wo") => void;
   onExclude: () => void;
   onRestore: () => void;
   isUnmatching: boolean;
@@ -544,7 +577,7 @@ function ReceiptLineRow({
   onFlagForReview: (note: string) => void;
   onResolve: () => void;
 }) {
-  // Determine receiving status for the suggested PO
+  // Determine receiving status for the suggested match
   const receivingStatus = useMemo(() => {
     if (!line.suggestedMatch) return null;
     if (line.suggestedMatch.hasPartialReceipts) return "partial";
@@ -579,9 +612,9 @@ function ReceiptLineRow({
 
         {/* Match To / Note */}
         <td className="px-4 py-3">
-          {activeTab === "matched" && line.matchedPO ? (
+          {activeTab === "matched" && (line.matchedPO || line.matchedWO) ? (
             <span className="font-medium text-sage-700">
-              {line.matchedPO.poNumber}
+              {line.matchedPO?.poNumber || line.matchedWO?.woNumber}
             </span>
           ) : activeTab === "excluded" ? (
             <span className="text-gray-400 italic text-xs">Excluded</span>
@@ -591,9 +624,9 @@ function ReceiptLineRow({
             </span>
           ) : line.suggestedMatch ? (
             <span className="font-medium text-gray-900">
-              {line.suggestedMatch.poNumber}
+              {line.suggestedMatch.sourceNumber}
             </span>
-          ) : line.poOptions.length > 0 ? (
+          ) : (line.poOptions.length > 0 || line.woOptions.length > 0) ? (
             <span className="text-warm-600 font-medium text-xs">
               Needs Review
             </span>
@@ -607,7 +640,7 @@ function ReceiptLineRow({
           <>
             <td className="px-4 py-3 text-right text-gray-600 w-24">
               {line.suggestedMatch
-                ? line.suggestedMatch.poQty.toLocaleString()
+                ? line.suggestedMatch.qty.toLocaleString()
                 : ""}
             </td>
             <td className="px-4 py-3 text-center w-28">
@@ -632,8 +665,9 @@ function ReceiptLineRow({
               onClick={(e) => {
                 e.stopPropagation();
                 onConfirm(
-                  line.suggestedMatch!.poId,
-                  line.suggestedMatch!.poLineItemId
+                  line.suggestedMatch!.sourceId,
+                  line.suggestedMatch!.lineItemId,
+                  line.suggestedMatch!.type
                 );
               }}
               disabled={isConfirming}
@@ -679,10 +713,11 @@ function ReceiptLineRow({
           )}
           {activeTab === "open" &&
             !line.suggestedMatch &&
-            line.poOptions.length > 0 && (
+            (line.poOptions.length > 0 || line.woOptions.length > 0) && (
               <span className="text-xs text-gray-400">
-                {line.poOptions.length} PO
-                {line.poOptions.length !== 1 ? "s" : ""}
+                {line.poOptions.length > 0 && `${line.poOptions.length} PO${line.poOptions.length !== 1 ? "s" : ""}`}
+                {line.poOptions.length > 0 && line.woOptions.length > 0 && ", "}
+                {line.woOptions.length > 0 && `${line.woOptions.length} WO${line.woOptions.length !== 1 ? "s" : ""}`}
               </span>
             )}
         </td>
@@ -722,25 +757,38 @@ function ExpandedPOPanel({
   line: MatchingLine;
   isConfirming: boolean;
   isExcluding: boolean;
-  onConfirm: (poId: string, poLineItemId: string) => void;
+  onConfirm: (sourceId: string, lineItemId: string, sourceType?: "po" | "wo") => void;
   onExclude: () => void;
   onFlagForReview: (note: string) => void;
   onClose: () => void;
 }) {
+  // Determine initial selection: suggested match, first PO, or first WO
+  const initialSourceType: "po" | "wo" =
+    line.suggestedMatch?.type || (line.poOptions.length > 0 ? "po" : "wo");
+  const initialSourceId =
+    line.suggestedMatch?.sourceId ||
+    (initialSourceType === "po" ? line.poOptions[0]?.poId : line.woOptions[0]?.woId) ||
+    "";
+
+  const [selectedSourceType, setSelectedSourceType] = useState<"po" | "wo">(initialSourceType);
   const [selectedPOId, setSelectedPOId] = useState<string>(
-    line.suggestedMatch?.poId || line.poOptions[0]?.poId || ""
+    initialSourceType === "po" ? initialSourceId : line.poOptions[0]?.poId || ""
+  );
+  const [selectedWOId, setSelectedWOId] = useState<string>(
+    initialSourceType === "wo" ? initialSourceId : line.woOptions[0]?.woId || ""
   );
   const [showFlagForm, setShowFlagForm] = useState(false);
   const [flagNote, setFlagNote] = useState("");
 
   const selectedPO = line.poOptions.find((o) => o.poId === selectedPOId);
+  const selectedWO = line.woOptions.find((o) => o.woId === selectedWOId);
 
-  if (line.poOptions.length === 0) {
+  if (line.poOptions.length === 0 && line.woOptions.length === 0) {
     return (
       <div className="bg-gray-50 border-t border-gray-200 px-6 py-6">
         <div className="flex items-center justify-between mb-3">
           <p className="text-sm text-gray-500">
-            No open Purchase Orders found with{" "}
+            No matching POs or WOs found with{" "}
             <span className="font-medium text-gray-700">{line.sku}</span>.
           </p>
           <button
@@ -831,12 +879,38 @@ function ExpandedPOPanel({
         </button>
       </div>
 
+      {/* Source Type Toggle (PO / WO) */}
+      {(line.poOptions.length > 0 && line.woOptions.length > 0) && (
+        <div className="flex gap-2 mb-3">
+          <button
+            onClick={(e) => { e.stopPropagation(); setSelectedSourceType("po"); }}
+            className={`px-3 py-1.5 text-xs rounded-md font-medium transition-colors ${
+              selectedSourceType === "po"
+                ? "bg-gray-900 text-white"
+                : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+            }`}
+          >
+            Purchase Orders ({line.poOptions.length})
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); setSelectedSourceType("wo"); }}
+            className={`px-3 py-1.5 text-xs rounded-md font-medium transition-colors ${
+              selectedSourceType === "wo"
+                ? "bg-gray-900 text-white"
+                : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+            }`}
+          >
+            Work Orders ({line.woOptions.length})
+          </button>
+        </div>
+      )}
+
       {/* PO Tabs */}
-      {line.poOptions.length > 1 && (
+      {selectedSourceType === "po" && line.poOptions.length > 1 && (
         <div className="flex gap-1.5 mb-4">
           {line.poOptions.map((po) => {
             const isActive = po.poId === selectedPOId;
-            const isSuggested = line.suggestedMatch?.poId === po.poId;
+            const isSuggested = line.suggestedMatch?.type === "po" && line.suggestedMatch?.sourceId === po.poId;
             return (
               <button
                 key={po.poId}
@@ -862,10 +936,40 @@ function ExpandedPOPanel({
         </div>
       )}
 
+      {/* WO Tabs */}
+      {selectedSourceType === "wo" && line.woOptions.length > 1 && (
+        <div className="flex gap-1.5 mb-4">
+          {line.woOptions.map((wo) => {
+            const isActive = wo.woId === selectedWOId;
+            const isSuggested = line.suggestedMatch?.type === "wo" && line.suggestedMatch?.sourceId === wo.woId;
+            return (
+              <button
+                key={wo.woId}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedWOId(wo.woId);
+                }}
+                className={`px-3 py-1.5 text-sm rounded-md border transition-colors ${
+                  isActive
+                    ? "bg-white border-gray-300 text-gray-900 font-medium shadow-sm"
+                    : "border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+                }`}
+              >
+                {wo.woNumber}
+                {isSuggested && (
+                  <span className="ml-1 text-[10px] text-sage-600">
+                    Suggested
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {/* Mini PO Card */}
-      {selectedPO && (
+      {selectedSourceType === "po" && selectedPO && (
         <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-          {/* PO Header */}
           <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-3">
             <span className="font-semibold text-gray-900">
               {selectedPO.poNumber}
@@ -892,7 +996,6 @@ function ExpandedPOPanel({
             )}
           </div>
 
-          {/* PO Line Items */}
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100">
@@ -920,20 +1023,10 @@ function ExpandedPOPanel({
                 return (
                   <tr
                     key={li.poLineItemId}
-                    className={
-                      isMatch
-                        ? "bg-gold-50/50"
-                        : "text-gray-400"
-                    }
+                    className={isMatch ? "bg-gold-50/50" : "text-gray-400"}
                   >
                     <td className="px-4 py-2.5">
-                      <span
-                        className={
-                          isMatch
-                            ? "font-medium text-gray-900"
-                            : "text-gray-400"
-                        }
-                      >
+                      <span className={isMatch ? "font-medium text-gray-900" : "text-gray-400"}>
                         {li.sku}
                       </span>
                     </td>
@@ -942,9 +1035,7 @@ function ExpandedPOPanel({
                     </td>
                     <td className="px-4 py-2.5 text-right">
                       {li.qtyReceived > 0 ? (
-                        <span className="text-warm-600">
-                          {li.qtyReceived.toLocaleString()}
-                        </span>
+                        <span className="text-warm-600">{li.qtyReceived.toLocaleString()}</span>
                       ) : (
                         <span className="text-gray-300">0</span>
                       )}
@@ -957,7 +1048,7 @@ function ExpandedPOPanel({
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            onConfirm(selectedPO.poId, li.poLineItemId);
+                            onConfirm(selectedPO.poId, li.poLineItemId, "po");
                           }}
                           disabled={isConfirming}
                           className={`text-white px-4 py-1 text-xs font-semibold rounded transition-colors disabled:opacity-50 ${
@@ -965,6 +1056,104 @@ function ExpandedPOPanel({
                               ? "bg-green-600 hover:bg-sage-700"
                               : overReceipt
                               ? "bg-gold-500 hover:bg-gold-600"
+                              : "bg-gold-600 hover:bg-gold-700"
+                          }`}
+                        >
+                          {isConfirming ? "..." : "Match"}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Mini WO Card */}
+      {selectedSourceType === "wo" && selectedWO && (
+        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-3">
+            <span className="font-semibold text-gray-900">
+              {selectedWO.woNumber}
+            </span>
+            <span
+              className={`px-2 py-0.5 text-[10px] font-medium rounded-full ${
+                selectedWO.woStatus === "Completed"
+                  ? "bg-sage-100 text-sage-700"
+                  : "bg-blue-100 text-blue-700"
+              }`}
+            >
+              {selectedWO.woStatus}
+            </span>
+            {selectedWO.description && (
+              <>
+                <span className="text-gray-300">&middot;</span>
+                <span className="text-sm text-gray-500">
+                  {selectedWO.description}
+                </span>
+              </>
+            )}
+          </div>
+
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-100">
+                <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  Output SKU
+                </th>
+                <th className="text-right px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">
+                  Produced
+                </th>
+                <th className="text-right px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">
+                  Received
+                </th>
+                <th className="text-right px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">
+                  Remaining
+                </th>
+                <th className="px-4 py-2 w-28"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {selectedWO.lineItems.map((li) => {
+                const isMatch = li.isMatchable;
+                const qtyMatch = li.qty === line.receiptQty && li.qtyReceived === 0;
+
+                return (
+                  <tr
+                    key={li.woLineItemId}
+                    className={isMatch ? "bg-gold-50/50" : "text-gray-400"}
+                  >
+                    <td className="px-4 py-2.5">
+                      <span className={isMatch ? "font-medium text-gray-900" : "text-gray-400"}>
+                        {li.sku}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2.5 text-right">
+                      {li.qty.toLocaleString()}
+                    </td>
+                    <td className="px-4 py-2.5 text-right">
+                      {li.qtyReceived > 0 ? (
+                        <span className="text-warm-600">{li.qtyReceived.toLocaleString()}</span>
+                      ) : (
+                        <span className="text-gray-300">0</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5 text-right">
+                      {li.qtyRemaining.toLocaleString()}
+                    </td>
+                    <td className="px-4 py-2.5 text-right">
+                      {isMatch && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onConfirm(selectedWO.woId, li.woLineItemId, "wo");
+                          }}
+                          disabled={isConfirming}
+                          className={`text-white px-4 py-1 text-xs font-semibold rounded transition-colors disabled:opacity-50 ${
+                            qtyMatch
+                              ? "bg-green-600 hover:bg-sage-700"
                               : "bg-gold-600 hover:bg-gold-700"
                           }`}
                         >

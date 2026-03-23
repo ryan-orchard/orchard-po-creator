@@ -151,7 +151,7 @@ function mapStordToOnHand(
   });
 }
 
-// --- ANS calculated from receipts ---
+// --- ANS calculated from receipts + work orders ---
 
 async function fetchANSInventory(
   skuMap: Map<string, { standardSku: string; category: string }>
@@ -163,8 +163,15 @@ async function fetchANSInventory(
   if (warehouses.length === 0) return [];
   const ansWarehouseId = warehouses[0].id;
 
-  // Get all receipts at ANS
-  const receipts = await getRecords(TABLES.RECEIPTS);
+  // Fetch receipts and work orders in parallel
+  const [receipts, allReceiptLines, allWOs, allWOLines] = await Promise.all([
+    getRecords(TABLES.RECEIPTS),
+    getRecords(TABLES.RECEIPT_LINES),
+    getRecords(TABLES.WORK_ORDERS),
+    getRecords(TABLES.WORK_ORDER_LINES),
+  ]);
+
+  // --- Receipts: add received quantities ---
   const ansReceiptIds = new Set(
     receipts
       .filter((r) => {
@@ -174,17 +181,13 @@ async function fetchANSInventory(
       .map((r) => r.id)
   );
 
-  if (ansReceiptIds.size === 0) return [];
+  const qtyBySkuId = new Map<string, number>();
 
-  // Get all receipt lines and filter to ANS receipts
-  const allReceiptLines = await getRecords(TABLES.RECEIPT_LINES);
   const ansLines = allReceiptLines.filter((rl) => {
     const receiptLinks = rl.fields["Receipt"] as string[] | undefined;
     return receiptLinks?.some((id) => ansReceiptIds.has(id));
   });
 
-  // Aggregate by SKU record ID
-  const qtyBySkuId = new Map<string, number>();
   for (const line of ansLines) {
     const skuLinks = line.fields["SKU"] as string[] | undefined;
     const skuId = skuLinks?.[0];
@@ -193,9 +196,44 @@ async function fetchANSInventory(
     qtyBySkuId.set(skuId, (qtyBySkuId.get(skuId) || 0) + qty);
   }
 
-  // Convert to OnHandItem[]
+  // --- Work Orders: subtract inputs, add outputs for completed WOs at ANS ---
+  const completedANSWOIds = new Set(
+    allWOs
+      .filter((wo) => {
+        const locLinks = wo.fields["Location"] as string[] | undefined;
+        const status = wo.fields["Status"] as string;
+        return locLinks?.includes(ansWarehouseId) && status === "Completed";
+      })
+      .map((wo) => wo.id)
+  );
+
+  if (completedANSWOIds.size > 0) {
+    const woLines = allWOLines.filter((wl) => {
+      const woLinks = wl.fields["Work Order"] as string[] | undefined;
+      return woLinks?.some((id) => completedANSWOIds.has(id));
+    });
+
+    for (const line of woLines) {
+      const skuLinks = line.fields["SKU"] as string[] | undefined;
+      const skuId = skuLinks?.[0];
+      if (!skuId) continue;
+      const qty = (line.fields["Quantity"] as number) || 0;
+      const lineType = line.fields["Line Type"] as string;
+
+      if (lineType === "Input") {
+        // Inputs consumed — subtract from inventory
+        qtyBySkuId.set(skuId, (qtyBySkuId.get(skuId) || 0) - qty);
+      } else if (lineType === "Output") {
+        // Outputs produced — add to inventory
+        qtyBySkuId.set(skuId, (qtyBySkuId.get(skuId) || 0) + qty);
+      }
+    }
+  }
+
+  // Convert to OnHandItem[] (skip SKUs with zero or negative qty)
   const items: OnHandItem[] = [];
   for (const [skuId, qty] of qtyBySkuId) {
+    if (qty <= 0) continue;
     const skuInfo = skuMap.get(skuId);
     const standardSku = skuInfo?.standardSku || skuId;
     const stordSku = STANDARD_TO_STORD[standardSku] || null;
@@ -384,7 +422,7 @@ export async function GET(request: Request) {
         code: "ANS",
         name: "ANS",
         sourceType: "calculated",
-        sourceLabel: "Calculated from receipts",
+        sourceLabel: "Calculated from receipts + work orders",
         asOf: new Date().toISOString(),
       });
     }

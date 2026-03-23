@@ -26,37 +26,46 @@ export async function POST(
     }
 
     const poLineItemLinks = receiptLine.fields["PO Line Item"] as string[] | undefined;
+    const woLineItemLinks = receiptLine.fields["Work Order Lines"] as string[] | undefined;
     const receiptIds = receiptLine.fields["Receipt"] as string[] | undefined;
     const receiptId = receiptIds?.[0];
 
-    if (!poLineItemLinks?.[0]) {
+    const isWOMatch = !!woLineItemLinks?.[0];
+    const isPOMatch = !!poLineItemLinks?.[0];
+
+    if (!isPOMatch && !isWOMatch) {
       return NextResponse.json(
         { error: "Receipt line is not matched" },
         { status: 400 }
       );
     }
 
-    // Find which PO this PO Line Item belongs to
-    const allPOLineItems = await getRecords(TABLES.PO_LINE_ITEMS);
-    const poLineItem = allPOLineItems.find((li) => li.id === poLineItemLinks[0]);
-    const poLinks = poLineItem?.fields["Purchase Order"] as string[] | undefined;
-    const poId = poLinks?.[0];
+    // Find which PO this PO Line Item belongs to (if PO match)
+    let poId: string | undefined;
+    if (isPOMatch) {
+      const allPOLineItems = await getRecords(TABLES.PO_LINE_ITEMS);
+      const poLineItem = allPOLineItems.find((li) => li.id === poLineItemLinks![0]);
+      const poLinks = poLineItem?.fields["Purchase Order"] as string[] | undefined;
+      poId = poLinks?.[0];
+    }
 
-    // 1. Clear the PO Line Item link and set Match Status to Open
-    await updateRecord(TABLES.RECEIPT_LINES, receiptLineId, {
-      "PO Line Item": [],
-      "Match Status": "Open",
-    });
+    // 1. Clear the match link and set Match Status to Open
+    const clearFields: Record<string, unknown> = { "Match Status": "Open" };
+    if (isPOMatch) clearFields["PO Line Item"] = [];
+    if (isWOMatch) clearFields["Work Order Lines"] = [];
+    await updateRecord(TABLES.RECEIPT_LINES, receiptLineId, clearFields);
 
-    // 2. Clear the receipt header PO link (since at least one line is now unmatched)
+    // 2. Clear the receipt header link (since at least one line is now unmatched)
     if (receiptId) {
       const allReceipts = await getRecords(TABLES.RECEIPTS);
       const receipt = allReceipts.find((r) => r.id === receiptId);
       const receiptPOLink = receipt?.fields["Purchase Order"] as string[] | undefined;
+      const receiptWOLink = receipt?.fields["Work Order"] as string[] | undefined;
       if (receiptPOLink?.length) {
-        await updateRecord(TABLES.RECEIPTS, receiptId, {
-          "Purchase Order": [],
-        });
+        await updateRecord(TABLES.RECEIPTS, receiptId, { "Purchase Order": [] });
+      }
+      if (receiptWOLink?.length) {
+        await updateRecord(TABLES.RECEIPTS, receiptId, { "Work Order": [] });
       }
     }
 
@@ -97,6 +106,7 @@ export async function POST(
       }
 
       // Check PO line items
+      const allPOLineItems = await getRecords(TABLES.PO_LINE_ITEMS);
       const poLineItems = allPOLineItems.filter((li) => {
         const plPoLinks = li.fields["Purchase Order"] as string[] | undefined;
         return plPoLinks?.[0] === poId;

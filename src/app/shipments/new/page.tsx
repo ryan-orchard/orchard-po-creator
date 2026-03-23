@@ -11,6 +11,14 @@ interface POOption {
   status: string;
 }
 
+interface WOOption {
+  id: string;
+  woNumber: string;
+  description: string;
+  warehouse: string[];
+  status: string;
+}
+
 interface Supplier {
   id: string;
   name: string;
@@ -44,8 +52,22 @@ interface POLineItem {
   qtyCartons: number;
 }
 
+interface WOLineItem {
+  id: string;
+  skuId: string | null;
+  sku: {
+    standardSku: string;
+    flavor: string;
+    count: number | null;
+    category: string;
+    uom: string;
+  } | null;
+  lineType: string;
+  qty: number;
+}
+
 interface ShipmentLine {
-  poLineItemId: string;
+  sourceLineId: string;
   skuId: string;
   skuName: string;
   section: string;
@@ -59,30 +81,30 @@ interface ShipmentLine {
 interface ExistingShipment {
   id: string;
   purchaseOrder: string[];
+  workOrder: string[];
   shipmentLines: string[];
 }
 
-interface ShipmentLineDetail {
-  fields: {
-    SKU: string[];
-    "Qty Shipped": number;
-    "PO Line Item": string[];
-  };
-}
+type SourceType = "po" | "wo";
 
 export default function CreateShipmentPage() {
   const router = useRouter();
 
+  // Source type toggle
+  const [sourceType, setSourceType] = useState<SourceType>("po");
+
   // Reference data
   const [pos, setPOs] = useState<POOption[]>([]);
+  const [wos, setWOs] = useState<WOOption[]>([]);
   const [suppliers, setSuppliers] = useState<Record<string, string>>({});
+  const [warehouses, setWarehouses] = useState<Record<string, string>>({});
   const [locations, setLocations] = useState<Location[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Form state
-  const [selectedPOId, setSelectedPOId] = useState("");
-  const [poDetail, setPODetail] = useState<PODetail | null>(null);
-  const [loadingPO, setLoadingPO] = useState(false);
+  const [selectedSourceId, setSelectedSourceId] = useState("");
+  const [sourceDetail, setSourceDetail] = useState<PODetail | { id: string; woNumber: string; description: string; outputs: WOLineItem[] } | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
   const [shipmentLines, setShipmentLines] = useState<ShipmentLine[]>([]);
 
   const [shipDate, setShipDate] = useState(
@@ -100,104 +122,138 @@ export default function CreateShipmentPage() {
   useEffect(() => {
     Promise.all([
       fetch("/api/purchase-orders").then((r) => r.json()),
+      fetch("/api/work-orders").then((r) => r.json()),
       fetch("/api/suppliers").then((r) => r.json()),
       fetch("/api/ship-to").then((r) => r.json()),
-    ]).then(([poData, supplierData, locationData]) => {
-      // Only show Issued POs (active, ready to ship)
+    ]).then(([poData, woData, supplierData, locationData]) => {
       setPOs(poData.filter((p: POOption) => p.status === "Issued"));
+      setWOs(woData.filter((w: WOOption) => w.status === "Issued" || w.status === "In Progress" || w.status === "Completed"));
       const sMap: Record<string, string> = {};
       supplierData.forEach((s: Supplier) => {
         sMap[s.id] = s.name;
       });
       setSuppliers(sMap);
+      const wMap: Record<string, string> = {};
+      locationData.forEach((l: Location) => {
+        wMap[l.id] = l.name;
+      });
+      setWarehouses(wMap);
       setLocations(locationData);
       setLoading(false);
     });
   }, []);
 
-  // Load PO detail + existing shipments when PO is selected
-  const loadPODetail = useCallback(async (poId: string) => {
-    if (!poId) {
-      setPODetail(null);
+  // Load source detail when selection changes
+  const loadSourceDetail = useCallback(async (sourceId: string, type: SourceType) => {
+    if (!sourceId) {
+      setSourceDetail(null);
       setShipmentLines([]);
       return;
     }
 
-    setLoadingPO(true);
+    setLoadingDetail(true);
     try {
-      // Fetch PO detail and all shipments in parallel
-      const [poData, allShipments] = await Promise.all([
-        fetch(`/api/purchase-orders/${poId}`).then((r) => r.json()),
-        fetch("/api/shipments").then((r) => r.json()),
-      ]);
+      const allShipments = await fetch("/api/shipments").then((r) => r.json());
 
-      setPODetail(poData);
+      if (type === "po") {
+        const poData = await fetch(`/api/purchase-orders/${sourceId}`).then((r) => r.json());
+        setSourceDetail(poData);
 
-      // Pre-fill ship-to from PO
-      if (poData.shipToId) {
-        setShipToId(poData.shipToId);
-      }
+        if (poData.shipToId) setShipToId(poData.shipToId);
 
-      // Calculate qty already shipped per PO line item
-      const shippedByLineItem: Record<string, number> = {};
-
-      // Find shipments for this PO
-      const poShipments = allShipments.filter(
-        (s: ExistingShipment) => s.purchaseOrder?.[0] === poId
-      );
-
-      // Fetch shipment line details for each existing shipment
-      for (const shipment of poShipments) {
-        if (shipment.shipmentLines?.length) {
-          const shipmentDetail = await fetch(
-            `/api/shipments/${shipment.id}`
-          ).then((r) => r.json());
-          for (const line of shipmentDetail.lineItems || []) {
-            const poLineId = line.poLineItemId;
-            if (poLineId) {
-              shippedByLineItem[poLineId] =
-                (shippedByLineItem[poLineId] || 0) + (line.qtyShipped || 0);
+        // Calculate already shipped per line item
+        const shippedByLineItem: Record<string, number> = {};
+        const poShipments = allShipments.filter(
+          (s: ExistingShipment) => s.purchaseOrder?.[0] === sourceId
+        );
+        for (const shipment of poShipments) {
+          if (shipment.shipmentLines?.length) {
+            const detail = await fetch(`/api/shipments/${shipment.id}`).then((r) => r.json());
+            for (const line of detail.lineItems || []) {
+              if (line.poLineItemId) {
+                shippedByLineItem[line.poLineItemId] =
+                  (shippedByLineItem[line.poLineItemId] || 0) + (line.qtyShipped || 0);
+              }
             }
           }
         }
-      }
 
-      // Build shipment lines from PO line items
-      const lines: ShipmentLine[] = (poData.lineItems || []).map(
-        (li: POLineItem) => {
+        const lines: ShipmentLine[] = (poData.lineItems || []).map((li: POLineItem) => {
           const qtyOrdered = li.qtySticks || 0;
           const qtyAlreadyShipped = shippedByLineItem[li.id] || 0;
           const qtyRemaining = Math.max(0, qtyOrdered - qtyAlreadyShipped);
-          const skuName = li.sku
-            ? li.sku.flavor || li.sku.standardSku
-            : "Unknown SKU";
-
           return {
-            poLineItemId: li.id,
+            sourceLineId: li.id,
             skuId: li.skuId || "",
-            skuName,
+            skuName: li.sku ? li.sku.flavor || li.sku.standardSku : "Unknown SKU",
             section: li.section || "",
             qtyOrdered,
             qtyAlreadyShipped,
             qtyRemaining,
-            qtyShipped: qtyRemaining, // Default to shipping remaining
+            qtyShipped: qtyRemaining,
             included: qtyRemaining > 0,
           };
-        }
-      );
+        });
+        setShipmentLines(lines);
+      } else {
+        // Work Order — ship output lines
+        const woData = await fetch(`/api/work-orders/${sourceId}`).then((r) => r.json());
+        setSourceDetail(woData);
 
-      setShipmentLines(lines);
+        // Calculate already shipped per WO output SKU
+        const shippedBySku: Record<string, number> = {};
+        const woShipments = allShipments.filter(
+          (s: ExistingShipment) => s.workOrder?.[0] === sourceId
+        );
+        for (const shipment of woShipments) {
+          if (shipment.shipmentLines?.length) {
+            const detail = await fetch(`/api/shipments/${shipment.id}`).then((r) => r.json());
+            for (const line of detail.lineItems || []) {
+              if (line.skuId) {
+                shippedBySku[line.skuId] =
+                  (shippedBySku[line.skuId] || 0) + (line.qtyShipped || 0);
+              }
+            }
+          }
+        }
+
+        const lines: ShipmentLine[] = (woData.outputs || []).map((li: WOLineItem) => {
+          const qtyOrdered = li.qty || 0;
+          const qtyAlreadyShipped = shippedBySku[li.skuId || ""] || 0;
+          const qtyRemaining = Math.max(0, qtyOrdered - qtyAlreadyShipped);
+          return {
+            sourceLineId: li.id,
+            skuId: li.skuId || "",
+            skuName: li.sku ? `${li.sku.standardSku} — ${li.sku.flavor}` : "Unknown SKU",
+            section: "",
+            qtyOrdered,
+            qtyAlreadyShipped,
+            qtyRemaining,
+            qtyShipped: qtyRemaining,
+            included: qtyRemaining > 0,
+          };
+        });
+        setShipmentLines(lines);
+      }
     } catch (err) {
-      console.error("Failed to load PO detail:", err);
-      alert("Failed to load PO details. Please try again.");
+      console.error("Failed to load source detail:", err);
+      alert("Failed to load details. Please try again.");
     } finally {
-      setLoadingPO(false);
+      setLoadingDetail(false);
     }
   }, []);
 
-  const handlePOChange = (poId: string) => {
-    setSelectedPOId(poId);
-    loadPODetail(poId);
+  const handleSourceChange = (sourceId: string) => {
+    setSelectedSourceId(sourceId);
+    loadSourceDetail(sourceId, sourceType);
+  };
+
+  const handleSourceTypeChange = (type: SourceType) => {
+    setSourceType(type);
+    setSelectedSourceId("");
+    setSourceDetail(null);
+    setShipmentLines([]);
+    setShipToId("");
   };
 
   const handleLineToggle = (index: number) => {
@@ -221,13 +277,16 @@ export default function CreateShipmentPage() {
   };
 
   const handleSubmit = async () => {
-    // Validation
-    if (!selectedPOId) {
-      alert("Please select a Purchase Order.");
+    if (!selectedSourceId) {
+      alert(`Please select a ${sourceType === "po" ? "Purchase Order" : "Work Order"}.`);
       return;
     }
     if (!shipDate) {
       alert("Please enter a ship date.");
+      return;
+    }
+    if (!shipToId) {
+      alert("Please select a Ship To location.");
       return;
     }
     const includedLines = shipmentLines.filter(
@@ -244,7 +303,9 @@ export default function CreateShipmentPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          purchaseOrderId: selectedPOId,
+          ...(sourceType === "po"
+            ? { purchaseOrderId: selectedSourceId }
+            : { workOrderId: selectedSourceId }),
           shipDate,
           expectedDeliveryDate: expectedDeliveryDate || null,
           carrier,
@@ -281,11 +342,9 @@ export default function CreateShipmentPage() {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">
-              Create Shipment
-            </h1>
+            <h1 className="text-2xl font-bold text-gray-900">Create Shipment</h1>
             <p className="text-sm text-gray-500 mt-1">
-              Record a shipment against a purchase order
+              Record a shipment against a purchase order or work order
             </p>
           </div>
           <button
@@ -297,36 +356,85 @@ export default function CreateShipmentPage() {
         </div>
 
         <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-6">
-          {/* Step 1: Select PO */}
+          {/* Source Type Toggle */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Source Document
+            </label>
+            <div className="flex gap-2">
+              <button
+                onClick={() => handleSourceTypeChange("po")}
+                className={`px-4 py-2 text-sm rounded-md font-medium transition-colors ${
+                  sourceType === "po"
+                    ? "bg-gray-900 text-white"
+                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                }`}
+              >
+                Purchase Order
+              </button>
+              <button
+                onClick={() => handleSourceTypeChange("wo")}
+                className={`px-4 py-2 text-sm rounded-md font-medium transition-colors ${
+                  sourceType === "wo"
+                    ? "bg-gray-900 text-white"
+                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                }`}
+              >
+                Work Order
+              </button>
+            </div>
+          </div>
+
+          {/* Source Selection */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Purchase Order <span className="text-red-500">*</span>
+              {sourceType === "po" ? "Purchase Order" : "Work Order"} <span className="text-red-500">*</span>
             </label>
-            <select
-              value={selectedPOId}
-              onChange={(e) => handlePOChange(e.target.value)}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
-            >
-              <option value="">Select a PO...</option>
-              {pos.map((po) => (
-                <option key={po.id} value={po.id}>
-                  {po.poNumber} — {po.supplier?.[0] ? suppliers[po.supplier[0]] || "" : ""}
-                </option>
-              ))}
-            </select>
-            {pos.length === 0 && (
+            {sourceType === "po" ? (
+              <select
+                value={selectedSourceId}
+                onChange={(e) => handleSourceChange(e.target.value)}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
+              >
+                <option value="">Select a PO...</option>
+                {pos.map((po) => (
+                  <option key={po.id} value={po.id}>
+                    {po.poNumber} — {po.supplier?.[0] ? suppliers[po.supplier[0]] || "" : ""}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <select
+                value={selectedSourceId}
+                onChange={(e) => handleSourceChange(e.target.value)}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
+              >
+                <option value="">Select a Work Order...</option>
+                {wos.map((wo) => (
+                  <option key={wo.id} value={wo.id}>
+                    {wo.woNumber} — {wo.description || (wo.warehouse?.[0] ? warehouses[wo.warehouse[0]] || "" : "")}
+                  </option>
+                ))}
+              </select>
+            )}
+            {sourceType === "po" && pos.length === 0 && (
               <p className="text-xs text-gray-400 mt-1">
                 No issued POs available. POs must be in &quot;Issued&quot; status to create shipments.
               </p>
             )}
+            {sourceType === "wo" && wos.length === 0 && (
+              <p className="text-xs text-gray-400 mt-1">
+                No work orders available.
+              </p>
+            )}
           </div>
 
-          {/* Step 2: Line Items (shown when PO is selected) */}
-          {loadingPO && (
-            <p className="text-sm text-gray-500">Loading PO details...</p>
+          {/* Line Items */}
+          {loadingDetail && (
+            <p className="text-sm text-gray-500">Loading details...</p>
           )}
 
-          {poDetail && !loadingPO && (
+          {sourceDetail && !loadingDetail && (
             <>
               <div>
                 <h2 className="text-sm font-semibold text-gray-900 mb-3">
@@ -344,7 +452,7 @@ export default function CreateShipmentPage() {
                           SKU
                         </th>
                         <th className="text-right px-3 py-2 text-xs font-semibold text-gray-500 uppercase">
-                          Ordered
+                          {sourceType === "po" ? "Ordered" : "Produced"}
                         </th>
                         <th className="text-right px-3 py-2 text-xs font-semibold text-gray-500 uppercase">
                           Already Shipped
@@ -360,11 +468,9 @@ export default function CreateShipmentPage() {
                     <tbody>
                       {shipmentLines.map((line, index) => (
                         <tr
-                          key={line.poLineItemId}
+                          key={line.sourceLineId}
                           className={`border-b border-gray-100 ${
-                            line.qtyRemaining === 0
-                              ? "opacity-40"
-                              : ""
+                            line.qtyRemaining === 0 ? "opacity-40" : ""
                           }`}
                         >
                           <td className="px-3 py-2 text-center">
@@ -398,14 +504,9 @@ export default function CreateShipmentPage() {
                               type="number"
                               value={line.qtyShipped || ""}
                               onChange={(e) =>
-                                handleQtyChange(
-                                  index,
-                                  parseInt(e.target.value) || 0
-                                )
+                                handleQtyChange(index, parseInt(e.target.value) || 0)
                               }
-                              disabled={
-                                !line.included || line.qtyRemaining === 0
-                              }
+                              disabled={!line.included || line.qtyRemaining === 0}
                               min={0}
                               max={line.qtyRemaining}
                               className="w-24 border border-gray-300 rounded px-2 py-1 text-sm text-right tabular-nums focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent disabled:bg-gray-50 disabled:text-gray-400"
@@ -418,7 +519,7 @@ export default function CreateShipmentPage() {
                 </div>
               </div>
 
-              {/* Step 3: Shipment Details */}
+              {/* Shipment Details */}
               <div className="border-t border-gray-200 pt-6">
                 <h2 className="text-sm font-semibold text-gray-900 mb-3">
                   Shipment Details

@@ -16,6 +16,7 @@ export async function GET() {
     id: r.id,
     shipmentNumber: r.fields["Shipment Number"] as string,
     purchaseOrder: r.fields["Purchase Order"] as string[],
+    workOrder: r.fields["Work Order"] as string[],
     shipDate: r.fields["Ship Date"] as string,
     expectedDeliveryDate: r.fields["Estimated Delivery"] as string,
     carrier: r.fields["Carrier"] as string,
@@ -44,18 +45,28 @@ export async function POST(request: NextRequest) {
   }
   const shipmentNumber = `SH-${maxNum + 1}`;
 
-  // Create shipment header
-  const shipment = await createRecord(TABLES.SHIPMENTS, {
+  // Build header fields — link to either PO or WO
+  const headerFields: Record<string, unknown> = {
     "Shipment Number": shipmentNumber,
-    "Purchase Order": [body.purchaseOrderId],
     "Ship Date": body.shipDate,
     "Estimated Delivery": body.expectedDeliveryDate || null,
     Carrier: body.carrier || "",
     "Carrier Reference": body.carrierReference || "",
     "Tracking Number": body.trackingNumber || "",
-    ...(body.shipToId ? { "Ship To": [body.shipToId] } : {}),
     Status: "Created",
-  });
+  };
+
+  if (body.purchaseOrderId) {
+    headerFields["Purchase Order"] = [body.purchaseOrderId];
+  }
+  if (body.workOrderId) {
+    headerFields["Work Order"] = [body.workOrderId];
+  }
+  if (body.shipToId) {
+    headerFields["Ship To"] = [body.shipToId];
+  }
+
+  const shipment = await createRecord(TABLES.SHIPMENTS, headerFields);
 
   // Create shipment line items
   if (body.lineItems && body.lineItems.length > 0) {
@@ -75,8 +86,10 @@ export async function POST(request: NextRequest) {
     await createRecords(TABLES.SHIPMENT_LINES, lineItemRecords);
   }
 
+  // Log activity to the appropriate source document
   logActivity({
-    poId: body.purchaseOrderId,
+    poId: body.purchaseOrderId || undefined,
+    woId: body.workOrderId || undefined,
     action: "shipment_created",
     description: `Shipment ${shipmentNumber} created`,
     actor: "Ryan Belanger",

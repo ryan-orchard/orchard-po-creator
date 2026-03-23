@@ -23,6 +23,8 @@ export const TABLES = {
   INVOICE_LINES: "tblmVy4gKNijRTFEm",
   ACTIVITY_LOG: "tbllLQCZQj16oc0zX",
   INVENTORY_SNAPSHOTS: "tblXFUhjdVW7uGtK1",
+  WORK_ORDERS: "tblEVzkLvd7Vfb5LB",
+  WORK_ORDER_LINES: "tblFOVJ9GA479tcJZ",
 };
 
 export interface AirtableRecord {

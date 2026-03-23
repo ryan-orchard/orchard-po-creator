@@ -1,26 +1,34 @@
 import { createRecord, TABLES } from "./airtable";
 
 interface LogActivityParams {
-  poId: string;
+  poId?: string;
+  woId?: string;
   action: string;
   description: string;
   actor: "Ryan Belanger" | "Orchard AI";
-  relatedRecordType?: "shipment" | "receipt" | "invoice" | "po";
+  relatedRecordType?: "shipment" | "receipt" | "invoice" | "po" | "work_order";
   relatedRecordId?: string;
 }
 
 /**
- * Log an activity entry for a PO. Fire-and-forget — errors are logged
+ * Log an activity entry for a PO or WO. Fire-and-forget — errors are logged
  * but never block the calling API route.
  */
 export function logActivity(params: LogActivityParams): void {
   const fields: Record<string, unknown> = {
     Description: params.description,
-    "Purchase Order": [params.poId],
-    "PO Record ID": params.poId,
     Action: params.action,
     Actor: params.actor,
   };
+
+  if (params.poId) {
+    fields["Purchase Order"] = [params.poId];
+    fields["PO Record ID"] = params.poId;
+  }
+
+  if (params.woId) {
+    fields["Work Orders"] = [params.woId];
+  }
 
   if (params.relatedRecordType) {
     fields["Related Record Type"] = params.relatedRecordType;
