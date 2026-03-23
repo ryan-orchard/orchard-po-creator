@@ -19,8 +19,17 @@ export async function GET(
       lineItemIds.map((liId: string) => getRecord(TABLES.PO_LINE_ITEMS, liId))
     );
 
+    // Fetch linked receipts for dates
+    const receiptIds = (po.fields["Receipts"] as string[]) || [];
+    const receipts = await Promise.all(
+      receiptIds.map((rId: string) => getRecord(TABLES.RECEIPTS, rId))
+    );
+    const receiptDates = receipts
+      .map((r) => r.fields["Received Date"] as string)
+      .filter(Boolean)
+      .sort();
+
     // Fetch all receipt lines that reference any of these PO line items
-    // Receipt lines have a "PO Line Item" link field when matched
     const allReceiptLines = await getRecords(TABLES.RECEIPT_LINES);
 
     // Build qty received per PO line item (from matched receipt lines)
@@ -34,6 +43,9 @@ export async function GET(
       }
     }
 
+    // Track UOMs to determine label
+    const uomSet = new Set<string>();
+
     // Fetch SKU details for each line item
     const result = await Promise.all(
       lineItems.map(async (li) => {
@@ -41,7 +53,13 @@ export async function GET(
         const sku = skuIds[0]
           ? await getRecord(TABLES.SKUS, skuIds[0])
           : null;
-        const qtyOrdered = (li.fields["Qty Sticks"] as number) || 0;
+        const uom = sku ? (sku.fields["UOM"] as string) || "Each" : "Each";
+        uomSet.add(uom);
+        // Use Qty Cartons for Carton UOM items (receipts are in base UOM),
+        // Qty Sticks for Stick/Each items
+        const qtyOrdered = uom === "Carton"
+          ? ((li.fields["Qty Cartons"] as number) || 0)
+          : ((li.fields["Qty Sticks"] as number) || 0);
         const qtyReceived = receivedByLineItem[li.id] || 0;
 
         return {
@@ -65,10 +83,19 @@ export async function GET(
       })
     );
 
+    // Determine UOM label for progress bar
+    const uomLabel = uomSet.size === 1 && uomSet.has("Carton")
+      ? "cartons"
+      : uomSet.size === 1 && uomSet.has("Stick")
+      ? "sticks"
+      : "units";
+
     return NextResponse.json({
       poId: id,
       poNumber: po.fields["PO Number"] as string,
       lineItems: result,
+      receiptDates,
+      uomLabel,
     });
   } catch {
     return NextResponse.json(

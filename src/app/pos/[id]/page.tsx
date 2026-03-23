@@ -4,6 +4,21 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { MAGNA } from "@/config/magna";
 
+interface LinkedReceipt {
+  id: string;
+  receiptNumber: string;
+  receivedDate: string | null;
+  warehouse: string | null;
+}
+
+interface LinkedInvoice {
+  id: string;
+  invoiceNumber: string;
+  invoiceDate: string | null;
+  matchStatus: string | null;
+  totalAmount: number | null;
+}
+
 interface PODetail {
   id: string;
   poNumber: string;
@@ -52,6 +67,8 @@ interface PODetail {
     costBasis: string;
     totalPrice: number;
   }[];
+  receipts: LinkedReceipt[];
+  invoices: LinkedInvoice[];
 }
 
 interface ActivityEntry {
@@ -104,11 +121,12 @@ interface EditLineItem {
   totalPrice: number;
 }
 
-const STATUSES = ["Draft", "Issued", "Received", "Closed"] as const;
+const STATUSES = ["Draft", "Issued", "Partially Received", "Received", "Closed"] as const;
 
 const statusColors: Record<string, string> = {
   Draft: "bg-warm-100 text-warm-800",
   Issued: "bg-gold-100 text-gold-800",
+  "Partially Received": "bg-gold-100 text-gold-800",
   Received: "bg-sage-100 text-sage-800",
   Closed: "bg-gray-100 text-gray-600",
 };
@@ -129,6 +147,9 @@ export default function PODetailPage() {
   const [receiptStatus, setReceiptStatus] = useState<{
     totalOrdered: number;
     totalReceived: number;
+    uomLabel: string;
+    receiptDates: string[];
+    lineItems: { id: string; skuId: string | null; sku: { standardSku: string; flavor: string; uom: string } | null; qtyOrdered: number; qtyReceived: number; qtyRemaining: number }[];
   } | null>(null);
 
   // Status update
@@ -188,7 +209,13 @@ export default function PODetailPage() {
         if (data?.lineItems) {
           const totalOrdered = data.lineItems.reduce((s: number, li: { qtyOrdered: number }) => s + (li.qtyOrdered || 0), 0);
           const totalReceived = data.lineItems.reduce((s: number, li: { qtyReceived: number }) => s + (li.qtyReceived || 0), 0);
-          setReceiptStatus({ totalOrdered, totalReceived });
+          setReceiptStatus({
+            totalOrdered,
+            totalReceived,
+            uomLabel: data.uomLabel || "units",
+            receiptDates: data.receiptDates || [],
+            lineItems: data.lineItems,
+          });
         }
       })
       .catch(() => {});
@@ -844,7 +871,16 @@ export default function PODetailPage() {
   const isSimpleMode = po.lineItems.length > 0 && po.lineItems.every(
     (li) => li.costBasis === "Per Each" || li.sku?.uom === "Each"
   );
-  const colSpan = isSimpleMode ? 3 : 6;
+
+  // Build received qty lookup per PO line item
+  const receivedByLineId: Record<string, number> = {};
+  if (receiptStatus?.lineItems) {
+    for (const rli of receiptStatus.lineItems) {
+      receivedByLineId[rli.id] = rli.qtyReceived || 0;
+    }
+  }
+  const showReceived = receiptStatus && receiptStatus.totalReceived > 0;
+  const colSpan = (isSimpleMode ? 3 : 6) + (showReceived ? 1 : 0);
   return (
     <div className="min-h-screen bg-gray-50" onClick={() => setShowStatusMenu(false)}>
       <div className="max-w-6xl mx-auto px-6 py-8">
@@ -918,7 +954,7 @@ export default function PODetailPage() {
                     ? "text-gold-700"
                     : "text-gray-400"
                 }`}>
-                  {receiptStatus.totalReceived.toLocaleString()} / {receiptStatus.totalOrdered.toLocaleString()} received
+                  {receiptStatus.totalReceived.toLocaleString()} / {receiptStatus.totalOrdered.toLocaleString()} {receiptStatus.uomLabel} received
                 </span>
               </div>
             )}
@@ -1001,21 +1037,53 @@ export default function PODetailPage() {
           </div>
         </div>
 
-        {/* Terms */}
+        {/* Terms & Dates */}
         <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
-          <div className="flex gap-10">
-            <div>
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
-                Delivery Date
-              </p>
-              <p className="text-sm text-gray-900">
-                {po.deliveryDate
-                  ? new Date(
-                      po.deliveryDate + "T00:00:00"
-                    ).toLocaleDateString("en-US")
-                  : "\u2014"}
-              </p>
-            </div>
+          <div className="flex gap-10 flex-wrap">
+            {/* Smart date: show expected delivery until received, then show actual receipt dates */}
+            {(() => {
+              const isReceived = po.status === "Received" || po.status === "Partially Received";
+              const receiptDates = receiptStatus?.receiptDates || [];
+              const hasReceiptDates = receiptDates.length > 0;
+
+              return (
+                <>
+                  {/* Always show expected delivery if set */}
+                  {po.deliveryDate && (
+                    <div>
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
+                        {isReceived && hasReceiptDates ? "Expected Delivery" : "Delivery Date"}
+                      </p>
+                      <p className={`text-sm ${isReceived && hasReceiptDates ? "text-gray-400 line-through" : "text-gray-900"}`}>
+                        {new Date(po.deliveryDate + "T00:00:00").toLocaleDateString("en-US")}
+                      </p>
+                    </div>
+                  )}
+                  {/* Show actual receipt dates when available */}
+                  {hasReceiptDates && (
+                    <div>
+                      <p className="text-xs font-semibold text-sage-600 uppercase tracking-wider mb-1">
+                        Received
+                      </p>
+                      <p className="text-sm text-gray-900 font-medium">
+                        {receiptDates.map((d: string) =>
+                          new Date(d + "T00:00:00").toLocaleDateString("en-US")
+                        ).join(", ")}
+                      </p>
+                    </div>
+                  )}
+                  {/* Show dash if no dates at all */}
+                  {!po.deliveryDate && !hasReceiptDates && (
+                    <div>
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
+                        Delivery Date
+                      </p>
+                      <p className="text-sm text-gray-900">{"\u2014"}</p>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
             <div>
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
                 Payment Terms
@@ -1040,6 +1108,64 @@ export default function PODetailPage() {
             </div>
           </div>
         </div>
+
+        {/* Linked Records — Receipts & Invoices */}
+        {((po.receipts && po.receipts.length > 0) || (po.invoices && po.invoices.length > 0)) && (
+          <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6 print:hidden">
+            <div className="flex gap-12 flex-wrap">
+              {po.receipts && po.receipts.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                    Receipts
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {po.receipts.map((r: LinkedReceipt) => (
+                      <a
+                        key={r.id}
+                        href={`/receipts`}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 text-sm font-medium text-sage-700 bg-sage-50 border border-sage-200 rounded-md hover:bg-sage-100 transition-colors"
+                      >
+                        {r.receiptNumber}
+                        {r.receivedDate && (
+                          <span className="text-xs text-sage-500">
+                            {new Date(r.receivedDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                          </span>
+                        )}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {po.invoices && po.invoices.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                    Invoices
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {po.invoices.map((inv: LinkedInvoice) => (
+                      <a
+                        key={inv.id}
+                        href={`/invoices/${inv.id}/match`}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 text-sm font-medium text-warm-700 bg-warm-50 border border-warm-200 rounded-md hover:bg-warm-100 transition-colors"
+                      >
+                        #{inv.invoiceNumber}
+                        {inv.matchStatus && (
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                            inv.matchStatus === "Matched" ? "bg-sage-100 text-sage-700" :
+                            inv.matchStatus === "Discrepancy" ? "bg-gold-100 text-gold-700" :
+                            "bg-gray-100 text-gray-600"
+                          }`}>
+                            {inv.matchStatus}
+                          </span>
+                        )}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Line Items — grouped by section */}
         <div className="bg-white rounded-lg border border-gray-200 overflow-hidden mb-6">
@@ -1068,6 +1194,11 @@ export default function PODetailPage() {
                 <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap">
                   Total Price
                 </th>
+                {showReceived && (
+                  <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap">
+                    Received
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -1128,6 +1259,22 @@ export default function PODetailPage() {
                               maximumFractionDigits: 2,
                             }) || "0.00"}
                           </td>
+                          {showReceived && (() => {
+                            const uom = item.sku?.uom || "Each";
+                            const ordered = uom === "Carton" ? item.qtyCartons : item.qtySticks;
+                            const received = receivedByLineId[item.id] || 0;
+                            const variance = received - ordered;
+                            return (
+                              <td className="px-4 py-2.5 text-right tabular-nums">
+                                <span className="font-medium">{received.toLocaleString()}</span>
+                                {variance !== 0 && ordered > 0 && (
+                                  <span className={`ml-1 text-xs ${variance < 0 ? "text-red-500" : "text-sage-600"}`}>
+                                    ({variance > 0 ? "+" : ""}{variance.toLocaleString()})
+                                  </span>
+                                )}
+                              </td>
+                            );
+                          })()}
                         </tr>
                       ))}
                       {/* Section subtotal */}
@@ -1148,6 +1295,11 @@ export default function PODetailPage() {
                               maximumFractionDigits: 2,
                             })}
                           </td>
+                          {showReceived && (
+                            <td className="px-4 py-2.5 text-right font-semibold tabular-nums">
+                              {items.reduce((sum, i) => sum + (receivedByLineId[i.id] || 0), 0).toLocaleString()}
+                            </td>
+                          )}
                         </tr>
                       )}
                     </React.Fragment>
@@ -1172,6 +1324,11 @@ export default function PODetailPage() {
                       maximumFractionDigits: 2,
                     }) || "0.00"}
                   </span>
+                  {showReceived && (
+                    <span className="font-bold">
+                      {receiptStatus.totalReceived.toLocaleString()}
+                    </span>
+                  )}
                 </>
               ) : (
                 <>
@@ -1187,6 +1344,11 @@ export default function PODetailPage() {
                       maximumFractionDigits: 2,
                     }) || "0.00"}
                   </span>
+                  {showReceived && (
+                    <span className="font-bold">
+                      {receiptStatus.totalReceived.toLocaleString()}
+                    </span>
+                  )}
                 </>
               )}
             </div>

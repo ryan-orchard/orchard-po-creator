@@ -71,6 +71,35 @@ export async function GET(
       })
     );
 
+    // Fetch linked receipts
+    const receiptIds = (record.fields["Receipts"] as string[]) || [];
+    const linkedReceipts = await Promise.all(
+      receiptIds.map(async (rId: string) => {
+        const r = await getRecord(TABLES.RECEIPTS, rId);
+        return {
+          id: r.id,
+          receiptNumber: r.fields["Receipt Number"] as string,
+          receivedDate: (r.fields["Received Date"] as string) || null,
+          warehouse: ((r.fields["Code (from Warehouses)"] as string[]) || [])[0] || null,
+        };
+      })
+    );
+
+    // Fetch linked invoices
+    const invoiceIds = (record.fields["Invoices"] as string[]) || [];
+    const linkedInvoices = await Promise.all(
+      invoiceIds.map(async (iId: string) => {
+        const inv = await getRecord(TABLES.INVOICES, iId);
+        return {
+          id: inv.id,
+          invoiceNumber: inv.fields["Invoice Number"] as string,
+          invoiceDate: (inv.fields["Invoice Date"] as string) || null,
+          matchStatus: (inv.fields["Match Status"] as string) || null,
+          totalAmount: (inv.fields["Total Amount"] as number) || null,
+        };
+      })
+    );
+
     return NextResponse.json({
       id: record.id,
       poNumber: record.fields["PO Number"] as string,
@@ -104,6 +133,8 @@ export async function GET(
           }
         : null,
       lineItems: lineItemsWithSkus,
+      receipts: linkedReceipts,
+      invoices: linkedInvoices,
     });
   } catch {
     return NextResponse.json({ error: "PO not found" }, { status: 404 });
