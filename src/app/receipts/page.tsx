@@ -753,16 +753,65 @@ function ExpandedPOPanel({
             <XIcon />
           </button>
         </div>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onExclude();
-          }}
-          disabled={isExcluding}
-          className="text-xs text-gray-400 hover:text-gray-600 disabled:opacity-50"
-        >
-          {isExcluding ? "Excluding..." : "Exclude this receipt line"}
-        </button>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onExclude();
+            }}
+            disabled={isExcluding}
+            className="text-xs text-gray-400 hover:text-gray-600 disabled:opacity-50"
+          >
+            {isExcluding ? "Excluding..." : "Exclude"}
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowFlagForm(!showFlagForm);
+            }}
+            className="text-xs text-warm-600 hover:text-warm-800"
+          >
+            Flag for client review
+          </button>
+        </div>
+        {showFlagForm && (
+          <div
+            className="mt-3 flex items-center gap-2"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <input
+              type="text"
+              placeholder="Note (e.g., Missing PO, Unknown SKU)"
+              value={flagNote}
+              onChange={(e) => setFlagNote(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && flagNote.trim()) {
+                  onFlagForReview(flagNote.trim());
+                }
+              }}
+              className="flex-1 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-gold-400 focus:border-gold-400"
+              autoFocus
+            />
+            <button
+              onClick={() => {
+                if (flagNote.trim()) onFlagForReview(flagNote.trim());
+              }}
+              disabled={!flagNote.trim()}
+              className="bg-gold-500 text-white px-4 py-1.5 text-xs font-semibold rounded hover:bg-gold-600 disabled:opacity-50 transition-colors"
+            >
+              Flag
+            </button>
+            <button
+              onClick={() => {
+                setShowFlagForm(false);
+                setFlagNote("");
+              }}
+              className="text-xs text-gray-400 hover:text-gray-600"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
       </div>
     );
   }
