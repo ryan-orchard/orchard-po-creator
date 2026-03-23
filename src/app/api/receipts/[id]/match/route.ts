@@ -88,12 +88,17 @@ export async function PATCH(
     });
 
     // Filter receipts linked to this PO
+    // Include current receipt if all lines were just matched (header link was set above
+    // but allReceipts was fetched before that update)
     const poReceiptIds = allReceipts
       .filter((r) => {
         const poIds = r.fields["Purchase Order"] as string[] | undefined;
         return poIds?.[0] === purchaseOrderId;
       })
       .map((r) => r.id);
+    if (allLinesMatched && !poReceiptIds.includes(receiptId)) {
+      poReceiptIds.push(receiptId);
+    }
 
     // Filter receipt lines for those receipts
     const relevantReceiptLines = allReceiptLines.filter((rl) => {
@@ -166,13 +171,27 @@ export async function PATCH(
       }
     }
 
-    // Log receipt matched activity
+    // Log receipt matched activity with qty and date details
     const receiptRecord = await getRecord(TABLES.RECEIPTS, receiptId);
-    const receiptNumber = (receiptRecord?.fields["Receipt Number"] as string) || receiptId;
+    const receiptDate = receiptRecord?.fields["Date"] as string;
+    const totalQtyReceived = thisReceiptLines.reduce(
+      (sum, rl) => sum + ((rl.fields["Qty Received"] as number) || 0),
+      0
+    );
+    const formattedDate = receiptDate
+      ? new Date(receiptDate + "T00:00:00").toLocaleDateString("en-US", {
+          month: "numeric",
+          day: "numeric",
+          year: "numeric",
+        })
+      : "";
+    const qtyDesc = totalQtyReceived > 0
+      ? `Matched ${totalQtyReceived.toLocaleString()} units${formattedDate ? ` received on ${formattedDate}` : ""}`
+      : `Receipt matched`;
     logActivity({
       poId: purchaseOrderId,
       action: "receipt_matched",
-      description: `Receipt ${receiptNumber} matched`,
+      description: qtyDesc,
       actor: "Ryan Belanger",
       relatedRecordType: "receipt",
       relatedRecordId: receiptId,

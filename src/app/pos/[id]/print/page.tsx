@@ -94,6 +94,10 @@ export default function POPrintPage() {
     sections[key].push(item);
   }
 
+  const isSimpleMode = po.lineItems.length > 0 && po.lineItems.every(
+    (li) => li.sku?.uom === "Each"
+  );
+
   const meta: { label: string; value: string }[] = [
     { label: "PO Number", value: po.poNumber },
     { label: "Date", value: po.date ? fmtDate(po.date, true) : "—" },
@@ -177,14 +181,22 @@ export default function POPrintPage() {
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
             <tr style={{ borderBottom: "1.5px solid #111" }}>
-              {[
-                ["Product", "left"],
-                ["Pack Size", "left"],
-                ["Qty (Sticks)", "right"],
-                ["Qty (Cartons)", "right"],
-                ["Unit Cost", "right"],
-                ["Total", "right"],
-              ].map(([col, align]) => (
+              {(isSimpleMode
+                ? [
+                    ["Product", "left"],
+                    ["Qty", "right"],
+                    ["Unit Cost", "right"],
+                    ["Total", "right"],
+                  ]
+                : [
+                    ["Product", "left"],
+                    ["Pack Size", "left"],
+                    ["Qty (Sticks)", "right"],
+                    ["Qty (Cartons)", "right"],
+                    ["Unit Cost", "right"],
+                    ["Total", "right"],
+                  ]
+              ).map(([col, align]) => (
                 <th
                   key={col}
                   style={{
@@ -210,40 +222,47 @@ export default function POPrintPage() {
               const sectionSticks = items.reduce((s, i) => s + (i.qtySticks || 0), 0);
               const sectionCartons = items.reduce((s, i) => s + (i.qtyCartons || 0), 0);
               const sectionTotal = items.reduce((s, i) => s + (i.totalPrice || 0), 0);
+              const printColSpan = isSimpleMode ? 4 : 6;
 
               return (
                 <React.Fragment key={sectionName}>
-                  <tr>
-                    <td
-                      colSpan={6}
-                      style={{
-                        paddingTop: 20,
-                        paddingBottom: 6,
-                        fontSize: 10,
-                        fontWeight: 700,
-                        textTransform: "uppercase",
-                        letterSpacing: "0.08em",
-                        color: "#aaa",
-                      }}
-                    >
-                      {sectionName}
-                    </td>
-                  </tr>
+                  {!isSimpleMode && (
+                    <tr>
+                      <td
+                        colSpan={printColSpan}
+                        style={{
+                          paddingTop: 20,
+                          paddingBottom: 6,
+                          fontSize: 10,
+                          fontWeight: 700,
+                          textTransform: "uppercase",
+                          letterSpacing: "0.08em",
+                          color: "#aaa",
+                        }}
+                      >
+                        {sectionName}
+                      </td>
+                    </tr>
+                  )}
 
                   {items.map((item) => (
                     <tr key={item.id} style={{ borderBottom: "1px solid #f0f0f0" }}>
                       <td style={{ padding: "9px 12px 9px 0", color: "#111", whiteSpace: "nowrap" }}>
                         {item.sku?.supplierItemName || item.sku?.flavor || item.sku?.standardSku || "—"}
                       </td>
-                      <td style={{ padding: "9px 12px", color: "#888", whiteSpace: "nowrap" }}>
-                        {packSize(item.sku?.uom, item.sku?.count)}
-                      </td>
+                      {!isSimpleMode && (
+                        <td style={{ padding: "9px 12px", color: "#888", whiteSpace: "nowrap" }}>
+                          {packSize(item.sku?.uom, item.sku?.count)}
+                        </td>
+                      )}
                       <td style={{ padding: "9px 0 9px 12px", textAlign: "right", color: "#111", fontVariantNumeric: "tabular-nums" }}>
                         {item.qtySticks?.toLocaleString() || "—"}
                       </td>
-                      <td style={{ padding: "9px 0 9px 12px", textAlign: "right", color: "#888", fontVariantNumeric: "tabular-nums" }}>
-                        {item.qtyCartons?.toLocaleString() || "—"}
-                      </td>
+                      {!isSimpleMode && (
+                        <td style={{ padding: "9px 0 9px 12px", textAlign: "right", color: "#888", fontVariantNumeric: "tabular-nums" }}>
+                          {item.qtyCartons?.toLocaleString() || "—"}
+                        </td>
+                      )}
                       <td style={{ padding: "9px 0 9px 12px", textAlign: "right", color: "#111", fontVariantNumeric: "tabular-nums" }}>
                         ${fmt(item.unitCost)}
                       </td>
@@ -253,22 +272,24 @@ export default function POPrintPage() {
                     </tr>
                   ))}
 
-                  <tr style={{ borderBottom: "1px solid #e8e8e8" }}>
-                    <td style={{ padding: "7px 12px 7px 0", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "#aaa" }}>
-                      {sectionName} Total
-                    </td>
-                    <td />
-                    <td style={{ padding: "7px 0 7px 12px", textAlign: "right", fontWeight: 700, color: "#555", fontVariantNumeric: "tabular-nums" }}>
-                      {sectionSticks.toLocaleString()}
-                    </td>
-                    <td style={{ padding: "7px 0 7px 12px", textAlign: "right", fontWeight: 700, color: "#aaa", fontVariantNumeric: "tabular-nums" }}>
-                      {sectionCartons.toLocaleString()}
-                    </td>
-                    <td />
-                    <td style={{ padding: "7px 0 7px 12px", textAlign: "right", fontWeight: 700, color: "#111", fontVariantNumeric: "tabular-nums" }}>
-                      ${fmt(sectionTotal)}
-                    </td>
-                  </tr>
+                  {!isSimpleMode && (
+                    <tr style={{ borderBottom: "1px solid #e8e8e8" }}>
+                      <td style={{ padding: "7px 12px 7px 0", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "#aaa" }}>
+                        {sectionName} Total
+                      </td>
+                      <td />
+                      <td style={{ padding: "7px 0 7px 12px", textAlign: "right", fontWeight: 700, color: "#555", fontVariantNumeric: "tabular-nums" }}>
+                        {sectionSticks.toLocaleString()}
+                      </td>
+                      <td style={{ padding: "7px 0 7px 12px", textAlign: "right", fontWeight: 700, color: "#aaa", fontVariantNumeric: "tabular-nums" }}>
+                        {sectionCartons.toLocaleString()}
+                      </td>
+                      <td />
+                      <td style={{ padding: "7px 0 7px 12px", textAlign: "right", fontWeight: 700, color: "#111", fontVariantNumeric: "tabular-nums" }}>
+                        ${fmt(sectionTotal)}
+                      </td>
+                    </tr>
+                  )}
                 </React.Fragment>
               );
             })}

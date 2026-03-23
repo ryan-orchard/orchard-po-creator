@@ -125,6 +125,12 @@ export default function PODetailPage() {
   // Activity log
   const [activities, setActivities] = useState<ActivityEntry[]>([]);
 
+  // Receipt status (received vs ordered)
+  const [receiptStatus, setReceiptStatus] = useState<{
+    totalOrdered: number;
+    totalReceived: number;
+  } | null>(null);
+
   // Status update
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [showStatusMenu, setShowStatusMenu] = useState(false);
@@ -172,6 +178,20 @@ export default function PODetailPage() {
       .then((r) => (r.ok ? r.json() : []))
       .then((data) => setActivities(data))
       .catch(() => setActivities([]));
+  }, [params.id]);
+
+  // Fetch receipt status (received vs ordered quantities)
+  useEffect(() => {
+    fetch(`/api/purchase-orders/${params.id}/receipt-status`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.lineItems) {
+          const totalOrdered = data.lineItems.reduce((s: number, li: { qtyOrdered: number }) => s + (li.qtyOrdered || 0), 0);
+          const totalReceived = data.lineItems.reduce((s: number, li: { qtyReceived: number }) => s + (li.qtyReceived || 0), 0);
+          setReceiptStatus({ totalOrdered, totalReceived });
+        }
+      })
+      .catch(() => {});
   }, [params.id]);
 
   const loadRefData = () => {
@@ -821,6 +841,10 @@ export default function PODetailPage() {
   }
 
   // ─── VIEW MODE ───
+  const isSimpleMode = po.lineItems.length > 0 && po.lineItems.every(
+    (li) => li.costBasis === "Per Each" || li.sku?.uom === "Each"
+  );
+  const colSpan = isSimpleMode ? 3 : 6;
   return (
     <div className="min-h-screen bg-gray-50" onClick={() => setShowStatusMenu(false)}>
       <div className="max-w-6xl mx-auto px-6 py-8">
@@ -873,6 +897,19 @@ export default function PODetailPage() {
                   })
                 : "No date"}
             </p>
+            {receiptStatus && receiptStatus.totalOrdered > 0 && (po.status === "Issued" || po.status === "Partially Received" || po.status === "Received") && (
+              <div className="flex items-center gap-2 mt-2 print:hidden">
+                <div className="w-32 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full ${receiptStatus.totalReceived >= receiptStatus.totalOrdered ? "bg-sage-600" : "bg-warm-500"}`}
+                    style={{ width: `${Math.min(100, (receiptStatus.totalReceived / receiptStatus.totalOrdered) * 100)}%` }}
+                  />
+                </div>
+                <span className="text-xs text-gray-500">
+                  {receiptStatus.totalReceived.toLocaleString()} / {receiptStatus.totalOrdered.toLocaleString()} received
+                </span>
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-3 print:hidden">
             <button
@@ -1000,15 +1037,19 @@ export default function PODetailPage() {
                 <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap">
                   Product
                 </th>
-                <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap">
-                  Carton Count
-                </th>
+                {!isSimpleMode && (
+                  <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap">
+                    Carton Count
+                  </th>
+                )}
                 <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap">
-                  Qty (Sticks)
+                  {isSimpleMode ? "Qty" : "Qty (Sticks)"}
                 </th>
-                <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap">
-                  Qty (Cartons)
-                </th>
+                {!isSimpleMode && (
+                  <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap">
+                    Qty (Cartons)
+                  </th>
+                )}
                 <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap">
                   Unit Cost
                 </th>
@@ -1037,26 +1078,32 @@ export default function PODetailPage() {
                   return (
                     <React.Fragment key={sectionName}>
                       {/* Section header */}
-                      <tr className="bg-gray-50">
-                        <td colSpan={6} className="px-4 py-2 text-xs font-bold text-gray-900 uppercase tracking-wider">
-                          {sectionName}
-                        </td>
-                      </tr>
+                      {!isSimpleMode && (
+                        <tr className="bg-gray-50">
+                          <td colSpan={colSpan} className="px-4 py-2 text-xs font-bold text-gray-900 uppercase tracking-wider">
+                            {sectionName}
+                          </td>
+                        </tr>
+                      )}
                       {/* Line items */}
                       {items.map((item) => (
                         <tr key={item.id} className="border-b border-gray-100">
                           <td className="px-4 py-2.5 text-gray-900 whitespace-nowrap">
                             {item.sku?.supplierItemName || item.sku?.flavor || item.sku?.standardSku || "\u2014"}
                           </td>
-                          <td className="px-4 py-2.5 text-gray-600">
-                            {item.sku?.uom === "Carton" ? `${item.sku.count} CT` : item.sku?.uom === "Stick" ? "Bulk" : "\u2014"}
-                          </td>
+                          {!isSimpleMode && (
+                            <td className="px-4 py-2.5 text-gray-600">
+                              {item.sku?.uom === "Carton" ? `${item.sku.count} CT` : item.sku?.uom === "Stick" ? "Bulk" : "\u2014"}
+                            </td>
+                          )}
                           <td className="px-4 py-2.5 text-right tabular-nums">
                             {item.qtySticks?.toLocaleString() || "\u2014"}
                           </td>
-                          <td className="px-4 py-2.5 text-right tabular-nums text-gray-500">
-                            {item.qtyCartons?.toLocaleString() || "\u2014"}
-                          </td>
+                          {!isSimpleMode && (
+                            <td className="px-4 py-2.5 text-right tabular-nums text-gray-500">
+                              {item.qtyCartons?.toLocaleString() || "\u2014"}
+                            </td>
+                          )}
                           <td className="px-4 py-2.5 text-right tabular-nums">
                             ${item.unitCost?.toLocaleString("en-US", {
                               minimumFractionDigits: 2,
@@ -1072,23 +1119,25 @@ export default function PODetailPage() {
                         </tr>
                       ))}
                       {/* Section subtotal */}
-                      <tr className="border-b border-gray-200">
-                        <td className="px-4 py-2.5 font-semibold text-gray-900">Total</td>
-                        <td></td>
-                        <td className="px-4 py-2.5 text-right font-semibold tabular-nums">
-                          {sectionSticks.toLocaleString()}
-                        </td>
-                        <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-gray-500">
-                          {sectionCartons.toLocaleString()}
-                        </td>
-                        <td></td>
-                        <td className="px-4 py-2.5 text-right font-bold tabular-nums">
-                          ${sectionTotal.toLocaleString("en-US", {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })}
-                        </td>
-                      </tr>
+                      {!isSimpleMode && (
+                        <tr className="border-b border-gray-200">
+                          <td className="px-4 py-2.5 font-semibold text-gray-900">Total</td>
+                          <td></td>
+                          <td className="px-4 py-2.5 text-right font-semibold tabular-nums">
+                            {sectionSticks.toLocaleString()}
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-gray-500">
+                            {sectionCartons.toLocaleString()}
+                          </td>
+                          <td></td>
+                          <td className="px-4 py-2.5 text-right font-bold tabular-nums">
+                            ${sectionTotal.toLocaleString("en-US", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </td>
+                        </tr>
+                      )}
                     </React.Fragment>
                   );
                 });
@@ -1100,18 +1149,34 @@ export default function PODetailPage() {
           <div className="border-t-2 border-gray-300 px-4 py-3 flex justify-between items-center bg-gray-50">
             <span className="font-bold text-gray-900 uppercase text-sm">Grand Total</span>
             <div className="flex gap-16 text-sm tabular-nums">
-              <span className="font-bold">
-                {po.lineItems.reduce((s, i) => s + (i.qtySticks || 0), 0).toLocaleString()}
-              </span>
-              <span className="font-bold text-gray-500">
-                {po.lineItems.reduce((s, i) => s + (i.qtyCartons || 0), 0).toLocaleString()}
-              </span>
-              <span className="font-bold text-lg">
-                ${po.grandTotal?.toLocaleString("en-US", {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                }) || "0.00"}
-              </span>
+              {isSimpleMode ? (
+                <>
+                  <span className="font-bold">
+                    {po.lineItems.reduce((s, i) => s + (i.qtySticks || 0), 0).toLocaleString()}
+                  </span>
+                  <span className="font-bold text-lg">
+                    ${po.grandTotal?.toLocaleString("en-US", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    }) || "0.00"}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="font-bold">
+                    {po.lineItems.reduce((s, i) => s + (i.qtySticks || 0), 0).toLocaleString()}
+                  </span>
+                  <span className="font-bold text-gray-500">
+                    {po.lineItems.reduce((s, i) => s + (i.qtyCartons || 0), 0).toLocaleString()}
+                  </span>
+                  <span className="font-bold text-lg">
+                    ${po.grandTotal?.toLocaleString("en-US", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    }) || "0.00"}
+                  </span>
+                </>
+              )}
             </div>
           </div>
         </div>
