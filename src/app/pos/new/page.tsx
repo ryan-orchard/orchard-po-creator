@@ -22,6 +22,7 @@ interface SKU {
   category: string;
   flavor: string;
   count: string;
+  uom: string;
   description: string;
   supplierItemName: string;
 }
@@ -44,7 +45,7 @@ interface LineItem {
   qtySticks: number;
   qtyCartons: number | null;
   unitCost: number;
-  costBasis: "Per Carton" | "Per Stick";
+  costBasis: "Per Carton" | "Per Stick" | "Per Each";
   totalPrice: number;
   shipToOverrideId?: string;
 }
@@ -135,17 +136,23 @@ export default function NewPOPage() {
             const sku = skus.find((s) => s.id === updates.skuId);
             if (sku) {
               updated.sku = sku;
-              const count = parseInt(sku.count);
-              if (sku.count === "Stick") {
+              if (sku.uom === "Each") {
+                updated.costBasis = "Per Each";
+                updated.section = "";
+                updated.qtyCartons = null;
+              } else if (sku.count === "Stick") {
                 updated.costBasis = "Per Stick";
                 updated.section = "Bulk Sticks";
-              } else if (!isNaN(count)) {
-                updated.costBasis = "Per Carton";
-                if (count === 28) updated.section = "28CT Packout";
-                else if (count === 10) updated.section = "10CT Retail";
-                else if (count === 14) updated.section = "14CT Amazon";
-                else if (count === 7) updated.section = "7CT Amazon";
-                else updated.section = `${count}CT`;
+              } else {
+                const count = parseInt(sku.count);
+                if (!isNaN(count)) {
+                  updated.costBasis = "Per Carton";
+                  if (count === 28) updated.section = "28CT Packout";
+                  else if (count === 10) updated.section = "10CT Retail";
+                  else if (count === 14) updated.section = "14CT Amazon";
+                  else if (count === 7) updated.section = "7CT Amazon";
+                  else updated.section = `${count}CT`;
+                }
               }
             }
           }
@@ -169,6 +176,10 @@ export default function NewPOPage() {
             } else if (updated.costBasis === "Per Stick") {
               // Stick-based: user enters sticks
               updated.totalPrice = updated.qtySticks * updated.unitCost;
+            } else if (updated.costBasis === "Per Each") {
+              // Each-based: user enters qty (stored in qtySticks)
+              updated.qtyCartons = null;
+              updated.totalPrice = updated.qtySticks * updated.unitCost;
             }
           }
 
@@ -188,6 +199,25 @@ export default function NewPOPage() {
   };
 
   const grandTotal = lineItems.reduce((sum, item) => sum + item.totalPrice, 0);
+
+  // Simple mode: hide carton/stick-specific columns when all items are "Each"
+  const isSimpleMode = (() => {
+    const itemsWithSkus = lineItems.filter((li) => li.sku);
+    if (itemsWithSkus.length > 0) {
+      return itemsWithSkus.every((li) => li.costBasis === "Per Each");
+    }
+    // No items selected yet — check if supplier's items are all "Each"
+    if (supplierId) {
+      const supplier = suppliers.find((s) => s.id === supplierId);
+      const supplierSkus = supplier?.categories?.length
+        ? skus.filter((s) => supplier.categories.includes(s.category))
+        : [];
+      if (supplierSkus.length > 0) {
+        return supplierSkus.every((s) => s.uom === "Each");
+      }
+    }
+    return false;
+  })();
 
   const handleSaveCustomShipTo = async () => {
     if (!customShipTo.name) return;
@@ -503,21 +533,27 @@ export default function NewPOPage() {
                   <th className="text-left px-3 py-2 text-xs font-semibold uppercase tracking-wider">
                     SKU
                   </th>
-                  <th className="text-left px-3 py-2 text-xs font-semibold uppercase tracking-wider">
-                    Section
-                  </th>
+                  {!isSimpleMode && (
+                    <th className="text-left px-3 py-2 text-xs font-semibold uppercase tracking-wider">
+                      Section
+                    </th>
+                  )}
                   <th className="text-right px-3 py-2 text-xs font-semibold uppercase tracking-wider">
-                    Qty (Sticks)
+                    {isSimpleMode ? "Qty" : "Qty (Sticks)"}
                   </th>
-                  <th className="text-right px-3 py-2 text-xs font-semibold uppercase tracking-wider">
-                    Qty (Ctns)
-                  </th>
+                  {!isSimpleMode && (
+                    <th className="text-right px-3 py-2 text-xs font-semibold uppercase tracking-wider">
+                      Qty (Ctns)
+                    </th>
+                  )}
                   <th className="text-right px-3 py-2 text-xs font-semibold uppercase tracking-wider">
                     Unit Cost
                   </th>
-                  <th className="text-center px-3 py-2 text-xs font-semibold uppercase tracking-wider">
-                    Cost Basis
-                  </th>
+                  {!isSimpleMode && (
+                    <th className="text-center px-3 py-2 text-xs font-semibold uppercase tracking-wider">
+                      Cost Basis
+                    </th>
+                  )}
                   <th className="text-right px-3 py-2 text-xs font-semibold uppercase tracking-wider">
                     Total
                   </th>
@@ -575,25 +611,27 @@ export default function NewPOPage() {
                                 {sku.standardSku}
                               </span>
                               <span className="text-gray-500 ml-2">
-                                {sku.flavor} · {sku.count} · {sku.category}
+                                {sku.flavor} · {sku.uom === "Each" ? "Each" : sku.count} · {sku.category}
                               </span>
                             </button>
                           ))}
                         </div>
                       )}
                     </td>
+                    {!isSimpleMode && (
+                      <td className="px-3 py-2">
+                        <input
+                          type="text"
+                          value={item.section}
+                          onChange={(e) =>
+                            updateLineItem(item.key, { section: e.target.value })
+                          }
+                          className="w-full border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-black"
+                        />
+                      </td>
+                    )}
                     <td className="px-3 py-2">
-                      <input
-                        type="text"
-                        value={item.section}
-                        onChange={(e) =>
-                          updateLineItem(item.key, { section: e.target.value })
-                        }
-                        className="w-full border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-black"
-                      />
-                    </td>
-                    <td className="px-3 py-2">
-                      {item.costBasis === "Per Stick" ? (
+                      {item.costBasis === "Per Stick" || item.costBasis === "Per Each" ? (
                         <input
                           type="number"
                           value={item.qtySticks || ""}
@@ -615,29 +653,31 @@ export default function NewPOPage() {
                         />
                       )}
                     </td>
-                    <td className="px-3 py-2">
-                      {item.costBasis === "Per Carton" ? (
-                        <input
-                          type="number"
-                          value={item.qtyCartons ?? ""}
-                          onChange={(e) =>
-                            updateLineItem(item.key, {
-                              qtyCartons: parseInt(e.target.value) || 0,
-                            })
-                          }
-                          className="w-full border border-gray-300 rounded px-2 py-1 text-xs text-right focus:outline-none focus:ring-2 focus:ring-black"
-                          placeholder="0"
-                        />
-                      ) : (
-                        <input
-                          type="number"
-                          value={item.qtyCartons ?? ""}
-                          readOnly
-                          className="w-full border border-gray-200 bg-gray-50 rounded px-2 py-1 text-xs text-right text-gray-500"
-                          placeholder="—"
-                        />
-                      )}
-                    </td>
+                    {!isSimpleMode && (
+                      <td className="px-3 py-2">
+                        {item.costBasis === "Per Carton" ? (
+                          <input
+                            type="number"
+                            value={item.qtyCartons ?? ""}
+                            onChange={(e) =>
+                              updateLineItem(item.key, {
+                                qtyCartons: parseInt(e.target.value) || 0,
+                              })
+                            }
+                            className="w-full border border-gray-300 rounded px-2 py-1 text-xs text-right focus:outline-none focus:ring-2 focus:ring-black"
+                            placeholder="0"
+                          />
+                        ) : (
+                          <input
+                            type="number"
+                            value={item.qtyCartons ?? ""}
+                            readOnly
+                            className="w-full border border-gray-200 bg-gray-50 rounded px-2 py-1 text-xs text-right text-gray-500"
+                            placeholder="—"
+                          />
+                        )}
+                      </td>
+                    )}
                     <td className="px-3 py-2">
                       <input
                         type="number"
@@ -652,11 +692,13 @@ export default function NewPOPage() {
                         placeholder="$0.00"
                       />
                     </td>
-                    <td className="px-3 py-2 text-center">
-                      <span className="text-xs text-gray-500">
-                        {item.costBasis}
-                      </span>
-                    </td>
+                    {!isSimpleMode && (
+                      <td className="px-3 py-2 text-center">
+                        <span className="text-xs text-gray-500">
+                          {item.costBasis}
+                        </span>
+                      </td>
+                    )}
                     <td className="px-3 py-2 text-right">
                       <span className="text-xs font-semibold tabular-nums">
                         ${item.totalPrice.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
