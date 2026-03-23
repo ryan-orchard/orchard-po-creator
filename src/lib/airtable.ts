@@ -22,6 +22,7 @@ export const TABLES = {
   INVOICES: "tblsqhIIwY94HPW4j",
   INVOICE_LINES: "tblmVy4gKNijRTFEm",
   ACTIVITY_LOG: "tbllLQCZQj16oc0zX",
+  INVENTORY_SNAPSHOTS: "tblXFUhjdVW7uGtK1",
 };
 
 export interface AirtableRecord {
@@ -130,4 +131,19 @@ export async function deleteRecord(
     method: "DELETE",
     headers,
   });
+}
+
+export async function deleteRecords(
+  tableId: string,
+  recordIds: string[]
+): Promise<void> {
+  // Airtable max 10 records per delete request
+  for (let i = 0; i < recordIds.length; i += 10) {
+    const batch = recordIds.slice(i, i + 10);
+    const params = batch.map((id) => `records[]=${id}`).join("&");
+    await fetch(`${BASE_URL}/${tableId}?${params}`, {
+      method: "DELETE",
+      headers,
+    });
+  }
 }

@@ -13,7 +13,19 @@ const SKU_MAPPING: Record<
   { standardSku: string; airtableId: string } | null
 >;
 
+// Reverse mapping: standardSku → stordSku (for unit cost lookup)
+const STANDARD_TO_STORD: Record<string, string> = {};
+for (const [stordSku, mapping] of Object.entries(SKU_MAPPING)) {
+  if (mapping?.standardSku) {
+    STANDARD_TO_STORD[mapping.standardSku] = stordSku;
+  }
+}
+
 const STORD_BASE_URL = "https://api-next.stord.com/v1";
+
+// Warehouse codes
+const WAREHOUSE_CODES = ["STORD", "ANS", "BMC"] as const;
+type WarehouseCode = (typeof WAREHOUSE_CODES)[number];
 
 interface StordFacilityBalance {
   sku: string;
@@ -38,20 +50,23 @@ interface StordFacilityBalance {
 }
 
 export interface OnHandItem {
-  stordSku: string;
-  standardSku: string | null;
+  standardSku: string;
+  stordSku: string | null;
   category: string | null;
   productName: string;
-  facility: string;
-  available: number;
-  allocated: number;
-  locked: number;
-  incoming: number;
-  damaged: number;
+  warehouse: string;
   totalOnHand: number;
+  incoming: number;
   unitCost: number | null;
   extendedValue: number | null;
-  outOfStock: boolean;
+}
+
+export interface WarehouseInfo {
+  code: string;
+  name: string;
+  sourceType: "api" | "calculated" | "snapshot";
+  sourceLabel: string;
+  asOf: string | null;
 }
 
 export interface OnHandResponse {
@@ -62,11 +77,14 @@ export interface OnHandResponse {
     totalValue: number;
     totalIncoming: number;
   };
+  warehouses: WarehouseInfo[];
   costEffectiveDate: string;
   fetchedAt: string;
 }
 
-async function fetchAllFacilityBalances(
+// --- Stord API fetch ---
+
+async function fetchStordInventory(
   apiKey: string,
   orgId: string,
   networkId: string
@@ -101,113 +119,294 @@ async function fetchAllFacilityBalances(
   return results;
 }
 
-// Server-side cache: 24 hours
+function mapStordToOnHand(
+  balances: StordFacilityBalance[],
+  categoryByRecordId: Map<string, string>
+): OnHandItem[] {
+  return balances.map((b) => {
+    const mapping = SKU_MAPPING[b.sku];
+    const totalOnHand = parseInt(b.total_on_hand) || 0;
+    const incoming = parseInt(b.incoming) || 0;
+    const unitCost = UNIT_COSTS[b.sku] ?? null;
+    const extendedValue =
+      unitCost !== null && totalOnHand > 0
+        ? Math.round(unitCost * totalOnHand * 100) / 100
+        : null;
+
+    const category = mapping?.airtableId
+      ? categoryByRecordId.get(mapping.airtableId) || null
+      : null;
+
+    return {
+      standardSku: mapping?.standardSku || b.sku,
+      stordSku: b.sku,
+      category,
+      productName: b.name,
+      warehouse: "STORD",
+      totalOnHand,
+      incoming,
+      unitCost,
+      extendedValue,
+    };
+  });
+}
+
+// --- ANS calculated from receipts ---
+
+async function fetchANSInventory(
+  skuMap: Map<string, { standardSku: string; category: string }>
+): Promise<OnHandItem[]> {
+  // Find the ANS warehouse record ID
+  const warehouses = await getRecords(TABLES.WAREHOUSES, {
+    filterByFormula: '{Code} = "ANS"',
+  });
+  if (warehouses.length === 0) return [];
+  const ansWarehouseId = warehouses[0].id;
+
+  // Get all receipts at ANS
+  const receipts = await getRecords(TABLES.RECEIPTS);
+  const ansReceiptIds = new Set(
+    receipts
+      .filter((r) => {
+        const whLinks = r.fields["Warehouses"] as string[] | undefined;
+        return whLinks?.includes(ansWarehouseId);
+      })
+      .map((r) => r.id)
+  );
+
+  if (ansReceiptIds.size === 0) return [];
+
+  // Get all receipt lines and filter to ANS receipts
+  const allReceiptLines = await getRecords(TABLES.RECEIPT_LINES);
+  const ansLines = allReceiptLines.filter((rl) => {
+    const receiptLinks = rl.fields["Receipt"] as string[] | undefined;
+    return receiptLinks?.some((id) => ansReceiptIds.has(id));
+  });
+
+  // Aggregate by SKU record ID
+  const qtyBySkuId = new Map<string, number>();
+  for (const line of ansLines) {
+    const skuLinks = line.fields["SKU"] as string[] | undefined;
+    const skuId = skuLinks?.[0];
+    if (!skuId) continue;
+    const qty = (line.fields["Qty Received"] as number) || 0;
+    qtyBySkuId.set(skuId, (qtyBySkuId.get(skuId) || 0) + qty);
+  }
+
+  // Convert to OnHandItem[]
+  const items: OnHandItem[] = [];
+  for (const [skuId, qty] of qtyBySkuId) {
+    const skuInfo = skuMap.get(skuId);
+    const standardSku = skuInfo?.standardSku || skuId;
+    const stordSku = STANDARD_TO_STORD[standardSku] || null;
+    const unitCost = stordSku ? (UNIT_COSTS[stordSku] ?? null) : null;
+    const extendedValue =
+      unitCost !== null && qty > 0
+        ? Math.round(unitCost * qty * 100) / 100
+        : null;
+
+    items.push({
+      standardSku,
+      stordSku,
+      category: skuInfo?.category || null,
+      productName: standardSku,
+      warehouse: "ANS",
+      totalOnHand: qty,
+      incoming: 0,
+      unitCost,
+      extendedValue,
+    });
+  }
+
+  return items;
+}
+
+// --- BMC from inventory snapshots ---
+
+async function fetchBMCInventory(
+  skuMap: Map<string, { standardSku: string; category: string }>
+): Promise<{ items: OnHandItem[]; snapshotDate: string | null }> {
+  // Find the BMC warehouse record ID
+  const warehouses = await getRecords(TABLES.WAREHOUSES, {
+    filterByFormula: '{Code} = "BMC"',
+  });
+  if (warehouses.length === 0) return { items: [], snapshotDate: null };
+  const bmcWarehouseId = warehouses[0].id;
+
+  // Get all snapshot records for BMC
+  const snapshots = await getRecords(TABLES.INVENTORY_SNAPSHOTS);
+  const bmcSnapshots = snapshots.filter((s) => {
+    const whLinks = s.fields["Warehouse"] as string[] | undefined;
+    return whLinks?.includes(bmcWarehouseId);
+  });
+
+  if (bmcSnapshots.length === 0) return { items: [], snapshotDate: null };
+
+  // Find the latest snapshot date
+  const snapshotDate = bmcSnapshots.reduce((latest, s) => {
+    const d = s.fields["Snapshot Date"] as string | undefined;
+    return d && d > (latest || "") ? d : latest;
+  }, null as string | null);
+
+  // Filter to only records from the latest date
+  const latestSnapshots = snapshotDate
+    ? bmcSnapshots.filter((s) => s.fields["Snapshot Date"] === snapshotDate)
+    : bmcSnapshots;
+
+  const items: OnHandItem[] = latestSnapshots.map((s) => {
+    const skuLinks = s.fields["SKU"] as string[] | undefined;
+    const skuId = skuLinks?.[0];
+    const qty = (s.fields["Qty On Hand"] as number) || 0;
+    const skuInfo = skuId ? skuMap.get(skuId) : undefined;
+    const standardSku = skuInfo?.standardSku || "Unknown";
+    const stordSku = STANDARD_TO_STORD[standardSku] || null;
+    const unitCost = stordSku ? (UNIT_COSTS[stordSku] ?? null) : null;
+    const extendedValue =
+      unitCost !== null && qty > 0
+        ? Math.round(unitCost * qty * 100) / 100
+        : null;
+
+    return {
+      standardSku,
+      stordSku,
+      category: skuInfo?.category || null,
+      productName: standardSku,
+      warehouse: "BMC",
+      totalOnHand: qty,
+      incoming: 0,
+      unitCost,
+      extendedValue,
+    };
+  });
+
+  return { items, snapshotDate };
+}
+
+// Server-side cache: 24 hours (Stord only — ANS/BMC always fresh from Airtable)
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-let cachedResponse: OnHandResponse | null = null;
-let cachedAt = 0;
+let stordCachedItems: OnHandItem[] | null = null;
+let stordCachedAt = 0;
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const forceRefresh = searchParams.get("refresh") === "1";
-
-  // Return cached data if fresh
-  if (!forceRefresh && cachedResponse && Date.now() - cachedAt < CACHE_TTL_MS) {
-    return NextResponse.json(cachedResponse);
-  }
-  const apiKey = process.env.STORD_API_KEY;
-  const orgId = process.env.STORD_ORG_ID;
-  const networkId = process.env.STORD_NETWORK_ID;
-
-  if (!apiKey) {
-    return NextResponse.json(
-      { error: "STORD_API_KEY not configured" },
-      { status: 500 }
-    );
-  }
-  if (!orgId || !networkId) {
-    return NextResponse.json(
-      { error: "STORD_ORG_ID or STORD_NETWORK_ID not configured" },
-      { status: 500 }
-    );
-  }
+  const warehouseFilter = (searchParams.get("warehouse") || "all").toUpperCase();
 
   try {
-    const [balances, allItems] = await Promise.all([
-      fetchAllFacilityBalances(apiKey, orgId, networkId),
-      getRecords(TABLES.SKUS),
-    ]);
+    // Always fetch items master data (needed for all warehouses)
+    const allItems = await getRecords(TABLES.SKUS);
 
-    // Build lookup: airtableId → category
+    // Build lookups
     const categoryByRecordId = new Map<string, string>();
+    const skuMap = new Map<string, { standardSku: string; category: string }>();
     for (const item of allItems) {
-      categoryByRecordId.set(
-        item.id,
-        (item.fields["Category"] as string) || ""
+      const category = (item.fields["Category"] as string) || "";
+      const standardSku = (item.fields["Standard SKU"] as string) || "";
+      categoryByRecordId.set(item.id, category);
+      skuMap.set(item.id, { standardSku, category });
+    }
+
+    // Fetch data for requested warehouses
+    const includeStord = warehouseFilter === "ALL" || warehouseFilter === "STORD";
+    const includeANS = warehouseFilter === "ALL" || warehouseFilter === "ANS";
+    const includeBMC = warehouseFilter === "ALL" || warehouseFilter === "BMC";
+
+    let stordItems: OnHandItem[] = [];
+    let ansItems: OnHandItem[] = [];
+    let bmcResult: { items: OnHandItem[]; snapshotDate: string | null } = { items: [], snapshotDate: null };
+
+    // Parallel fetch for all requested warehouses
+    const fetches: Promise<void>[] = [];
+
+    if (includeStord) {
+      const useStordCache = !forceRefresh && stordCachedItems && Date.now() - stordCachedAt < CACHE_TTL_MS;
+      if (useStordCache) {
+        stordItems = stordCachedItems!;
+      } else {
+        const apiKey = process.env.STORD_API_KEY;
+        const orgId = process.env.STORD_ORG_ID;
+        const networkId = process.env.STORD_NETWORK_ID;
+        if (apiKey && orgId && networkId) {
+          fetches.push(
+            fetchStordInventory(apiKey, orgId, networkId).then((balances) => {
+              stordItems = mapStordToOnHand(balances, categoryByRecordId);
+              stordCachedItems = stordItems;
+              stordCachedAt = Date.now();
+            })
+          );
+        }
+      }
+    }
+
+    if (includeANS) {
+      fetches.push(
+        fetchANSInventory(skuMap).then((items) => {
+          ansItems = items;
+        })
       );
     }
 
-    const items: OnHandItem[] = balances
-      .map((b) => {
-        const mapping = SKU_MAPPING[b.sku];
-        const totalOnHand = parseInt(b.total_on_hand) || 0;
-        const available = parseInt(b.available) || 0;
-        const allocated = parseInt(b.allocated) || 0;
-        const locked = parseInt(b.locked) || 0;
-        const incoming = parseInt(b.incoming) || 0;
-        const damaged = parseInt(b.damaged) || 0;
+    if (includeBMC) {
+      fetches.push(
+        fetchBMCInventory(skuMap).then((result) => {
+          bmcResult = result;
+        })
+      );
+    }
 
-        const category = mapping?.airtableId
-          ? categoryByRecordId.get(mapping.airtableId) || null
-          : null;
+    await Promise.all(fetches);
 
-        const unitCost = UNIT_COSTS[b.sku] ?? null;
-        const extendedValue =
-          unitCost !== null && totalOnHand > 0
-            ? Math.round(unitCost * totalOnHand * 100) / 100
-            : null;
-
-        return {
-          stordSku: b.sku,
-          standardSku: mapping?.standardSku || null,
-          category,
-          productName: b.name,
-          facility: b.facility_alias,
-          available,
-          allocated,
-          locked,
-          incoming,
-          damaged,
-          totalOnHand,
-          unitCost,
-          extendedValue,
-          outOfStock: b.inventory_alerts.out_of_stock,
-        };
-      })
-      // Sort: mapped SKUs first (by standardSku), then unmapped (by stordSku)
-      .sort((a, b) => {
-        if (a.standardSku && !b.standardSku) return -1;
-        if (!a.standardSku && b.standardSku) return 1;
-        const aKey = a.standardSku || a.stordSku;
-        const bKey = b.standardSku || b.stordSku;
-        return aKey.localeCompare(bKey);
-      });
+    // Combine all items
+    const allOnHand = [...stordItems, ...ansItems, ...bmcResult.items].sort(
+      (a, b) => a.standardSku.localeCompare(b.standardSku)
+    );
 
     const summary = {
-      totalSkus: items.length,
-      totalOnHand: items.reduce((sum, i) => sum + i.totalOnHand, 0),
-      totalValue: items.reduce((sum, i) => sum + (i.extendedValue ?? 0), 0),
-      totalIncoming: items.reduce((sum, i) => sum + i.incoming, 0),
+      totalSkus: new Set(allOnHand.map((i) => i.standardSku)).size,
+      totalOnHand: allOnHand.reduce((sum, i) => sum + i.totalOnHand, 0),
+      totalValue: allOnHand.reduce((sum, i) => sum + (i.extendedValue ?? 0), 0),
+      totalIncoming: allOnHand.reduce((sum, i) => sum + i.incoming, 0),
     };
 
+    // Build warehouse info
+    const warehouses: WarehouseInfo[] = [];
+    if (includeStord) {
+      warehouses.push({
+        code: "STORD",
+        name: "Stord",
+        sourceType: "api",
+        sourceLabel: "Live from Stord API",
+        asOf: new Date().toISOString(),
+      });
+    }
+    if (includeANS) {
+      warehouses.push({
+        code: "ANS",
+        name: "ANS",
+        sourceType: "calculated",
+        sourceLabel: "Calculated from receipts",
+        asOf: new Date().toISOString(),
+      });
+    }
+    if (includeBMC) {
+      warehouses.push({
+        code: "BMC",
+        name: "BMC",
+        sourceType: "snapshot",
+        sourceLabel: bmcResult.snapshotDate
+          ? `Snapshot from ${bmcResult.snapshotDate}`
+          : "No snapshot loaded",
+        asOf: bmcResult.snapshotDate,
+      });
+    }
+
     const response: OnHandResponse = {
-      items,
+      items: allOnHand,
       summary,
+      warehouses,
       costEffectiveDate: "2026-02-28",
       fetchedAt: new Date().toISOString(),
     };
-
-    cachedResponse = response;
-    cachedAt = Date.now();
 
     return NextResponse.json(response);
   } catch (error) {

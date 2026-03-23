@@ -3,6 +3,8 @@
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 
+type IngestionTab = "receipts" | "snapshots";
+
 // Default date range: last 30 days
 function defaultDateRange() {
   const to = new Date();
@@ -58,9 +60,22 @@ interface IngestResult {
   availableItems: AvailableItem[];
 }
 
+// Snapshot types
+interface SnapshotLine {
+  standardSku: string;
+  skuRecordId: string;
+  qty: number;
+}
+
+interface SnapshotPreview {
+  lines: SnapshotLine[];
+  unmappedSkus: string[];
+}
+
 export default function DataIngestionPage() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [activeTab, setActiveTab] = useState<IngestionTab>("receipts");
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState<IngestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -75,6 +90,16 @@ export default function DataIngestionPage() {
   const [skuOverrides, setSkuOverrides] = useState<Record<string, string>>({});
   // Deleted lines: set of "receiptIdx-lineIdx" keys
   const [deletedLines, setDeletedLines] = useState<Set<string>>(new Set());
+
+  // Snapshot upload state
+  const snapshotFileRef = useRef<HTMLInputElement>(null);
+  const [snapshotWarehouse, setSnapshotWarehouse] = useState("BMC");
+  const [snapshotDate, setSnapshotDate] = useState(new Date().toISOString().split("T")[0]);
+  const [snapshotPreview, setSnapshotPreview] = useState<SnapshotPreview | null>(null);
+  const [snapshotUploading, setSnapshotUploading] = useState(false);
+  const [snapshotSubmitting, setSnapshotSubmitting] = useState(false);
+  const [snapshotSubmitted, setSnapshotSubmitted] = useState(false);
+  const [snapshotError, setSnapshotError] = useState<string | null>(null);
 
   const handleFileUpload = async (file: File) => {
     setUploading(true);
@@ -207,6 +232,98 @@ export default function DataIngestionPage() {
     resolved: { label: "Mapped", color: "bg-gold-100 text-gold-800" },
   };
 
+  // --- Snapshot handlers ---
+
+  const handleSnapshotFile = async (file: File) => {
+    setSnapshotUploading(true);
+    setSnapshotError(null);
+    setSnapshotPreview(null);
+    setSnapshotSubmitted(false);
+
+    try {
+      // Read CSV file
+      const text = await file.text();
+      const rows = text.split("\n").map((r) => r.trim()).filter(Boolean);
+      if (rows.length < 2) throw new Error("File is empty or has no data rows");
+
+      // Parse header to find SKU and Qty columns
+      const header = rows[0].split(",").map((h) => h.trim().toLowerCase().replace(/"/g, ""));
+      const skuCol = header.findIndex((h) =>
+        ["sku", "standard sku", "standard_sku", "item", "product"].includes(h)
+      );
+      const qtyCol = header.findIndex((h) =>
+        ["qty", "quantity", "qty on hand", "qty_on_hand", "on hand", "on_hand", "available", "total"].includes(h)
+      );
+
+      if (skuCol === -1) throw new Error("Could not find SKU column. Expected: sku, standard sku, item, or product");
+      if (qtyCol === -1) throw new Error("Could not find quantity column. Expected: qty, quantity, on hand, or available");
+
+      // Fetch items from Airtable to map SKUs
+      const itemsRes = await fetch("/api/skus");
+      const itemsData = await itemsRes.json();
+      const skuToRecord = new Map<string, { id: string; standardSku: string }>();
+      for (const item of itemsData) {
+        const sku = (item.fields?.["Standard SKU"] || item.standardSku || "") as string;
+        if (sku) skuToRecord.set(sku.toUpperCase(), { id: item.id, standardSku: sku });
+      }
+
+      // Parse data rows
+      const lines: SnapshotLine[] = [];
+      const unmappedSkus: string[] = [];
+
+      for (let i = 1; i < rows.length; i++) {
+        const cols = rows[i].split(",").map((c) => c.trim().replace(/"/g, ""));
+        const sku = cols[skuCol];
+        const qty = parseInt(cols[qtyCol]) || 0;
+        if (!sku || qty === 0) continue;
+
+        const match = skuToRecord.get(sku.toUpperCase());
+        if (match) {
+          lines.push({ standardSku: match.standardSku, skuRecordId: match.id, qty });
+        } else {
+          unmappedSkus.push(sku);
+        }
+      }
+
+      setSnapshotPreview({ lines, unmappedSkus });
+    } catch (err) {
+      setSnapshotError(err instanceof Error ? err.message : "Failed to parse file");
+    } finally {
+      setSnapshotUploading(false);
+    }
+  };
+
+  const handleSnapshotSubmit = async () => {
+    if (!snapshotPreview || snapshotPreview.lines.length === 0) return;
+    setSnapshotSubmitting(true);
+
+    try {
+      const res = await fetch("/api/warehouse/snapshots", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          warehouseCode: snapshotWarehouse,
+          date: snapshotDate,
+          lines: snapshotPreview.lines.map((l) => ({
+            skuRecordId: l.skuRecordId,
+            qty: l.qty,
+          })),
+        }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || "Upload failed");
+      }
+
+      setSnapshotSubmitted(true);
+    } catch (err) {
+      setSnapshotError(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setSnapshotSubmitting(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-6xl mx-auto px-6 py-8">
@@ -214,9 +331,36 @@ export default function DataIngestionPage() {
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-gray-900">Data Ingestion</h1>
           <p className="text-sm text-gray-500 mt-1">
-            Upload Stord Inventory Adjustments report to import receipt data
+            Import receipt data and inventory snapshots
           </p>
         </div>
+
+        {/* Tabs */}
+        <div className="flex gap-1 mb-6 bg-gray-100 rounded-lg p-1 w-fit">
+          <button
+            onClick={() => setActiveTab("receipts")}
+            className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+              activeTab === "receipts"
+                ? "bg-white text-gray-900 shadow-sm"
+                : "text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            Stord Receipts
+          </button>
+          <button
+            onClick={() => setActiveTab("snapshots")}
+            className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+              activeTab === "snapshots"
+                ? "bg-white text-gray-900 shadow-sm"
+                : "text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            Inventory Snapshots
+          </button>
+        </div>
+
+        {/* === RECEIPTS TAB === */}
+        {activeTab === "receipts" && <>
 
         {/* Import Options */}
         {!result && (
@@ -601,6 +745,197 @@ export default function DataIngestionPage() {
             )}
           </div>
         )}
+
+        </>}
+
+        {/* === INVENTORY SNAPSHOTS TAB === */}
+        {activeTab === "snapshots" && (
+          <div className="space-y-6">
+            {/* Upload Section */}
+            {!snapshotPreview && !snapshotSubmitted && (
+              <div className="bg-white rounded-lg border border-gray-200 p-6">
+                <h2 className="text-base font-semibold text-gray-900 mb-1">
+                  Upload Inventory Snapshot
+                </h2>
+                <p className="text-sm text-gray-500 mb-4">
+                  Upload a CSV with current on-hand quantities for a warehouse. This replaces any existing snapshot.
+                </p>
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Warehouse</label>
+                    <select
+                      value={snapshotWarehouse}
+                      onChange={(e) => setSnapshotWarehouse(e.target.value)}
+                      className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm"
+                    >
+                      <option value="BMC">BMC</option>
+                      <option value="ANS">ANS</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">As of Date</label>
+                    <input
+                      type="date"
+                      value={snapshotDate}
+                      onChange={(e) => setSnapshotDate(e.target.value)}
+                      className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm"
+                    />
+                  </div>
+                </div>
+                <div
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const file = e.dataTransfer.files[0];
+                    if (file) handleSnapshotFile(file);
+                  }}
+                  onDragOver={(e) => e.preventDefault()}
+                  className="border border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-gray-400 transition-colors"
+                >
+                  {snapshotUploading ? (
+                    <p className="text-sm text-gray-500">Parsing file...</p>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => snapshotFileRef.current?.click()}
+                        className="bg-white border border-gray-300 text-gray-700 px-4 py-2 text-sm rounded-md hover:bg-gray-50"
+                      >
+                        Choose CSV
+                      </button>
+                      <input
+                        ref={snapshotFileRef}
+                        type="file"
+                        accept=".csv"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) handleSnapshotFile(file);
+                        }}
+                      />
+                      <p className="text-xs text-gray-400 mt-3">
+                        CSV with columns: SKU (or Standard SKU), Qty (or Quantity, On Hand)
+                      </p>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Snapshot Error */}
+            {snapshotError && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                <p className="text-red-800 text-sm">{snapshotError}</p>
+              </div>
+            )}
+
+            {/* Snapshot Preview */}
+            {snapshotPreview && !snapshotSubmitted && (
+              <div className="bg-white rounded-lg border border-gray-200 p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-semibold text-gray-900">
+                    Preview — {snapshotWarehouse} Snapshot ({snapshotDate})
+                  </h2>
+                  <button
+                    onClick={() => {
+                      setSnapshotPreview(null);
+                      setSnapshotError(null);
+                    }}
+                    className="text-sm text-gray-500 hover:text-gray-700"
+                  >
+                    &larr; Start over
+                  </button>
+                </div>
+
+                {snapshotPreview.unmappedSkus.length > 0 && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
+                    <p className="text-sm text-amber-800">
+                      <strong>{snapshotPreview.unmappedSkus.length} SKU(s) not found</strong> in Items master data and will be skipped:{" "}
+                      {snapshotPreview.unmappedSkus.join(", ")}
+                    </p>
+                  </div>
+                )}
+
+                <table className="w-full text-sm mb-4">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-200">
+                      <th className="text-left px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                        SKU
+                      </th>
+                      <th className="text-right px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                        Qty On Hand
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {snapshotPreview.lines.map((line) => (
+                      <tr key={line.skuRecordId} className="border-b border-gray-100">
+                        <td className="px-3 py-2.5 text-xs font-semibold text-gray-900">
+                          {line.standardSku}
+                        </td>
+                        <td className="px-3 py-2.5 text-right text-gray-900">
+                          {line.qty.toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-gray-50 border-t-2 border-gray-300">
+                      <td className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                        Total
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-bold text-gray-900">
+                        {snapshotPreview.lines.reduce((s, l) => s + l.qty, 0).toLocaleString()}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-gray-500">
+                    {snapshotPreview.lines.length} SKU(s) will replace existing {snapshotWarehouse} snapshot
+                  </p>
+                  <button
+                    onClick={handleSnapshotSubmit}
+                    disabled={snapshotSubmitting}
+                    className="bg-gray-900 text-white px-6 py-2 text-sm rounded-md hover:bg-gray-800 disabled:opacity-50"
+                  >
+                    {snapshotSubmitting ? "Uploading..." : `Upload ${snapshotWarehouse} Snapshot`}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Snapshot Success */}
+            {snapshotSubmitted && (
+              <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
+                <p className="text-green-600 font-medium mb-2">
+                  Snapshot uploaded successfully
+                </p>
+                <p className="text-sm text-gray-500 mb-4">
+                  {snapshotWarehouse} inventory has been updated as of {snapshotDate}.
+                </p>
+                <div className="flex items-center justify-center gap-3">
+                  <button
+                    onClick={() => {
+                      setSnapshotPreview(null);
+                      setSnapshotSubmitted(false);
+                      setSnapshotError(null);
+                    }}
+                    className="border border-gray-300 text-gray-700 px-4 py-2 text-sm rounded-md hover:bg-gray-50"
+                  >
+                    Upload Another
+                  </button>
+                  <button
+                    onClick={() => router.push("/warehouse/on-hand")}
+                    className="bg-gray-900 text-white px-4 py-2 text-sm rounded-md hover:bg-gray-800"
+                  >
+                    View On-Hand Inventory
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
       </div>
     </div>
   );

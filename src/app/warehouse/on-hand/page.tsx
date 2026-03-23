@@ -1,22 +1,25 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 
 interface OnHandItem {
-  stordSku: string;
-  standardSku: string | null;
+  standardSku: string;
+  stordSku: string | null;
   category: string | null;
   productName: string;
-  facility: string;
-  available: number;
-  allocated: number;
-  locked: number;
-  incoming: number;
-  damaged: number;
+  warehouse: string;
   totalOnHand: number;
+  incoming: number;
   unitCost: number | null;
   extendedValue: number | null;
-  outOfStock: boolean;
+}
+
+interface WarehouseInfo {
+  code: string;
+  name: string;
+  sourceType: "api" | "calculated" | "snapshot";
+  sourceLabel: string;
+  asOf: string | null;
 }
 
 interface OnHandResponse {
@@ -27,18 +30,35 @@ interface OnHandResponse {
     totalValue: number;
     totalIncoming: number;
   };
+  warehouses: WarehouseInfo[];
   costEffectiveDate: string;
   fetchedAt: string;
 }
 
-type SortField =
-  | "sku"
-  | "category"
-  | "stordSku"
-  | "totalOnHand"
-  | "unitCost"
-  | "extendedValue"
-  | "incoming";
+// Pivoted row: one SKU across all warehouses
+interface PivotRow {
+  standardSku: string;
+  stordSku: string | null;
+  category: string | null;
+  stord: number;
+  ans: number;
+  bmc: number;
+  total: number;
+  incoming: number;
+  unitCost: number | null;
+  totalValue: number | null;
+}
+
+type WarehouseTab = "ALL" | "STORD" | "ANS" | "BMC";
+
+const TABS: { key: WarehouseTab; label: string }[] = [
+  { key: "ALL", label: "All Locations" },
+  { key: "STORD", label: "Stord" },
+  { key: "ANS", label: "ANS" },
+  { key: "BMC", label: "BMC" },
+];
+
+type SortField = "sku" | "category" | "totalOnHand" | "unitCost" | "totalValue" | "incoming";
 type SortDir = "asc" | "desc";
 
 export default function OnHandInventoryPage() {
@@ -46,17 +66,18 @@ export default function OnHandInventoryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [sortField, setSortField] = useState<SortField>("extendedValue");
+  const [sortField, setSortField] = useState<SortField>("totalValue");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [showZero, setShowZero] = useState(false);
+  const [activeTab, setActiveTab] = useState<WarehouseTab>("ALL");
 
   const fetchData = async (forceRefresh = false) => {
     setLoading(true);
     setError(null);
     try {
-      const url = forceRefresh
-        ? "/api/warehouse/on-hand?refresh=1"
-        : "/api/warehouse/on-hand";
+      const params = new URLSearchParams();
+      if (forceRefresh) params.set("refresh", "1");
+      const url = `/api/warehouse/on-hand?${params}`;
       const res = await fetch(url);
       if (!res.ok) {
         const errData = await res.json();
@@ -75,51 +96,116 @@ export default function OnHandInventoryPage() {
     fetchData();
   }, []);
 
-  const handleSort = (field: SortField) => {
-    if (sortField === field) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortField(field);
-      setSortDir(
-        field === "sku" || field === "category" || field === "stordSku"
-          ? "asc"
-          : "desc"
+  // Build pivot rows for "All Locations" view
+  const pivotRows = useMemo((): PivotRow[] => {
+    if (!data) return [];
+    const bySkuMap = new Map<string, PivotRow>();
+
+    for (const item of data.items) {
+      const key = item.standardSku;
+      let row = bySkuMap.get(key);
+      if (!row) {
+        row = {
+          standardSku: item.standardSku,
+          stordSku: item.stordSku,
+          category: item.category,
+          stord: 0,
+          ans: 0,
+          bmc: 0,
+          total: 0,
+          incoming: 0,
+          unitCost: item.unitCost,
+          totalValue: null,
+        };
+        bySkuMap.set(key, row);
+      }
+
+      if (item.warehouse === "STORD") row.stord += item.totalOnHand;
+      else if (item.warehouse === "ANS") row.ans += item.totalOnHand;
+      else if (item.warehouse === "BMC") row.bmc += item.totalOnHand;
+      row.incoming += item.incoming;
+
+      // Prefer non-null unit cost
+      if (item.unitCost !== null) row.unitCost = item.unitCost;
+    }
+
+    // Calculate totals
+    for (const row of bySkuMap.values()) {
+      row.total = row.stord + row.ans + row.bmc;
+      row.totalValue =
+        row.unitCost !== null && row.total > 0
+          ? Math.round(row.unitCost * row.total * 100) / 100
+          : null;
+    }
+
+    return Array.from(bySkuMap.values());
+  }, [data]);
+
+  // Filter items for single-warehouse tabs
+  const singleWarehouseItems = useMemo(() => {
+    if (!data || activeTab === "ALL") return [];
+    return data.items.filter((item) => item.warehouse === activeTab);
+  }, [data, activeTab]);
+
+  // Filtered + sorted pivot rows (All tab)
+  const filteredPivot = useMemo(() => {
+    let rows = pivotRows;
+    if (!showZero) rows = rows.filter((r) => r.total > 0);
+    if (search) {
+      const q = search.toLowerCase();
+      rows = rows.filter(
+        (r) =>
+          r.standardSku.toLowerCase().includes(q) ||
+          (r.stordSku?.toLowerCase().includes(q) ?? false) ||
+          (r.category?.toLowerCase().includes(q) ?? false)
       );
     }
-  };
-
-  const filtered = data?.items
-    .filter((item) => {
-      if (!showZero && item.totalOnHand <= 0) return false;
-      if (!search) return true;
-      const q = search.toLowerCase();
-      return (
-        item.stordSku.toLowerCase().includes(q) ||
-        (item.standardSku?.toLowerCase().includes(q) ?? false) ||
-        item.productName.toLowerCase().includes(q) ||
-        (item.category?.toLowerCase().includes(q) ?? false)
-      );
-    })
-    .sort((a, b) => {
+    return rows.sort((a, b) => {
       const dir = sortDir === "asc" ? 1 : -1;
       switch (sortField) {
         case "sku":
-          return (
-            (a.standardSku || a.stordSku).localeCompare(
-              b.standardSku || b.stordSku
-            ) * dir
-          );
+          return a.standardSku.localeCompare(b.standardSku) * dir;
         case "category":
-          return (
-            (a.category || "zzz").localeCompare(b.category || "zzz") * dir
-          );
-        case "stordSku":
-          return a.stordSku.localeCompare(b.stordSku) * dir;
+          return (a.category || "zzz").localeCompare(b.category || "zzz") * dir;
+        case "totalOnHand":
+          return (a.total - b.total) * dir;
+        case "unitCost":
+          return ((a.unitCost ?? 0) - (b.unitCost ?? 0)) * dir;
+        case "totalValue":
+          return ((a.totalValue ?? 0) - (b.totalValue ?? 0)) * dir;
+        case "incoming":
+          return (a.incoming - b.incoming) * dir;
+        default:
+          return 0;
+      }
+    });
+  }, [pivotRows, showZero, search, sortField, sortDir]);
+
+  // Filtered + sorted items (single warehouse tab)
+  const filteredSingle = useMemo(() => {
+    let items = singleWarehouseItems;
+    if (!showZero) items = items.filter((i) => i.totalOnHand > 0);
+    if (search) {
+      const q = search.toLowerCase();
+      items = items.filter(
+        (i) =>
+          i.standardSku.toLowerCase().includes(q) ||
+          (i.stordSku?.toLowerCase().includes(q) ?? false) ||
+          (i.category?.toLowerCase().includes(q) ?? false)
+      );
+    }
+    return items.sort((a, b) => {
+      const dir = sortDir === "asc" ? 1 : -1;
+      switch (sortField) {
+        case "sku":
+          return a.standardSku.localeCompare(b.standardSku) * dir;
+        case "category":
+          return (a.category || "zzz").localeCompare(b.category || "zzz") * dir;
         case "totalOnHand":
           return (a.totalOnHand - b.totalOnHand) * dir;
         case "unitCost":
           return ((a.unitCost ?? 0) - (b.unitCost ?? 0)) * dir;
-        case "extendedValue":
+        case "totalValue":
           return ((a.extendedValue ?? 0) - (b.extendedValue ?? 0)) * dir;
         case "incoming":
           return (a.incoming - b.incoming) * dir;
@@ -127,6 +213,34 @@ export default function OnHandInventoryPage() {
           return 0;
       }
     });
+  }, [singleWarehouseItems, showZero, search, sortField, sortDir]);
+
+  // Summary for current view
+  const viewSummary = useMemo(() => {
+    if (activeTab === "ALL") {
+      return {
+        totalSkus: filteredPivot.length,
+        totalOnHand: filteredPivot.reduce((s, r) => s + r.total, 0),
+        totalValue: filteredPivot.reduce((s, r) => s + (r.totalValue ?? 0), 0),
+        totalIncoming: filteredPivot.reduce((s, r) => s + r.incoming, 0),
+      };
+    }
+    return {
+      totalSkus: filteredSingle.length,
+      totalOnHand: filteredSingle.reduce((s, i) => s + i.totalOnHand, 0),
+      totalValue: filteredSingle.reduce((s, i) => s + (i.extendedValue ?? 0), 0),
+      totalIncoming: filteredSingle.reduce((s, i) => s + i.incoming, 0),
+    };
+  }, [activeTab, filteredPivot, filteredSingle]);
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      setSortDir(field === "sku" || field === "category" ? "asc" : "desc");
+    }
+  };
 
   const SortHeader = ({
     field,
@@ -145,9 +259,7 @@ export default function OnHandInventoryPage() {
     >
       {label}
       {sortField === field && (
-        <span className="ml-1">
-          {sortDir === "asc" ? "\u2191" : "\u2193"}
-        </span>
+        <span className="ml-1">{sortDir === "asc" ? "\u2191" : "\u2193"}</span>
       )}
     </th>
   );
@@ -157,6 +269,8 @@ export default function OnHandInventoryPage() {
 
   const fmtCompact = (n: number) =>
     n >= 1000 ? "$" + (n / 1000).toFixed(1) + "k" : fmt(n);
+
+  const activeWarehouse = data?.warehouses?.find((w) => w.code === activeTab);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -168,27 +282,18 @@ export default function OnHandInventoryPage() {
               On-Hand Inventory
             </h1>
             <p className="text-sm text-gray-500 mt-1">
-              Live inventory from Stord — quantities and valuation
+              Inventory across all locations
               {data && (
-                <>
-                  <span className="ml-2 text-gray-400">
-                    Costs as of{" "}
-                    {new Date(
-                      data.costEffectiveDate + "T00:00:00"
-                    ).toLocaleDateString("en-US", {
-                      month: "short",
-                      day: "numeric",
-                      year: "numeric",
-                    })}
-                  </span>
-                  <span className="ml-2 text-gray-400">
-                    &middot; Updated{" "}
-                    {new Date(data.fetchedAt).toLocaleTimeString("en-US", {
-                      hour: "numeric",
-                      minute: "2-digit",
-                    })}
-                  </span>
-                </>
+                <span className="ml-2 text-gray-400">
+                  Costs as of{" "}
+                  {new Date(
+                    data.costEffectiveDate + "T00:00:00"
+                  ).toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric",
+                  })}
+                </span>
               )}
             </p>
           </div>
@@ -200,6 +305,50 @@ export default function OnHandInventoryPage() {
             {loading ? "Refreshing..." : "Refresh"}
           </button>
         </div>
+
+        {/* Warehouse Tabs */}
+        <div className="flex gap-1 mb-6 bg-gray-100 rounded-lg p-1 w-fit">
+          {TABS.map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                activeTab === tab.key
+                  ? "bg-white text-gray-900 shadow-sm"
+                  : "text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Data Source Indicators */}
+        {data?.warehouses && data.warehouses.length > 0 && (
+          <div className="flex flex-wrap gap-3 mb-4">
+            {data.warehouses.map((wh) => (
+              <span
+                key={wh.code}
+                className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full ${
+                  activeTab === "ALL" || activeTab === wh.code
+                    ? "bg-gray-100 text-gray-600"
+                    : "bg-gray-50 text-gray-400"
+                }`}
+              >
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    wh.sourceType === "api"
+                      ? "bg-green-500"
+                      : wh.sourceType === "calculated"
+                      ? "bg-blue-500"
+                      : "bg-amber-500"
+                  }`}
+                />
+                {wh.name}: {wh.sourceLabel}
+              </span>
+            ))}
+          </div>
+        )}
 
         {/* Error */}
         {error && (
@@ -214,25 +363,25 @@ export default function OnHandInventoryPage() {
             <div className="bg-white rounded-lg border border-gray-200 px-4 py-3">
               <p className="text-xs text-gray-500 mb-1">SKUs</p>
               <p className="text-xl font-semibold text-gray-500">
-                {data.summary.totalSkus.toLocaleString()}
+                {viewSummary.totalSkus.toLocaleString()}
               </p>
             </div>
             <div className="bg-white rounded-lg border border-gray-200 px-4 py-3">
               <p className="text-xs text-gray-500 mb-1">Units on Hand</p>
               <p className="text-xl font-semibold text-gray-900">
-                {data.summary.totalOnHand.toLocaleString()}
+                {viewSummary.totalOnHand.toLocaleString()}
               </p>
             </div>
             <div className="bg-white rounded-lg border border-gray-200 px-4 py-3">
               <p className="text-xs text-gray-500 mb-1">Total Value</p>
               <p className="text-xl font-semibold text-gray-900">
-                {fmt(data.summary.totalValue)}
+                {fmt(viewSummary.totalValue)}
               </p>
             </div>
             <div className="bg-white rounded-lg border border-gray-200 px-4 py-3">
               <p className="text-xs text-gray-500 mb-1">Incoming</p>
               <p className="text-xl font-semibold text-amber-700">
-                {data.summary.totalIncoming.toLocaleString()}
+                {viewSummary.totalIncoming.toLocaleString()}
               </p>
             </div>
           </div>
@@ -243,7 +392,7 @@ export default function OnHandInventoryPage() {
           <div className="flex items-center gap-4 mb-4">
             <input
               type="text"
-              placeholder="Search by SKU, product, or category..."
+              placeholder="Search by SKU or category..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full max-w-sm px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-gray-400 focus:border-gray-400"
@@ -258,7 +407,7 @@ export default function OnHandInventoryPage() {
               Show zero-stock
             </label>
             <p className="text-sm text-gray-400 ml-auto">
-              {filtered?.length ?? 0} items
+              {activeTab === "ALL" ? filteredPivot.length : filteredSingle.length} items
             </p>
           </div>
         )}
@@ -266,125 +415,183 @@ export default function OnHandInventoryPage() {
         {/* Loading */}
         {loading && !data && (
           <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
-            <p className="text-gray-500">Loading inventory from Stord...</p>
+            <p className="text-gray-500">Loading inventory...</p>
           </div>
         )}
 
-        {/* Table */}
-        {filtered && filtered.length > 0 && (
+        {/* === ALL LOCATIONS — Pivot Table === */}
+        {activeTab === "ALL" && filteredPivot.length > 0 && (
           <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
                   <SortHeader field="sku" label="SKU" />
                   <SortHeader field="category" label="Category" />
-                  <SortHeader field="stordSku" label="Stord SKU" />
-                  <SortHeader
-                    field="totalOnHand"
-                    label="On-Hand"
-                    align="right"
-                  />
-                  <SortHeader
-                    field="unitCost"
-                    label="Unit Cost"
-                    align="right"
-                  />
-                  <SortHeader
-                    field="extendedValue"
-                    label="Value"
-                    align="right"
-                  />
-                  <SortHeader
-                    field="incoming"
-                    label="Incoming"
-                    align="right"
-                  />
+                  <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                    Stord
+                  </th>
+                  <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                    ANS
+                  </th>
+                  <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                    BMC
+                  </th>
+                  <SortHeader field="totalOnHand" label="Total" align="right" />
+                  <SortHeader field="unitCost" label="Unit Cost" align="right" />
+                  <SortHeader field="totalValue" label="Value" align="right" />
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((item) => {
-                  const displaySku = item.standardSku || item.stordSku;
-                  const isMapped = !!item.standardSku;
-                  const missingCost =
-                    item.unitCost === null && item.totalOnHand > 0;
-
+                {filteredPivot.map((row) => {
+                  const missingCost = row.unitCost === null && row.total > 0;
                   return (
                     <tr
-                      key={`${item.facility}-${item.stordSku}`}
+                      key={row.standardSku}
                       className={`border-b border-gray-100 hover:bg-gray-50 ${
                         missingCost ? "bg-red-50/40" : ""
                       }`}
                     >
-                      {/* SKU */}
                       <td className="px-4 py-3">
                         <span className="font-semibold text-gray-900 text-xs">
-                          {displaySku}
+                          {row.standardSku}
                         </span>
-                        {!isMapped && (
-                          <span className="ml-2 text-[10px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-full font-medium">
-                            Unmapped
-                          </span>
-                        )}
                       </td>
-                      {/* Category */}
                       <td className="px-4 py-3 text-gray-500 text-xs">
-                        {item.category || "\u2014"}
+                        {row.category || "\u2014"}
                       </td>
-                      {/* Stord SKU */}
-                      <td className="px-4 py-3 text-gray-500 text-xs">
-                        {item.stordSku}
+                      <td className="px-4 py-3 text-right text-gray-700 tabular-nums">
+                        {row.stord > 0 ? row.stord.toLocaleString() : "\u2014"}
                       </td>
-                      {/* On-Hand */}
-                      <td className="px-4 py-3 text-right text-gray-900 font-semibold">
-                        {item.totalOnHand.toLocaleString()}
+                      <td className="px-4 py-3 text-right text-gray-700 tabular-nums">
+                        {row.ans > 0 ? row.ans.toLocaleString() : "\u2014"}
                       </td>
-                      {/* Unit Cost */}
+                      <td className="px-4 py-3 text-right text-gray-700 tabular-nums">
+                        {row.bmc > 0 ? row.bmc.toLocaleString() : "\u2014"}
+                      </td>
+                      <td className="px-4 py-3 text-right text-gray-900 font-semibold tabular-nums">
+                        {row.total.toLocaleString()}
+                      </td>
                       <td className="px-4 py-3 text-right">
-                        {item.unitCost !== null ? (
-                          <span className="text-gray-700">
-                            {fmt(item.unitCost)}
-                          </span>
+                        {row.unitCost !== null ? (
+                          <span className="text-gray-700">{fmt(row.unitCost)}</span>
                         ) : missingCost ? (
-                          <span className="text-red-500 text-xs font-medium">
-                            Missing
-                          </span>
+                          <span className="text-red-500 text-xs font-medium">Missing</span>
                         ) : (
                           <span className="text-gray-300">{"\u2014"}</span>
                         )}
                       </td>
-                      {/* Value */}
                       <td className="px-4 py-3 text-right font-semibold">
-                        {item.extendedValue !== null ? (
-                          <span className="text-gray-900">
-                            {fmtCompact(item.extendedValue)}
-                          </span>
+                        {row.totalValue !== null ? (
+                          <span className="text-gray-900">{fmtCompact(row.totalValue)}</span>
                         ) : (
                           <span className="text-gray-300">{"\u2014"}</span>
                         )}
-                      </td>
-                      {/* Incoming */}
-                      <td className="px-4 py-3 text-right text-amber-600">
-                        {item.incoming > 0
-                          ? item.incoming.toLocaleString()
-                          : "\u2014"}
                       </td>
                     </tr>
                   );
                 })}
               </tbody>
-              {/* Total row */}
+              <tfoot>
+                <tr className="bg-gray-50 border-t-2 border-gray-300">
+                  <td colSpan={2} className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                    Totals
+                  </td>
+                  <td className="px-4 py-3 text-right font-semibold text-gray-700 tabular-nums">
+                    {filteredPivot.reduce((s, r) => s + r.stord, 0).toLocaleString()}
+                  </td>
+                  <td className="px-4 py-3 text-right font-semibold text-gray-700 tabular-nums">
+                    {filteredPivot.reduce((s, r) => s + r.ans, 0).toLocaleString()}
+                  </td>
+                  <td className="px-4 py-3 text-right font-semibold text-gray-700 tabular-nums">
+                    {filteredPivot.reduce((s, r) => s + r.bmc, 0).toLocaleString()}
+                  </td>
+                  <td className="px-4 py-3 text-right font-bold text-gray-900 tabular-nums">
+                    {viewSummary.totalOnHand.toLocaleString()}
+                  </td>
+                  <td></td>
+                  <td className="px-4 py-3 text-right font-bold text-gray-900 text-base">
+                    {fmt(viewSummary.totalValue)}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+
+        {/* === SINGLE WAREHOUSE — Simple Table === */}
+        {activeTab !== "ALL" && filteredSingle.length > 0 && (
+          <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  <SortHeader field="sku" label="SKU" />
+                  <SortHeader field="category" label="Category" />
+                  <SortHeader field="totalOnHand" label="On-Hand" align="right" />
+                  <SortHeader field="unitCost" label="Unit Cost" align="right" />
+                  <SortHeader field="totalValue" label="Value" align="right" />
+                  {activeTab === "STORD" && (
+                    <SortHeader field="incoming" label="Incoming" align="right" />
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                {filteredSingle.map((item, idx) => {
+                  const missingCost = item.unitCost === null && item.totalOnHand > 0;
+                  return (
+                    <tr
+                      key={`${item.warehouse}-${item.standardSku}-${item.stordSku || idx}`}
+                      className={`border-b border-gray-100 hover:bg-gray-50 ${
+                        missingCost ? "bg-red-50/40" : ""
+                      }`}
+                    >
+                      <td className="px-4 py-3">
+                        <span className="font-semibold text-gray-900 text-xs">
+                          {item.standardSku}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-gray-500 text-xs">
+                        {item.category || "\u2014"}
+                      </td>
+                      <td className="px-4 py-3 text-right text-gray-900 font-semibold tabular-nums">
+                        {item.totalOnHand.toLocaleString()}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        {item.unitCost !== null ? (
+                          <span className="text-gray-700">{fmt(item.unitCost)}</span>
+                        ) : missingCost ? (
+                          <span className="text-red-500 text-xs font-medium">Missing</span>
+                        ) : (
+                          <span className="text-gray-300">{"\u2014"}</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right font-semibold">
+                        {item.extendedValue !== null ? (
+                          <span className="text-gray-900">{fmtCompact(item.extendedValue)}</span>
+                        ) : (
+                          <span className="text-gray-300">{"\u2014"}</span>
+                        )}
+                      </td>
+                      {activeTab === "STORD" && (
+                        <td className="px-4 py-3 text-right text-amber-600">
+                          {item.incoming > 0 ? item.incoming.toLocaleString() : "\u2014"}
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
               <tfoot>
                 <tr className="bg-gray-50 border-t-2 border-gray-300">
                   <td
-                    colSpan={5}
+                    colSpan={activeTab === "STORD" ? 4 : 3}
                     className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider"
                   >
-                    Total Inventory Value
+                    Total
                   </td>
                   <td className="px-4 py-3 text-right font-bold text-gray-900 text-base">
-                    {data ? fmt(data.summary.totalValue) : "\u2014"}
+                    {fmt(viewSummary.totalValue)}
                   </td>
-                  <td></td>
+                  {activeTab === "STORD" && <td></td>}
                 </tr>
               </tfoot>
             </table>
@@ -392,15 +599,24 @@ export default function OnHandInventoryPage() {
         )}
 
         {/* Empty state */}
-        {filtered && filtered.length === 0 && !loading && (
-          <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
-            <p className="text-gray-500">
-              {search
-                ? "No items match your search."
-                : "No inventory items found."}
-            </p>
-          </div>
-        )}
+        {data &&
+          !loading &&
+          ((activeTab === "ALL" && filteredPivot.length === 0) ||
+            (activeTab !== "ALL" && filteredSingle.length === 0)) && (
+            <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
+              <p className="text-gray-500">
+                {search
+                  ? "No items match your search."
+                  : activeTab !== "ALL" && activeTab !== "STORD"
+                  ? `No inventory data for ${activeTab}. ${
+                      activeTab === "BMC"
+                        ? "Upload a snapshot via Data Ingestion."
+                        : "Receive POs at ANS to see inventory here."
+                    }`
+                  : "No inventory items found."}
+              </p>
+            </div>
+          )}
       </div>
     </div>
   );
