@@ -9,6 +9,7 @@ export async function GET() {
   const locations = records.map((r) => ({
     id: r.id,
     name: r.fields["Name"] as string,
+    code: (r.fields["Code"] as string) || null,
     address: r.fields["Address"] as string,
     city: r.fields["City"] as string,
     state: r.fields["State"] as string,

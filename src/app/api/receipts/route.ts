@@ -127,6 +127,7 @@ export async function POST(request: NextRequest) {
         qtyExpected?: number;
         threePlSku?: string;
         lotNumber?: string;
+        poLineItemId?: string;
       },
         index: number
       ) => ({
@@ -138,6 +139,7 @@ export async function POST(request: NextRequest) {
           ...(item.qtyExpected != null ? { "Qty Expected": item.qtyExpected } : {}),
           ...(item.threePlSku ? { "3PL SKU": item.threePlSku } : {}),
           ...(item.lotNumber ? { "Lot Number": item.lotNumber } : {}),
+          ...(item.poLineItemId ? { "PO Line Item": [item.poLineItemId], "Match Status": "Matched" } : {}),
         },
       })
     );

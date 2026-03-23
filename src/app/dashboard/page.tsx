@@ -17,13 +17,17 @@ interface Invoice {
 export default function DashboardPage() {
   const router = useRouter();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [reviewCount, setReviewCount] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/invoices")
-      .then((r) => r.json())
-      .then((data) => {
-        setInvoices(data);
+    Promise.all([
+      fetch("/api/invoices").then((r) => r.json()),
+      fetch("/api/receipts/count").then((r) => r.json()),
+    ])
+      .then(([invoiceData, countData]) => {
+        setInvoices(invoiceData);
+        setReviewCount(countData.review || 0);
         setLoading(false);
       })
       .catch(() => setLoading(false));
@@ -48,6 +52,34 @@ export default function DashboardPage() {
           <p className="text-gray-500">Loading...</p>
         ) : (
           <>
+            {/* Client Review Banner */}
+            {reviewCount > 0 && (
+              <button
+                onClick={() => router.push("/receipts?tab=review")}
+                className="w-full mb-8 bg-warm-50 border-2 border-warm-300 rounded-lg px-5 py-4 text-left hover:bg-warm-100 transition-colors flex items-center justify-between"
+              >
+                <div className="flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-full bg-warm-200 flex items-center justify-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-warm-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-warm-900">Needs Your Input</p>
+                    <p className="text-xs text-warm-700">{reviewCount} receipt {reviewCount === 1 ? "line" : "lines"} flagged for client review</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="bg-warm-200 text-warm-900 text-sm font-bold px-3 py-1 rounded-full tabular-nums">
+                    {reviewCount}
+                  </span>
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-warm-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                  </svg>
+                </div>
+              </button>
+            )}
+
             {/* Summary Cards */}
             <div className="grid grid-cols-4 gap-4 mb-8">
               <div className="bg-gray-900 text-white rounded-lg px-5 py-5">

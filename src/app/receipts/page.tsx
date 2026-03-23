@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
+import Link from "next/link";
 
 // --- Types ---
 
@@ -78,6 +80,7 @@ function formatFullDate(d: string) {
 // --- Main Page ---
 
 export default function ReceiptsPage() {
+  const searchParams = useSearchParams();
   const [lines, setLines] = useState<MatchingLine[]>([]);
   const [counts, setCounts] = useState({
     open: 0,
@@ -86,7 +89,8 @@ export default function ReceiptsPage() {
     excluded: 0,
   });
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<Tab>("open");
+  const initialTab = (searchParams.get("tab") as Tab) || "open";
+  const [activeTab, setActiveTab] = useState<Tab>(initialTab);
   const [search, setSearch] = useState("");
   const [expandedLineId, setExpandedLineId] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
@@ -311,13 +315,21 @@ export default function ReceiptsPage() {
               )}
             </p>
           </div>
-          <button
-            onClick={handleSync}
-            disabled={syncing || loading}
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
-          >
-            {syncing ? "Syncing..." : "Refresh"}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleSync}
+              disabled={syncing || loading}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
+            >
+              {syncing ? "Syncing..." : "Refresh"}
+            </button>
+            <Link
+              href="/receipts/new"
+              className="px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-md hover:bg-gray-800"
+            >
+              + Add Receipt
+            </Link>
+          </div>
         </div>
 
         {loading ? (
