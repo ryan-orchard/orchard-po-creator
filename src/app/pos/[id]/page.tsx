@@ -898,14 +898,26 @@ export default function PODetailPage() {
                 : "No date"}
             </p>
             {receiptStatus && receiptStatus.totalOrdered > 0 && (po.status === "Issued" || po.status === "Partially Received" || po.status === "Received") && (
-              <div className="flex items-center gap-2 mt-2 print:hidden">
-                <div className="w-32 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+              <div className="flex items-center gap-3 mt-2 print:hidden">
+                <div className="w-36 h-2 bg-gray-200 rounded-full overflow-hidden">
                   <div
-                    className={`h-full rounded-full ${receiptStatus.totalReceived >= receiptStatus.totalOrdered ? "bg-sage-600" : "bg-warm-500"}`}
+                    className={`h-full rounded-full transition-all ${
+                      receiptStatus.totalReceived >= receiptStatus.totalOrdered
+                        ? "bg-sage-500"
+                        : receiptStatus.totalReceived > 0
+                        ? "bg-gold-400"
+                        : ""
+                    }`}
                     style={{ width: `${Math.min(100, (receiptStatus.totalReceived / receiptStatus.totalOrdered) * 100)}%` }}
                   />
                 </div>
-                <span className="text-xs text-gray-500">
+                <span className={`text-xs font-medium ${
+                  receiptStatus.totalReceived >= receiptStatus.totalOrdered
+                    ? "text-sage-700"
+                    : receiptStatus.totalReceived > 0
+                    ? "text-gold-700"
+                    : "text-gray-400"
+                }`}>
                   {receiptStatus.totalReceived.toLocaleString()} / {receiptStatus.totalOrdered.toLocaleString()} received
                 </span>
               </div>
