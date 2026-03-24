@@ -5,22 +5,10 @@ import { useRouter } from "next/navigation";
 
 type IngestionTab = "receipts" | "snapshots";
 
-// Default date range: last 30 days
-function defaultDateRange() {
-  const to = new Date();
-  const from = new Date();
-  from.setDate(from.getDate() - 30);
-  return {
-    from: from.toISOString().split("T")[0],
-    to: to.toISOString().split("T")[0],
-  };
-}
-
 interface ReceiptLine {
   stordSku: string;
   productName: string;
   qtyReceived: number;
-  qtyExpected: number | null;
   lotNumber: string | null;
   standardSku: string | null;
   airtableSkuId: string | null;
@@ -82,10 +70,6 @@ export default function DataIngestionPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
-  // Stord API fetch state
-  const [stordFetching, setStordFetching] = useState(false);
-  const [stordDates, setStordDates] = useState(defaultDateRange);
-
   // SKU overrides: key = "receiptIdx-lineIdx", value = airtable item ID
   const [skuOverrides, setSkuOverrides] = useState<Record<string, string>>({});
   // Deleted lines: set of "receiptIdx-lineIdx" keys
@@ -132,35 +116,6 @@ export default function DataIngestionPage() {
     }
   };
 
-  const handleStordFetch = async () => {
-    setStordFetching(true);
-    setError(null);
-    setResult(null);
-    setSubmitted(false);
-    setSkuOverrides({});
-    setDeletedLines(new Set());
-
-    try {
-      const params = new URLSearchParams({
-        from: `${stordDates.from}T00:00:00Z`,
-        to: `${stordDates.to}T23:59:59Z`,
-      });
-      const response = await fetch(`/api/stord/sync?${params}`);
-
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.error || "Stord fetch failed");
-      }
-
-      const data = await response.json();
-      setResult(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Stord fetch failed");
-    } finally {
-      setStordFetching(false);
-    }
-  };
-
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     const file = e.dataTransfer.files[0];
@@ -194,7 +149,6 @@ export default function DataIngestionPage() {
             return {
               skuId,
               qtyReceived: line.qtyReceived,
-              qtyExpected: line.qtyExpected || undefined,
               threePlSku: line.stordSku,
               lotNumber: line.lotNumber || undefined,
             };
@@ -364,53 +318,19 @@ export default function DataIngestionPage() {
 
         {/* Import Options */}
         {!result && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Option 1: Fetch from Stord API */}
-            <div className="bg-white rounded-lg border border-gray-200 p-6">
-              <div className="flex items-center gap-2 mb-1">
-                <h2 className="text-base font-semibold text-gray-900">Fetch from Stord</h2>
-                <span className="text-xs bg-green-100 text-green-700 font-medium px-2 py-0.5 rounded-full">Recommended</span>
-              </div>
-              <p className="text-sm text-gray-500 mb-4">Pull inventory adjustments directly from the Stord API.</p>
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">From</label>
-                    <input
-                      type="date"
-                      value={stordDates.from}
-                      onChange={(e) => setStordDates((d) => ({ ...d, from: e.target.value }))}
-                      className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">To</label>
-                    <input
-                      type="date"
-                      value={stordDates.to}
-                      onChange={(e) => setStordDates((d) => ({ ...d, to: e.target.value }))}
-                      className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm"
-                    />
-                  </div>
-                </div>
-                <button
-                  onClick={handleStordFetch}
-                  disabled={stordFetching}
-                  className="w-full bg-gray-900 text-white px-4 py-2 text-sm rounded-md hover:bg-gray-800 disabled:opacity-50"
-                >
-                  {stordFetching ? "Fetching from Stord..." : "Fetch Adjustments"}
-                </button>
-              </div>
+          <div className="max-w-md">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+              <p className="text-sm text-blue-800">
+                Stord receipts arrive automatically via webhook. Use this upload as a backup for manual corrections.
+              </p>
             </div>
-
-            {/* Option 2: Upload file */}
             <div
               onDrop={handleDrop}
               onDragOver={(e) => e.preventDefault()}
               className="bg-white rounded-lg border border-dashed border-gray-300 p-6 text-center hover:border-gray-400 transition-colors"
             >
               <h2 className="text-base font-semibold text-gray-900 mb-1">Upload File</h2>
-              <p className="text-sm text-gray-500 mb-4">Upload a Stord Inventory Adjustments XLSX export.</p>
+              <p className="text-sm text-gray-500 mb-4">Upload a Stord Inventory Adjustments XLSX or CSV export.</p>
               {uploading ? (
                 <p className="text-sm text-gray-500">Parsing file...</p>
               ) : (

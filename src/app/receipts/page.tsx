@@ -122,9 +122,7 @@ export default function ReceiptsPage() {
   const [confirming, setConfirming] = useState<string | null>(null);
   const [excluding, setExcluding] = useState<string | null>(null);
   const [unmatching, setUnmatching] = useState<string | null>(null);
-  const [syncing, setSyncing] = useState(false);
-  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
-  const [syncResult, setSyncResult] = useState<{ created: number } | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
@@ -143,26 +141,10 @@ export default function ReceiptsPage() {
     fetchData();
   }, [fetchData]);
 
-  const handleSync = async () => {
-    setSyncing(true);
-    setSyncResult(null);
-    try {
-      const res = await fetch("/api/receipts/sync", { method: "POST" });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "Sync failed");
-      }
-      const data = await res.json();
-      setLastSyncedAt(data.syncedAt);
-      if (data.created > 0) {
-        setSyncResult({ created: data.created });
-      }
-      await fetchData();
-    } catch (err) {
-      console.error("Sync failed:", err);
-    } finally {
-      setSyncing(false);
-    }
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await fetchData();
+    setRefreshing(false);
   };
 
   const filteredLines = useMemo(() => {
@@ -332,30 +314,15 @@ export default function ReceiptsPage() {
             <h1 className="text-2xl font-bold text-gray-900">Receipts</h1>
             <p className="text-sm text-gray-500 mt-1">
               Match receipt lines to purchase orders
-              {lastSyncedAt && (
-                <span className="ml-2 text-gray-400">
-                  &middot; Updated{" "}
-                  {new Date(lastSyncedAt).toLocaleTimeString("en-US", {
-                    hour: "numeric",
-                    minute: "2-digit",
-                  })}
-                </span>
-              )}
-              {syncResult && syncResult.created > 0 && (
-                <span className="ml-2 text-sage-600">
-                  &middot; {syncResult.created} new receipt
-                  {syncResult.created !== 1 ? "s" : ""} added
-                </span>
-              )}
             </p>
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={handleSync}
-              disabled={syncing || loading}
+              onClick={handleRefresh}
+              disabled={refreshing || loading}
               className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
             >
-              {syncing ? "Syncing..." : "Refresh"}
+              {refreshing ? "Refreshing..." : "Refresh"}
             </button>
             <Link
               href="/receipts/new"
@@ -371,16 +338,9 @@ export default function ReceiptsPage() {
         ) : lines.length === 0 ? (
           <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
             <p className="text-gray-500 mb-4">No receipts yet.</p>
-            <p className="text-sm text-gray-400 mb-4">
-              Click Refresh to pull the latest receipts from Stord.
+            <p className="text-sm text-gray-400">
+              Receipts arrive automatically via Stord webhook, or upload manually from Data Ingestion.
             </p>
-            <button
-              onClick={handleSync}
-              disabled={syncing}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
-            >
-              {syncing ? "Syncing..." : "Refresh"}
-            </button>
           </div>
         ) : (
           <>
@@ -609,7 +569,7 @@ function ReceiptLineRow({
         <td className="px-4 py-3 text-gray-600 w-24">
           {line.warehouse || "—"}
         </td>
-        <td className="px-4 py-3 text-gray-900 truncate max-w-48">
+        <td className="px-4 py-3 text-gray-900">
           {line.sku}
         </td>
         <td className="px-4 py-3 text-right font-medium text-gray-900 w-24">

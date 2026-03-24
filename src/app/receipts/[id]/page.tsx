@@ -9,7 +9,6 @@ interface ReceiptLine {
   sku: string | null;
   uom: string | null;
   qtyReceived: number;
-  qtyExpected: number | null;
   threePlSku: string | null;
   lotNumber: string | null;
   matched: boolean;
@@ -30,6 +29,7 @@ interface ReceiptDetail {
   purchaseOrderId: string | null;
   warehouse: string | null;
   warehouseId: string | null;
+  stordReceiptId: string | null;
   lines: ReceiptLine[];
   availableItems: AvailableItem[];
 }
@@ -43,6 +43,10 @@ export default function ReceiptDetailPage() {
   const [loading, setLoading] = useState(true);
   const [editingLineId, setEditingLineId] = useState<string | null>(null);
   const [savingLineId, setSavingLineId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [editingField, setEditingField] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const loadReceipt = useCallback(() => {
     fetch(`/api/receipts/${id}`)
@@ -76,6 +80,35 @@ export default function ReceiptDetailPage() {
     } finally {
       setSavingLineId(null);
       setEditingLineId(null);
+    }
+  };
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/receipts/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Delete failed");
+      router.push("/receipts");
+    } catch {
+      alert("Failed to delete receipt.");
+      setDeleting(false);
+    }
+  };
+
+  const handleUpdateField = async (field: string, value: string | null) => {
+    setSaving(true);
+    try {
+      await fetch(`/api/receipts/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [field]: value }),
+      });
+      loadReceipt();
+    } catch {
+      alert("Failed to update.");
+    } finally {
+      setSaving(false);
+      setEditingField(null);
     }
   };
 
@@ -135,6 +168,31 @@ export default function ReceiptDetailPage() {
                 Match to PO
               </button>
             )}
+            {showDeleteConfirm ? (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-500">Delete this receipt?</span>
+                <button
+                  onClick={handleDelete}
+                  disabled={deleting}
+                  className="bg-red-600 text-white px-3 py-1.5 text-sm rounded-md hover:bg-red-700 disabled:opacity-50"
+                >
+                  {deleting ? "Deleting..." : "Confirm"}
+                </button>
+                <button
+                  onClick={() => setShowDeleteConfirm(false)}
+                  className="text-sm text-gray-500 hover:text-gray-700"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowDeleteConfirm(true)}
+                className="border border-red-200 text-red-600 px-4 py-2 text-sm rounded-md hover:bg-red-50"
+              >
+                Delete
+              </button>
+            )}
             <button
               onClick={() => router.push("/receipts")}
               className="border border-gray-300 text-gray-700 px-4 py-2 text-sm rounded-md hover:bg-gray-50"
@@ -190,23 +248,87 @@ export default function ReceiptDetailPage() {
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
                   Received Date
                 </p>
-                <p className="text-sm text-gray-900">
-                  {receipt.receivedDate
-                    ? new Date(receipt.receivedDate + "T00:00:00").toLocaleDateString(
-                        "en-US",
-                        { year: "numeric", month: "long", day: "numeric" }
-                      )
-                    : "—"}
-                </p>
+                {editingField === "receivedDate" ? (
+                  <input
+                    type="date"
+                    autoFocus
+                    defaultValue={receipt.receivedDate || ""}
+                    disabled={saving}
+                    className="text-sm border border-gray-300 rounded px-2 py-1"
+                    onBlur={(e) => {
+                      if (e.target.value && e.target.value !== receipt.receivedDate) {
+                        handleUpdateField("receivedDate", e.target.value);
+                      } else {
+                        setEditingField(null);
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                      if (e.key === "Escape") setEditingField(null);
+                    }}
+                  />
+                ) : (
+                  <p
+                    className="text-sm text-gray-900 cursor-pointer hover:text-gold-600 group"
+                    onClick={() => setEditingField("receivedDate")}
+                  >
+                    {receipt.receivedDate
+                      ? new Date(receipt.receivedDate + "T00:00:00").toLocaleDateString(
+                          "en-US",
+                          { year: "numeric", month: "long", day: "numeric" }
+                        )
+                      : "—"}
+                    <svg className="w-3 h-3 inline ml-1 text-gray-400 opacity-0 group-hover:opacity-100" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                    </svg>
+                  </p>
+                )}
               </div>
               <div>
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
                   External Receipt ID
                 </p>
-                <p className="text-sm text-gray-900">
-                  {receipt.externalReceiptId || "—"}
-                </p>
+                {editingField === "externalReceiptId" ? (
+                  <input
+                    type="text"
+                    autoFocus
+                    defaultValue={receipt.externalReceiptId || ""}
+                    disabled={saving}
+                    className="text-sm border border-gray-300 rounded px-2 py-1 w-full"
+                    onBlur={(e) => {
+                      if (e.target.value !== (receipt.externalReceiptId || "")) {
+                        handleUpdateField("externalReceiptId", e.target.value || null);
+                      } else {
+                        setEditingField(null);
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                      if (e.key === "Escape") setEditingField(null);
+                    }}
+                  />
+                ) : (
+                  <p
+                    className="text-sm text-gray-900 cursor-pointer hover:text-gold-600 group"
+                    onClick={() => setEditingField("externalReceiptId")}
+                  >
+                    {receipt.externalReceiptId || "—"}
+                    <svg className="w-3 h-3 inline ml-1 text-gray-400 opacity-0 group-hover:opacity-100" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                    </svg>
+                  </p>
+                )}
               </div>
+              {receipt.stordReceiptId && (
+                <div>
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
+                    Stord Receipt ID
+                  </p>
+                  <p className="text-sm text-gray-500 font-mono text-xs">
+                    {receipt.stordReceiptId}
+                  </p>
+                </div>
+              )}
               <div>
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
                   Line Matching

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getRecord, getRecords, updateRecord, TABLES } from "@/lib/airtable";
+import { getRecord, getRecords, updateRecord, deleteRecord, deleteRecords, TABLES } from "@/lib/airtable";
 import { SKU_MAPPING } from "@/lib/client-config";
 
 /**
@@ -85,7 +85,6 @@ export async function GET(
         sku: skuInfo?.standardSku || null,
         uom: skuInfo?.uom || null,
         qtyReceived: (l.fields["Qty Received"] as number) || 0,
-        qtyExpected: (l.fields["Qty Expected"] as number) || null,
         threePlSku,
         lotNumber: (l.fields["Lot Number"] as string) || null,
         matched: !!(poLineItemLink && poLineItemLink.length > 0),
@@ -97,6 +96,7 @@ export async function GET(
       receiptNumber: receipt.fields["Receipt Number"] as string,
       receivedDate: receipt.fields["Received Date"] as string,
       externalReceiptId: (receipt.fields["External Receipt ID"] as string) || null,
+      stordReceiptId: (receipt.fields["Stord Receipt ID"] as string) || null,
       notes: (receipt.fields["Notes"] as string) || null,
       purchaseOrder: poInfo?.poNumber || null,
       purchaseOrderId: poInfo?.id || null,
@@ -117,7 +117,7 @@ export async function GET(
 /**
  * PATCH /api/receipts/[id]
  *
- * Update receipt header fields (notes, externalReceiptId).
+ * Update receipt header fields.
  */
 export async function PATCH(
   request: NextRequest,
@@ -130,6 +130,9 @@ export async function PATCH(
 
     if (body.notes !== undefined) updates["Notes"] = body.notes;
     if (body.externalReceiptId !== undefined) updates["External Receipt ID"] = body.externalReceiptId;
+    if (body.receivedDate !== undefined) updates["Received Date"] = body.receivedDate;
+    if (body.warehouseId !== undefined) updates["Warehouses"] = body.warehouseId ? [body.warehouseId] : [];
+    if (body.purchaseOrderId !== undefined) updates["Purchase Order"] = body.purchaseOrderId ? [body.purchaseOrderId] : [];
 
     if (Object.keys(updates).length === 0) {
       return NextResponse.json({ error: "No fields to update" }, { status: 400 });
@@ -141,6 +144,43 @@ export async function PATCH(
     console.error("Update receipt error:", error);
     return NextResponse.json(
       { error: `Failed to update: ${error instanceof Error ? error.message : "Unknown error"}` },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * DELETE /api/receipts/[id]
+ *
+ * Delete a receipt and all its receipt lines.
+ */
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+
+    // Find all receipt lines for this receipt
+    const allLines = await getRecords(TABLES.RECEIPT_LINES);
+    const lineIds = allLines
+      .filter((rl) => {
+        const receiptIds = rl.fields["Receipt"] as string[] | undefined;
+        return receiptIds?.[0] === id;
+      })
+      .map((rl) => rl.id);
+
+    // Delete lines first, then the receipt
+    if (lineIds.length > 0) {
+      await deleteRecords(TABLES.RECEIPT_LINES, lineIds);
+    }
+    await deleteRecord(TABLES.RECEIPTS, id);
+
+    return NextResponse.json({ success: true, deleted: { receipt: id, lines: lineIds.length } });
+  } catch (error) {
+    console.error("Delete receipt error:", error);
+    return NextResponse.json(
+      { error: `Failed to delete: ${error instanceof Error ? error.message : "Unknown error"}` },
       { status: 500 }
     );
   }

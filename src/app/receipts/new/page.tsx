@@ -229,7 +229,6 @@ export default function CreateReceiptPage() {
           lineItems: includedLines.map((line) => ({
             skuId: line.skuId,
             qtyReceived: line.qtyReceived,
-            qtyExpected: line.qtyRemaining,
             poLineItemId: line.poLineItemId,
           })),
         }),

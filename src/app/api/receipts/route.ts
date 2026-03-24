@@ -61,7 +61,7 @@ export async function GET() {
       warehouse: warehouseIds?.[0] ? warehouseMap[warehouseIds[0]] : null,
       warehouseId: warehouseIds?.[0] || null,
       externalReceiptId: r.fields["External Receipt ID"] as string,
-      notes: r.fields["Notes"] as string,
+      stordReceiptId: r.fields["Stord Receipt ID"] as string | null,
       lines: lines.map((l) => {
         const skuIds = l.fields["SKU"] as string[] | undefined;
         return {
@@ -69,7 +69,6 @@ export async function GET() {
           sku: skuIds?.[0] ? skuMap[skuIds[0]] : null,
           skuId: skuIds?.[0] || null,
           qtyReceived: l.fields["Qty Received"] as number,
-          qtyExpected: l.fields["Qty Expected"] as number | null,
           threePlSku: l.fields["3PL SKU"] as string,
           lotNumber: l.fields["Lot Number"] as string,
         };
@@ -114,7 +113,6 @@ export async function POST(request: NextRequest) {
       (item: {
         skuId?: string;
         qtyReceived: number;
-        qtyExpected?: number;
         threePlSku?: string;
         lotNumber?: string;
         poLineItemId?: string;
@@ -126,10 +124,11 @@ export async function POST(request: NextRequest) {
           Receipt: [receipt.id],
           ...(item.skuId ? { SKU: [item.skuId] } : {}),
           "Qty Received": item.qtyReceived,
-          ...(item.qtyExpected != null ? { "Qty Expected": item.qtyExpected } : {}),
           ...(item.threePlSku ? { "3PL SKU": item.threePlSku } : {}),
           ...(item.lotNumber ? { "Lot Number": item.lotNumber } : {}),
-          ...(item.poLineItemId ? { "PO Line Item": [item.poLineItemId], "Match Status": "Matched" } : {}),
+          ...(item.poLineItemId
+            ? { "PO Line Item": [item.poLineItemId], "Match Status": "Matched" }
+            : { "Match Status": "Open" }),
         },
       })
     );

@@ -73,22 +73,29 @@ export async function POST(request: NextRequest) {
 
   try {
     // Idempotency — skip if we've already processed this receipt
-    // Check both UUID (legacy) and order number (current) as External Receipt ID
+    // Check UUID, order number, and normalized variants as External Receipt ID
     const orderNum = data.order?.order_number || "";
-    const existingByUuid = await getRecords(TABLES.RECEIPTS, {
-      filterByFormula: `{External Receipt ID} = "${data.receipt_confirmation_id}"`,
-    });
-    if (existingByUuid.length > 0) {
+    const existingReceipts = await getRecords(TABLES.RECEIPTS);
+    const existingExternalIds = new Set(
+      existingReceipts
+        .map((r) => r.fields["External Receipt ID"] as string)
+        .filter(Boolean)
+    );
+
+    // Check UUID
+    if (existingExternalIds.has(data.receipt_confirmation_id)) {
       console.log(`Receipt ${data.receipt_confirmation_id} already exists — skipping`);
       return NextResponse.json({ received: true, skipped: true, reason: "duplicate", id: data.receipt_confirmation_id });
     }
+    // Check order number and common variants (e.g., "Order: PO-123" vs "PO-123")
     if (orderNum) {
-      const existingByOrder = await getRecords(TABLES.RECEIPTS, {
-        filterByFormula: `{External Receipt ID} = "${orderNum}"`,
-      });
-      if (existingByOrder.length > 0) {
-        console.log(`Receipt with order ${orderNum} already exists — skipping`);
-        return NextResponse.json({ received: true, skipped: true, reason: "duplicate", orderNumber: orderNum });
+      const normalizedOrder = orderNum.replace(/^Order:\s*/i, "").trim();
+      for (const extId of existingExternalIds) {
+        const normalizedExt = extId.replace(/^Order:\s*/i, "").trim();
+        if (normalizedExt === normalizedOrder || normalizedExt === orderNum) {
+          console.log(`Receipt with order ${orderNum} already exists (matched ${extId}) — skipping`);
+          return NextResponse.json({ received: true, skipped: true, reason: "duplicate", orderNumber: orderNum });
+        }
       }
     }
 
@@ -99,8 +106,7 @@ export async function POST(request: NextRequest) {
     });
     const warehouseId = warehouses[0]?.id ?? null;
 
-    // Generate receipt number
-    const existingReceipts = await getRecords(TABLES.RECEIPTS);
+    // Generate receipt number (reuse existingReceipts from dedup check above)
     const maxNum = getMaxSequenceNumber(existingReceipts, "Receipt Number", "RCP");
     const receiptNumber = `RCP-${maxNum + 1}`;
 
@@ -111,11 +117,9 @@ export async function POST(request: NextRequest) {
       "Receipt Number": receiptNumber,
       "Received Date": data.received_at.split("T")[0],
       "External Receipt ID": externalId,
+      "Stord Receipt ID": data.receipt_confirmation_id,
       ...(warehouseId ? { Warehouses: [warehouseId] } : {}),
-      Notes: [
-        data.order?.order_number ? `Stord ID: ${data.receipt_confirmation_id}` : null,
-        data.bol ? `BOL: ${data.bol}` : null,
-      ].filter(Boolean).join(" | ") || undefined,
+      ...(data.bol ? { Notes: `BOL: ${data.bol}` } : {}),
     };
 
     const receipt = await createRecord(TABLES.RECEIPTS, receiptFields);
@@ -130,6 +134,7 @@ export async function POST(request: NextRequest) {
           ...(mapping?.airtableId ? { SKU: [mapping.airtableId] } : {}),
           "Qty Received": parseFloat(item.quantity) || 0,
           "3PL SKU": item.sku,
+          "Match Status": "Open",
           ...(item.lot_number ? { "Lot Number": item.lot_number } : {}),
         },
       };

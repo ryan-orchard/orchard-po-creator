@@ -47,6 +47,9 @@ interface POPrint {
 const fmt = (n: number) =>
   n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+const fmtUnit = (n: number) =>
+  n.toLocaleString("en-US", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+
 const fmtDate = (d: string, long = false) =>
   new Date(d + "T00:00:00").toLocaleDateString(
     "en-US",
@@ -144,7 +147,7 @@ export default function POPrintPage() {
             <div style={{ marginTop: 10 }}>
               {meta.map(({ label, value }) => (
                 <div key={label} style={{ display: "flex", justifyContent: "flex-end", gap: 24, marginTop: 3 }}>
-                  <span style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "#aaa", width: 68, textAlign: "right" }}>
+                  <span style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "#aaa", whiteSpace: "nowrap", textAlign: "right" }}>
                     {label}
                   </span>
                   <span style={{ fontSize: 13, color: "#333", width: 130, textAlign: "right" }}>
@@ -264,7 +267,7 @@ export default function POPrintPage() {
                         </td>
                       )}
                       <td style={{ padding: "9px 0 9px 12px", textAlign: "right", color: "#111", fontVariantNumeric: "tabular-nums" }}>
-                        ${fmt(item.unitCost)}
+                        ${fmtUnit(item.unitCost)}
                       </td>
                       <td style={{ padding: "9px 0 9px 12px", textAlign: "right", color: "#111", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
                         ${fmt(item.totalPrice)}

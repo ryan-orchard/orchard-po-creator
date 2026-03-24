@@ -29,7 +29,6 @@ interface ParsedReceipt {
     stordSku: string;
     productName: string;
     qtyReceived: number;
-    qtyExpected: number | null;
     lotNumber: string | null;
     standardSku: string | null;
     airtableSkuId: string | null;
@@ -120,7 +119,6 @@ export async function POST(request: NextRequest) {
     };
 
     const receiptRows: StordRow[] = [];
-    const inboundRows: StordRow[] = [];
 
     for (const row of rows) {
       if (row.reason === "Receipt Confirmation" && row.reasonType === "Receipt") {
@@ -128,7 +126,6 @@ export async function POST(request: NextRequest) {
         receiptRows.push(row);
       } else if (row.reason === "Inbound Inventory" && row.reasonType === "Receipt") {
         classification.inboundInventory++;
-        inboundRows.push(row);
       } else if (row.reason === "Customer Returned Inventory") {
         classification.customerReturns++;
       } else if (row.reason === "Work Order Inventory Adjustment") {
@@ -155,15 +152,6 @@ export async function POST(request: NextRequest) {
       const key = row.orderNumber || "UNKNOWN";
       if (!receiptGroups[key]) receiptGroups[key] = [];
       receiptGroups[key].push(row);
-    }
-
-    // Build expected quantities from inbound rows
-    const expectedByOrder: Record<string, Record<string, number>> = {};
-    for (const row of inboundRows) {
-      const key = row.orderNumber || "UNKNOWN";
-      if (!expectedByOrder[key]) expectedByOrder[key] = {};
-      if (!expectedByOrder[key][row.sku]) expectedByOrder[key][row.sku] = 0;
-      expectedByOrder[key][row.sku] += row.adjustedQuantity;
     }
 
     // Fetch items for UOM lookup (still needed for SKU mapping context)
@@ -197,13 +185,11 @@ export async function POST(request: NextRequest) {
       // Map SKUs and build lines
       const lines = Object.entries(skuAgg).map(([stordSku, agg]) => {
         const mapping = SKU_MAPPING[stordSku];
-        const expected = expectedByOrder[orderNumber]?.[stordSku] || null;
 
         return {
           stordSku,
           productName: agg.productName,
           qtyReceived: agg.qty,
-          qtyExpected: expected,
           lotNumber: Array.from(agg.lotNumbers).join(", ") || null,
           standardSku: mapping?.standardSku || null,
           airtableSkuId: mapping?.airtableId || null,
