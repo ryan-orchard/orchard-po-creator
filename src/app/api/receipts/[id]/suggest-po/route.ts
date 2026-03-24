@@ -1,11 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRecord, getRecords, TABLES } from "@/lib/airtable";
+import { SKU_MAPPING } from "@/lib/client-config";
 import { attemptPOMatch } from "@/lib/po-matching";
-
-// Stord SKU -> Standard SKU mapping (for resolving receipt lines without SKU links)
-import skuMappingData from "@/../clients/magna/config/stord-sku-mapping.json";
-const SKU_MAPPING: Record<string, { standardSku: string; airtableId: string } | null> =
-  skuMappingData as Record<string, { standardSku: string; airtableId: string } | null>;
 
 /**
  * GET /api/receipts/[id]/suggest-po

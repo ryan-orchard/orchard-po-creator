@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   getRecords,
-  getRecord,
   createRecord,
   createRecords,
   TABLES,
 } from "@/lib/airtable";
+import { generateNextNumber } from "@/lib/sequence";
 import { logActivity } from "@/lib/activity-log";
 
 export async function GET() {
@@ -30,17 +30,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   const body = await request.json();
 
-  // Generate WO number: WO-10001, WO-10002, ...
-  const existingWOs = await getRecords(TABLES.WORK_ORDERS);
-  let maxNum = 10000;
-  for (const r of existingWOs) {
-    const num = r.fields["WO Number"] as string;
-    const match = num?.match(/^WO-(\d+)$/);
-    if (match) {
-      maxNum = Math.max(maxNum, parseInt(match[1], 10));
-    }
-  }
-  const woNumber = `WO-${maxNum + 1}`;
+  const woNumber = await generateNextNumber(TABLES.WORK_ORDERS, "WO Number", "WO");
 
   // Create WO header
   const wo = await createRecord(TABLES.WORK_ORDERS, {

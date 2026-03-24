@@ -149,3 +149,23 @@ export async function deleteRecords(
     });
   }
 }
+
+/**
+ * Fetch records by ID in batches to avoid Airtable 5 req/sec rate limit.
+ */
+export async function fetchInBatches<T>(
+  ids: string[],
+  fn: (id: string) => Promise<T>,
+  batchSize = 5
+): Promise<T[]> {
+  const results: T[] = [];
+  for (let i = 0; i < ids.length; i += batchSize) {
+    const batch = ids.slice(i, i + batchSize);
+    const batchResults = await Promise.all(batch.map(fn));
+    results.push(...batchResults);
+    if (i + batchSize < ids.length) {
+      await new Promise((r) => setTimeout(r, 250));
+    }
+  }
+  return results;
+}

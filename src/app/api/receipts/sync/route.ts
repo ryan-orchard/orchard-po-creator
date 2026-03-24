@@ -1,12 +1,10 @@
 import { NextResponse } from "next/server";
 import { getRecords, createRecord, createRecords, TABLES } from "@/lib/airtable";
+import { getMaxSequenceNumber } from "@/lib/sequence";
+import { SKU_MAPPING, resolveFacilityCode } from "@/lib/client-config";
 import { fetchAllAdjustments } from "@/lib/stord-api";
 import { attemptPOMatch } from "@/lib/po-matching";
 import { logActivity } from "@/lib/activity-log";
-
-import skuMappingData from "@/../clients/magna/config/stord-sku-mapping.json";
-const SKU_MAPPING: Record<string, { standardSku: string; airtableId: string } | null> =
-  skuMappingData as Record<string, { standardSku: string; airtableId: string } | null>;
 
 export async function POST() {
   const apiKey = process.env.STORD_API_KEY;
@@ -76,12 +74,7 @@ export async function POST() {
     }
 
     // Find max receipt number
-    let maxNum = 10000;
-    for (const r of existingReceipts) {
-      const num = r.fields["Receipt Number"] as string;
-      const match = num?.match(/^RCP-(\d+)$/);
-      if (match) maxNum = Math.max(maxNum, parseInt(match[1], 10));
-    }
+    let maxNum = getMaxSequenceNumber(existingReceipts, "Receipt Number", "RCP");
 
     // Look up Stord warehouse
     const warehouses = await getRecords(TABLES.WAREHOUSES, {
@@ -129,7 +122,7 @@ export async function POST() {
       const receiptNumber = `RCP-${maxNum}`;
 
       // Create receipt header
-      const facilityCode = facility === "RNOs003" ? "STORD" : facility;
+      const facilityCode = resolveFacilityCode(facility);
       const receiptFields: Record<string, unknown> = {
         "Receipt Number": receiptNumber,
         "Received Date": earliestDate ? earliestDate.toISOString().split("T")[0] : new Date().toISOString().split("T")[0],

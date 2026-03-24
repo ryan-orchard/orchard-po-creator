@@ -1,11 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { getRecords, TABLES } from "@/lib/airtable";
-
-// Stord SKU -> Standard SKU mapping (loaded from config)
-import skuMappingData from "@/../clients/magna/config/stord-sku-mapping.json";
-const SKU_MAPPING: Record<string, { standardSku: string; airtableId: string } | null> =
-  skuMappingData as Record<string, { standardSku: string; airtableId: string } | null>;
+import { SKU_MAPPING } from "@/lib/client-config";
 
 interface StordRow {
   adjustmentDate: Date;

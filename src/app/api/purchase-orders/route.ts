@@ -5,6 +5,7 @@ import {
   createRecords,
   TABLES,
 } from "@/lib/airtable";
+import { generateNextNumber } from "@/lib/sequence";
 import { logActivity } from "@/lib/activity-log";
 
 export async function GET() {
@@ -33,17 +34,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   const body = await request.json();
 
-  // Generate PO number: PO-10001, PO-10002, ...
-  const existingPOs = await getRecords(TABLES.PURCHASE_ORDERS);
-  let maxNum = 10000;
-  for (const r of existingPOs) {
-    const num = r.fields["PO Number"] as string;
-    const match = num?.match(/^PO-(\d+)$/);
-    if (match) {
-      maxNum = Math.max(maxNum, parseInt(match[1], 10));
-    }
-  }
-  const poNumber = `PO-${maxNum + 1}`;
+  const poNumber = await generateNextNumber(TABLES.PURCHASE_ORDERS, "PO Number", "PO");
 
   // Create PO header
   const po = await createRecord(TABLES.PURCHASE_ORDERS, {

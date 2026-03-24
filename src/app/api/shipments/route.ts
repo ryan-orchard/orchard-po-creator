@@ -5,6 +5,7 @@ import {
   createRecords,
   TABLES,
 } from "@/lib/airtable";
+import { generateNextNumber } from "@/lib/sequence";
 import { logActivity } from "@/lib/activity-log";
 
 export async function GET() {
@@ -33,17 +34,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   const body = await request.json();
 
-  // Generate Shipment number: SH-10001, SH-10002, ...
-  const existingShipments = await getRecords(TABLES.SHIPMENTS);
-  let maxNum = 10000;
-  for (const r of existingShipments) {
-    const num = r.fields["Shipment Number"] as string;
-    const match = num?.match(/^SH-(\d+)$/);
-    if (match) {
-      maxNum = Math.max(maxNum, parseInt(match[1], 10));
-    }
-  }
-  const shipmentNumber = `SH-${maxNum + 1}`;
+  const shipmentNumber = await generateNextNumber(TABLES.SHIPMENTS, "Shipment Number", "SH");
 
   // Build header fields — link to either PO or WO
   const headerFields: Record<string, unknown> = {

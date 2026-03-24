@@ -1,17 +1,10 @@
 import { NextResponse } from "next/server";
 import { getRecords, TABLES } from "@/lib/airtable";
+import { SKU_MAPPING } from "@/lib/client-config";
 
-import skuMappingData from "@/../clients/magna/config/stord-sku-mapping.json";
 import unitCostData from "@/../clients/magna/config/unit-costs-2026-02.json";
 
 const UNIT_COSTS: Record<string, number> = unitCostData as Record<string, number>;
-const SKU_MAPPING: Record<
-  string,
-  { standardSku: string; airtableId: string } | null
-> = skuMappingData as Record<
-  string,
-  { standardSku: string; airtableId: string } | null
->;
 
 // Reverse mapping: standardSku → stordSku (for unit cost lookup)
 const STANDARD_TO_STORD: Record<string, string> = {};

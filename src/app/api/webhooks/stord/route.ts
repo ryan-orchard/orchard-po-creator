@@ -1,18 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Webhook } from "svix";
 import { getRecords, createRecord, createRecords, TABLES } from "@/lib/airtable";
+import { getMaxSequenceNumber } from "@/lib/sequence";
+import { SKU_MAPPING, resolveFacilityCode } from "@/lib/client-config";
 import { logActivity } from "@/lib/activity-log";
 import { attemptPOMatch } from "@/lib/po-matching";
-
-import skuMappingData from "@/../clients/magna/config/stord-sku-mapping.json";
-const SKU_MAPPING: Record<string, { standardSku: string; airtableId: string } | null> =
-  skuMappingData as Record<string, { standardSku: string; airtableId: string } | null>;
-
-// Stord facility UUID → our warehouse code
-// Add more entries if Magna ever uses additional Stord facilities
-const FACILITY_MAP: Record<string, string> = {
-  "7e59a430-ae3b-4915-8414-6c064d0b9876": "STORD", // RNOs003 — Stord Reno
-};
 
 interface ReceiptLineItem {
   sku: string;
@@ -101,7 +93,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Resolve warehouse
-    const facilityCode = FACILITY_MAP[data.facility_id] ?? "STORD";
+    const facilityCode = resolveFacilityCode(data.facility_id);
     const warehouses = await getRecords(TABLES.WAREHOUSES, {
       filterByFormula: `{Code} = "${facilityCode}"`,
     });
@@ -109,12 +101,7 @@ export async function POST(request: NextRequest) {
 
     // Generate receipt number
     const existingReceipts = await getRecords(TABLES.RECEIPTS);
-    let maxNum = 10000;
-    for (const r of existingReceipts) {
-      const num = r.fields["Receipt Number"] as string;
-      const match = num?.match(/^RCP-(\d+)$/);
-      if (match) maxNum = Math.max(maxNum, parseInt(match[1], 10));
-    }
+    const maxNum = getMaxSequenceNumber(existingReceipts, "Receipt Number", "RCP");
     const receiptNumber = `RCP-${maxNum + 1}`;
 
     // Create receipt header — use order number as External Receipt ID (the linkable thread),

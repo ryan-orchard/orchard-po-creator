@@ -1,15 +1,7 @@
 import { NextResponse } from "next/server";
 import { getRecords, TABLES } from "@/lib/airtable";
+import { SKU_MAPPING } from "@/lib/client-config";
 import { attemptPOMatch } from "@/lib/po-matching";
-import skuMappingData from "@/../clients/magna/config/stord-sku-mapping.json";
-
-const SKU_MAPPING: Record<
-  string,
-  { standardSku: string; airtableId: string } | null
-> = skuMappingData as Record<
-  string,
-  { standardSku: string; airtableId: string } | null
->;
 
 /**
  * GET /api/receipt-lines/matching
@@ -66,7 +58,7 @@ export async function GET() {
     const supplierMap: Record<string, string> = {};
     for (const s of allSuppliers) {
       supplierMap[s.id] =
-        (s.fields["Name"] as string) ||
+        (s.fields["Supplier Name"] as string) ||
         (s.fields["Code"] as string) ||
         s.id;
     }

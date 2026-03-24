@@ -1,10 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRecords, TABLES } from "@/lib/airtable";
+import { SKU_MAPPING } from "@/lib/client-config";
 import { fetchAllAdjustments } from "@/lib/stord-api";
-
-import skuMappingData from "@/../clients/magna/config/stord-sku-mapping.json";
-const SKU_MAPPING: Record<string, { standardSku: string; airtableId: string } | null> =
-  skuMappingData as Record<string, { standardSku: string; airtableId: string } | null>;
 
 interface NormalizedRow {
   adjustmentDate: Date;

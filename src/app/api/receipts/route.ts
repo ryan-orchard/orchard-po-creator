@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   getRecords,
-  getRecord,
   createRecord,
   createRecords,
   TABLES,
 } from "@/lib/airtable";
+import { generateNextNumber } from "@/lib/sequence";
 import { logActivity } from "@/lib/activity-log";
 
 export async function GET() {
@@ -83,17 +83,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   const body = await request.json();
 
-  // Generate Receipt number: RCP-10001, RCP-10002, ...
-  const existingReceipts = await getRecords(TABLES.RECEIPTS);
-  let maxNum = 10000;
-  for (const r of existingReceipts) {
-    const num = r.fields["Receipt Number"] as string;
-    const match = num?.match(/^RCP-(\d+)$/);
-    if (match) {
-      maxNum = Math.max(maxNum, parseInt(match[1], 10));
-    }
-  }
-  const receiptNumber = `RCP-${maxNum + 1}`;
+  const receiptNumber = await generateNextNumber(TABLES.RECEIPTS, "Receipt Number", "RCP");
 
   // Look up warehouse by code if facility code provided
   let warehouseId = body.warehouseId;
