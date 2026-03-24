@@ -2,9 +2,12 @@ import { NextResponse } from "next/server";
 import { getRecords, TABLES } from "@/lib/airtable";
 
 export async function GET() {
-  const [openLines, reviewLines] = await Promise.all([
+  const [openLines, blankLines, reviewLines] = await Promise.all([
     getRecords(TABLES.RECEIPT_LINES, {
       filterByFormula: `{Match Status} = "Open"`,
+    }),
+    getRecords(TABLES.RECEIPT_LINES, {
+      filterByFormula: `{Match Status} = BLANK()`,
     }),
     getRecords(TABLES.RECEIPT_LINES, {
       filterByFormula: `{Match Status} = "Review"`,
@@ -12,7 +15,7 @@ export async function GET() {
   ]);
 
   return NextResponse.json({
-    unmatched: openLines.length,
+    unmatched: openLines.length + blankLines.length,
     review: reviewLines.length,
   });
 }
