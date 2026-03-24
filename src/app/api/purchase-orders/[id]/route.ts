@@ -9,6 +9,7 @@ import {
   TABLES,
 } from "@/lib/airtable";
 import { logActivity } from "@/lib/activity-log";
+import { computeLineTotal } from "@/lib/po-calc";
 
 export async function GET(
   _request: NextRequest,
@@ -94,6 +95,12 @@ export async function GET(
       }),
     ]);
 
+    // Always compute grand total from line items (single source of truth)
+    const computedGrandTotal = lineItemsWithSkus.reduce(
+      (sum, li) => sum + (li.totalPrice || 0),
+      0
+    );
+
     return NextResponse.json({
       id: record.id,
       poNumber: record.fields["PO Number"] as string,
@@ -103,7 +110,7 @@ export async function GET(
       shippingTerms: record.fields["Shipping Terms"] as string,
       paymentTerms: record.fields["Payment Terms"] as string,
       notes: record.fields["Notes"] as string,
-      grandTotal: record.fields["Grand Total"] as number,
+      grandTotal: computedGrandTotal,
       supplierId: supplierIds[0] || null,
       shipToId: shipToIds[0] || null,
       supplier: supplier
@@ -147,6 +154,24 @@ export async function PUT(
   const body = await request.json();
 
   try {
+    // Compute line item totals server-side (don't trust frontend)
+    const lineItems = (body.lineItems || []).map(
+      (item: {
+        skuId: string;
+        section: string;
+        qtySticks: number;
+        qtyCartons: number | null;
+        unitCost: number;
+        costBasis: string;
+        totalPrice: number;
+      }) => {
+        const totalPrice = computeLineTotal(item.costBasis, item.qtySticks, item.qtyCartons, item.unitCost);
+        return { ...item, totalPrice };
+      }
+    );
+
+    const grandTotal = lineItems.reduce((sum: number, li: { totalPrice: number }) => sum + li.totalPrice, 0);
+
     // Update PO header
     const po = await updateRecord(TABLES.PURCHASE_ORDERS, id, {
       Date: body.date,
@@ -156,7 +181,7 @@ export async function PUT(
       "Shipping Terms": body.shippingTerms || "",
       "Payment Terms": body.paymentTerms || "",
       Notes: body.notes || "",
-      "Grand Total": body.grandTotal,
+      "Grand Total": grandTotal,
       Status: body.status || "Draft",
     });
 
@@ -170,8 +195,8 @@ export async function PUT(
 
     // Recreate line items
     const poNumber = po.fields?.["PO Number"] || existing.fields["PO Number"];
-    if (body.lineItems && body.lineItems.length > 0) {
-      const lineItemRecords = body.lineItems.map(
+    if (lineItems.length > 0) {
+      const lineItemRecords = lineItems.map(
         (item: {
           skuId: string;
           section: string;

@@ -21,6 +21,7 @@ export async function GET() {
       allWOLines,
       allItems,
       allSuppliers,
+      allWarehouses,
     ] = await Promise.all([
       getRecords(TABLES.RECEIPTS, {
         sort: [{ field: "Received Date", direction: "desc" }],
@@ -36,7 +37,14 @@ export async function GET() {
       getRecords(TABLES.WORK_ORDER_LINES),
       getRecords(TABLES.SKUS),
       getRecords(TABLES.SUPPLIERS),
+      getRecords(TABLES.WAREHOUSES),
     ]);
+
+    const warehouseMap: Record<string, string> = {};
+    for (const wh of allWarehouses) {
+      warehouseMap[wh.id] =
+        (wh.fields["Code"] as string) || (wh.fields["Name"] as string) || wh.id;
+    }
 
     // --- Build lookups ---
 
@@ -70,6 +78,7 @@ export async function GET() {
         externalReceiptId: string;
         orderNumber: string;
         receiptNumber: string;
+        warehouse: string | null;
         poId: string | null;
         woId: string | null;
       }
@@ -77,6 +86,7 @@ export async function GET() {
     for (const r of allReceipts) {
       const poIds = r.fields["Purchase Order"] as string[] | undefined;
       const woIds = r.fields["Work Order"] as string[] | undefined;
+      const whIds = r.fields["Warehouses"] as string[] | undefined;
       const externalId = (r.fields["External Receipt ID"] as string) || "";
       const notes = (r.fields["Notes"] as string) || "";
       const notesMatch = notes.match(/^Order:\s*(.+?)(?:\s*\||$)/);
@@ -86,6 +96,7 @@ export async function GET() {
         externalReceiptId: externalId,
         orderNumber,
         receiptNumber: (r.fields["Receipt Number"] as string) || "",
+        warehouse: whIds?.[0] ? warehouseMap[whIds[0]] || null : null,
         poId: poIds?.[0] || null,
         woId: woIds?.[0] || null,
       };
@@ -304,6 +315,7 @@ export async function GET() {
       receiptDate: string;
       orderNumber: string;
       receiptNumber: string;
+      warehouse: string | null;
       sku: string;
       skuId: string | null;
       threePlSku: string | null;
@@ -576,6 +588,7 @@ export async function GET() {
         receiptDate: receipt.receivedDate,
         orderNumber: receipt.orderNumber,
         receiptNumber: receipt.receiptNumber,
+        warehouse: receipt.warehouse,
         sku: item?.name || threePlSku || "Unknown",
         skuId,
         threePlSku,

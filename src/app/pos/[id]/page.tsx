@@ -117,7 +117,7 @@ interface EditLineItem {
   qtySticks: number;
   qtyCartons: number | null;
   unitCost: number;
-  costBasis: "Per Carton" | "Per Stick";
+  costBasis: "Per Carton" | "Per Stick" | "Per Each";
   totalPrice: number;
 }
 
@@ -284,7 +284,7 @@ export default function PODetailPage() {
         qtySticks: li.qtySticks,
         qtyCartons: li.qtyCartons,
         unitCost: li.unitCost,
-        costBasis: li.costBasis as "Per Carton" | "Per Stick",
+        costBasis: li.costBasis as "Per Carton" | "Per Stick" | "Per Each",
         totalPrice: li.totalPrice,
       }))
     );
@@ -329,21 +329,21 @@ export default function PODetailPage() {
             updates.costBasis !== undefined ||
             updates.skuId !== undefined
           ) {
-            if (updated.costBasis === "Per Carton" && updated.qtyCartons) {
-              updated.totalPrice = updated.qtyCartons * updated.unitCost;
-            } else if (updated.costBasis === "Per Stick") {
-              updated.totalPrice = updated.qtySticks * updated.unitCost;
-            }
+            const count = updated.sku?.count ?? NaN;
 
-            if (updated.sku && updated.qtySticks > 0) {
-              const count = updated.sku.count;
-              if (count != null && count > 0) {
+            if (updated.costBasis === "Per Carton" && !isNaN(count) && count > 0) {
+              if (updates.qtyCartons !== undefined) {
+                updated.qtySticks = (updated.qtyCartons || 0) * count;
+              }
+              if (updated.sku && updated.qtySticks > 0) {
                 updated.qtyCartons = Math.ceil(updated.qtySticks / count);
               }
-            }
-
-            if (updated.costBasis === "Per Carton" && updated.qtyCartons) {
-              updated.totalPrice = updated.qtyCartons * updated.unitCost;
+              updated.totalPrice = (updated.qtyCartons || 0) * updated.unitCost;
+            } else if (updated.costBasis === "Per Stick") {
+              updated.totalPrice = updated.qtySticks * updated.unitCost;
+            } else if (updated.costBasis === "Per Each") {
+              updated.qtyCartons = null;
+              updated.totalPrice = updated.qtySticks * updated.unitCost;
             }
           }
 

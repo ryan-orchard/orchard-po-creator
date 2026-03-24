@@ -7,6 +7,7 @@ import {
 } from "@/lib/airtable";
 import { generateNextNumber } from "@/lib/sequence";
 import { logActivity } from "@/lib/activity-log";
+import { computeLineTotal } from "@/lib/po-calc";
 
 export async function GET() {
   const records = await getRecords(TABLES.PURCHASE_ORDERS, {
@@ -36,6 +37,25 @@ export async function POST(request: NextRequest) {
 
   const poNumber = await generateNextNumber(TABLES.PURCHASE_ORDERS, "PO Number", "PO");
 
+  // Compute line item totals server-side (don't trust frontend)
+  const lineItems = (body.lineItems || []).map(
+    (item: {
+      skuId: string;
+      section: string;
+      qtySticks: number;
+      qtyCartons: number | null;
+      unitCost: number;
+      costBasis: string;
+      totalPrice: number;
+      shipToOverrideId?: string;
+    }) => {
+      const totalPrice = computeLineTotal(item.costBasis, item.qtySticks, item.qtyCartons, item.unitCost);
+      return { ...item, totalPrice };
+    }
+  );
+
+  const grandTotal = lineItems.reduce((sum: number, li: { totalPrice: number }) => sum + li.totalPrice, 0);
+
   // Create PO header
   const po = await createRecord(TABLES.PURCHASE_ORDERS, {
     "PO Number": poNumber,
@@ -47,12 +67,12 @@ export async function POST(request: NextRequest) {
     "Shipping Terms": body.shippingTerms || "",
     "Payment Terms": body.paymentTerms || "",
     Notes: body.notes || "",
-    "Grand Total": body.grandTotal,
+    "Grand Total": grandTotal,
   });
 
   // Create line items
-  if (body.lineItems && body.lineItems.length > 0) {
-    const lineItemRecords = body.lineItems.map(
+  if (lineItems.length > 0) {
+    const lineItemRecords = lineItems.map(
       (item: {
         skuId: string;
         section: string;

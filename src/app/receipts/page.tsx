@@ -76,6 +76,7 @@ interface MatchingLine {
     woNumber: string;
     woLineItemId: string;
   } | null;
+  warehouse: string | null;
   poOptions: POOption[];
   woOptions: WOOption[];
 }
@@ -468,6 +469,9 @@ export default function ReceiptsPage() {
                     <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
                       Order #
                     </th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">
+                      Warehouse
+                    </th>
                     <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
                       Item
                     </th>
@@ -601,6 +605,9 @@ function ReceiptLineRow({
             {line.orderNumber || "—"}
           </div>
           <div className="text-xs text-gray-400">{line.receiptNumber}</div>
+        </td>
+        <td className="px-4 py-3 text-gray-600 w-24">
+          {line.warehouse || "—"}
         </td>
         <td className="px-4 py-3 text-gray-900 truncate max-w-48">
           {line.sku}
