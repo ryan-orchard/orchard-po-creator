@@ -7,15 +7,19 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const { status } = await request.json();
+  const { status, soNumber } = await request.json();
 
   try {
-    await updateRecord(TABLES.PURCHASE_ORDERS, id, { Status: status });
+    const fields: Record<string, unknown> = { Status: status };
+    if (soNumber) fields["ANS SO Number"] = soNumber;
+    await updateRecord(TABLES.PURCHASE_ORDERS, id, fields);
 
     logActivity({
       poId: id,
       action: "status_changed",
-      description: `Status changed to ${status}`,
+      description: soNumber
+        ? `Status changed to ${status} — ANS SO# ${soNumber}`
+        : `Status changed to ${status}`,
       actor: "Ryan Belanger",
     });
 

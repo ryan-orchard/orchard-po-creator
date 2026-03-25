@@ -110,6 +110,7 @@ export async function GET(
       shippingTerms: record.fields["Shipping Terms"] as string,
       paymentTerms: record.fields["Payment Terms"] as string,
       notes: record.fields["Notes"] as string,
+      soNumber: (record.fields["ANS SO Number"] as string) || null,
       grandTotal: computedGrandTotal,
       supplierId: supplierIds[0] || null,
       shipToId: shipToIds[0] || null,

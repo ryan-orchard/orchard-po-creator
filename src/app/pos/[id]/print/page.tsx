@@ -8,6 +8,7 @@ interface POPrint {
   id: string;
   poNumber: string;
   date: string;
+  status: string;
   deliveryDate: string;
   paymentTerms: string;
   shippingTerms: string;
@@ -126,7 +127,26 @@ export default function POPrintPage() {
       </div>
 
       {/* ── Document ── */}
-      <div className="max-w-3xl mx-auto px-12 py-12 print:p-0 print:max-w-none">
+      <div className="max-w-3xl mx-auto px-12 py-12 print:p-0 print:max-w-none" style={{ position: "relative" }}>
+
+        {/* ── Draft watermark ── */}
+        {po.status === "Draft" && (
+          <div style={{
+            position: "fixed",
+            top: "50%",
+            left: "50%",
+            transform: "translate(-50%, -50%) rotate(-45deg)",
+            fontSize: 140,
+            fontWeight: 900,
+            color: "rgba(0,0,0,0.06)",
+            pointerEvents: "none",
+            letterSpacing: "0.1em",
+            zIndex: 0,
+            userSelect: "none",
+          }}>
+            DRAFT
+          </div>
+        )}
 
         {/* ── Header ── */}
         <div className="flex justify-between items-start mb-14">
@@ -143,6 +163,11 @@ export default function POPrintPage() {
           <div style={{ textAlign: "right" }}>
             <p style={{ fontSize: 26, fontWeight: 800, color: "#111", letterSpacing: "-0.02em", textTransform: "uppercase" }}>
               Purchase Order
+              {po.status === "Draft" && (
+                <span style={{ marginLeft: 12, fontSize: 13, fontWeight: 700, color: "#fff", background: "#d97706", borderRadius: 4, padding: "2px 8px", letterSpacing: "0.08em", verticalAlign: "middle" }}>
+                  DRAFT
+                </span>
+              )}
             </p>
             <div style={{ marginTop: 10 }}>
               {meta.map(({ label, value }) => (
@@ -222,32 +247,8 @@ export default function POPrintPage() {
           </thead>
           <tbody>
             {Object.entries(sections).map(([sectionName, items]) => {
-              const sectionSticks = items.reduce((s, i) => s + (i.qtySticks || 0), 0);
-              const sectionCartons = items.reduce((s, i) => s + (i.qtyCartons || 0), 0);
-              const sectionTotal = items.reduce((s, i) => s + (i.totalPrice || 0), 0);
-              const printColSpan = isSimpleMode ? 4 : 6;
-
               return (
                 <React.Fragment key={sectionName}>
-                  {!isSimpleMode && (
-                    <tr>
-                      <td
-                        colSpan={printColSpan}
-                        style={{
-                          paddingTop: 20,
-                          paddingBottom: 6,
-                          fontSize: 10,
-                          fontWeight: 700,
-                          textTransform: "uppercase",
-                          letterSpacing: "0.08em",
-                          color: "#aaa",
-                        }}
-                      >
-                        {sectionName}
-                      </td>
-                    </tr>
-                  )}
-
                   {items.map((item) => (
                     <tr key={item.id} style={{ borderBottom: "1px solid #f0f0f0" }}>
                       <td style={{ padding: "9px 12px 9px 0", color: "#111", whiteSpace: "nowrap" }}>
@@ -275,24 +276,6 @@ export default function POPrintPage() {
                     </tr>
                   ))}
 
-                  {!isSimpleMode && (
-                    <tr style={{ borderBottom: "1px solid #e8e8e8" }}>
-                      <td style={{ padding: "7px 12px 7px 0", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "#aaa" }}>
-                        {sectionName} Total
-                      </td>
-                      <td />
-                      <td style={{ padding: "7px 0 7px 12px", textAlign: "right", fontWeight: 700, color: "#555", fontVariantNumeric: "tabular-nums" }}>
-                        {sectionSticks.toLocaleString()}
-                      </td>
-                      <td style={{ padding: "7px 0 7px 12px", textAlign: "right", fontWeight: 700, color: "#aaa", fontVariantNumeric: "tabular-nums" }}>
-                        {sectionCartons.toLocaleString()}
-                      </td>
-                      <td />
-                      <td style={{ padding: "7px 0 7px 12px", textAlign: "right", fontWeight: 700, color: "#111", fontVariantNumeric: "tabular-nums" }}>
-                        ${fmt(sectionTotal)}
-                      </td>
-                    </tr>
-                  )}
                 </React.Fragment>
               );
             })}

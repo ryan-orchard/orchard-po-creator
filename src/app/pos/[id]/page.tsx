@@ -19,11 +19,14 @@ interface LinkedInvoice {
   totalAmount: number | null;
 }
 
+const ANS_SUPPLIER_ID = "recQ9MHAO091WGTOO";
+
 interface PODetail {
   id: string;
   poNumber: string;
   date: string;
   status: string;
+  soNumber: string | null;
   deliveryDate: string;
   shippingTerms: string;
   paymentTerms: string;
@@ -121,11 +124,12 @@ interface EditLineItem {
   totalPrice: number;
 }
 
-const STATUSES = ["Draft", "Issued", "Partially Received", "Received", "Closed"] as const;
+const STATUSES = ["Draft", "Issued", "Accepted", "Partially Received", "Received", "Closed"] as const;
 
 const statusColors: Record<string, string> = {
   Draft: "bg-warm-100 text-warm-800",
   Issued: "bg-gold-100 text-gold-800",
+  Accepted: "bg-blue-100 text-blue-800",
   "Partially Received": "bg-gold-100 text-gold-800",
   Received: "bg-sage-100 text-sage-800",
   Closed: "bg-gray-100 text-gray-600",
@@ -155,6 +159,9 @@ export default function PODetailPage() {
   // Status update
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [showStatusMenu, setShowStatusMenu] = useState(false);
+  const [showSoModal, setShowSoModal] = useState(false);
+  const [soInput, setSoInput] = useState("");
+  const [unlocked, setUnlocked] = useState(false);
 
   // Edit mode state
   const [editing, setEditing] = useState(false);
@@ -237,8 +244,14 @@ export default function PODetailPage() {
 
   const updateStatus = async (newStatus: string) => {
     if (!po) return;
-    setUpdatingStatus(true);
     setShowStatusMenu(false);
+    // Intercept Accepted for ANS POs — prompt for SO number first
+    if (newStatus === "Accepted" && po.supplierId === ANS_SUPPLIER_ID) {
+      setSoInput("");
+      setShowSoModal(true);
+      return;
+    }
+    setUpdatingStatus(true);
     try {
       await fetch(`/api/purchase-orders/${params.id}/status`, {
         method: "PATCH",
@@ -246,6 +259,25 @@ export default function PODetailPage() {
         body: JSON.stringify({ status: newStatus }),
       });
       setPO({ ...po, status: newStatus });
+    } catch {
+      alert("Error updating status.");
+    } finally {
+      setUpdatingStatus(false);
+    }
+  };
+
+  const confirmAccepted = async () => {
+    if (!po) return;
+    setShowSoModal(false);
+    setUpdatingStatus(true);
+    try {
+      await fetch(`/api/purchase-orders/${params.id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "Accepted", soNumber: soInput || null }),
+      });
+      setPO({ ...po, status: "Accepted", soNumber: soInput || null });
+      setSoInput("");
     } catch {
       alert("Error updating status.");
     } finally {
@@ -674,9 +706,6 @@ export default function PODetailPage() {
                     <th className="text-left px-3 py-2 text-xs font-semibold uppercase tracking-wider">
                       SKU
                     </th>
-                    <th className="text-left px-3 py-2 text-xs font-semibold uppercase tracking-wider">
-                      Section
-                    </th>
                     <th className="text-right px-3 py-2 text-xs font-semibold uppercase tracking-wider">
                       Qty (Sticks)
                     </th>
@@ -685,9 +714,6 @@ export default function PODetailPage() {
                     </th>
                     <th className="text-right px-3 py-2 text-xs font-semibold uppercase tracking-wider">
                       Unit Cost
-                    </th>
-                    <th className="text-center px-3 py-2 text-xs font-semibold uppercase tracking-wider">
-                      Cost Basis
                     </th>
                     <th className="text-right px-3 py-2 text-xs font-semibold uppercase tracking-wider">
                       Total
@@ -757,36 +783,46 @@ export default function PODetailPage() {
                         )}
                       </td>
                       <td className="px-3 py-2">
-                        <input
-                          type="text"
-                          value={item.section}
-                          onChange={(e) =>
-                            updateLineItem(item.key, {
-                              section: e.target.value,
-                            })
-                          }
-                          className="w-full border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-black"
-                        />
+                        {item.costBasis === "Per Stick" || item.costBasis === "Per Each" ? (
+                          <input
+                            type="number"
+                            value={item.qtySticks || ""}
+                            onChange={(e) =>
+                              updateLineItem(item.key, {
+                                qtySticks: parseInt(e.target.value) || 0,
+                              })
+                            }
+                            className="w-full border border-gray-300 rounded px-2 py-1 text-xs text-right focus:outline-none focus:ring-2 focus:ring-black"
+                          />
+                        ) : (
+                          <input
+                            type="number"
+                            value={item.qtySticks || ""}
+                            readOnly
+                            className="w-full border border-gray-200 bg-gray-50 rounded px-2 py-1 text-xs text-right text-gray-500"
+                          />
+                        )}
                       </td>
                       <td className="px-3 py-2">
-                        <input
-                          type="number"
-                          value={item.qtySticks || ""}
-                          onChange={(e) =>
-                            updateLineItem(item.key, {
-                              qtySticks: parseInt(e.target.value) || 0,
-                            })
-                          }
-                          className="w-full border border-gray-300 rounded px-2 py-1 text-xs text-right focus:outline-none focus:ring-2 focus:ring-black"
-                        />
-                      </td>
-                      <td className="px-3 py-2">
-                        <input
-                          type="number"
-                          value={item.qtyCartons ?? ""}
-                          readOnly
-                          className="w-full border border-gray-200 bg-gray-50 rounded px-2 py-1 text-xs text-right text-gray-500"
-                        />
+                        {item.costBasis === "Per Carton" ? (
+                          <input
+                            type="number"
+                            value={item.qtyCartons ?? ""}
+                            onChange={(e) =>
+                              updateLineItem(item.key, {
+                                qtyCartons: parseInt(e.target.value) || 0,
+                              })
+                            }
+                            className="w-full border border-gray-300 rounded px-2 py-1 text-xs text-right focus:outline-none focus:ring-2 focus:ring-black"
+                          />
+                        ) : (
+                          <input
+                            type="number"
+                            value={item.qtyCartons ?? ""}
+                            readOnly
+                            className="w-full border border-gray-200 bg-gray-50 rounded px-2 py-1 text-xs text-right text-gray-500"
+                          />
+                        )}
                       </td>
                       <td className="px-3 py-2">
                         <input
@@ -800,11 +836,6 @@ export default function PODetailPage() {
                           }
                           className="w-full border border-gray-300 rounded px-2 py-1 text-xs text-right focus:outline-none focus:ring-2 focus:ring-black"
                         />
-                      </td>
-                      <td className="px-3 py-2 text-center">
-                        <span className="text-xs text-gray-500">
-                          {item.costBasis}
-                        </span>
                       </td>
                       <td className="px-3 py-2 text-right">
                         <span className="text-xs font-semibold tabular-nums">
@@ -891,6 +922,19 @@ export default function PODetailPage() {
           </div>
         )}
 
+        {po.status === "Draft" && (
+          <div className="print:hidden mb-6 bg-yellow-50 border border-yellow-300 rounded-lg px-4 py-3 flex items-center gap-3">
+            <span className="inline-block bg-yellow-200 text-yellow-900 text-xs font-bold uppercase tracking-widest px-2 py-0.5 rounded">Draft</span>
+            <span className="text-sm text-yellow-800">This PO has not been issued. Edit and change status to <strong>Issued</strong> when ready to send.</span>
+          </div>
+        )}
+        {po.status === "Accepted" && !unlocked && (
+          <div className="print:hidden mb-6 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-center gap-3">
+            <span className="inline-block bg-blue-200 text-blue-900 text-xs font-bold uppercase tracking-widest px-2 py-0.5 rounded">Accepted</span>
+            <span className="text-sm text-blue-800">Vendor has accepted this PO. Editing is locked — use <strong>Unlock to Edit</strong> to make changes.</span>
+          </div>
+        )}
+
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div>
@@ -966,12 +1010,25 @@ export default function PODetailPage() {
             >
               Save as PDF
             </button>
-            <button
-              onClick={startEditing}
-              className="px-4 py-2 text-sm font-medium bg-sage-50 text-sage-700 border border-sage-200 rounded-md hover:bg-sage-100"
-            >
-              Edit
-            </button>
+            {po.status === "Accepted" && !unlocked ? (
+              <button
+                onClick={() => {
+                  if (confirm("This PO has been accepted by the vendor. Editing may create discrepancies with their records. Continue?")) {
+                    setUnlocked(true);
+                  }
+                }}
+                className="px-4 py-2 text-sm font-medium text-gray-500 border border-gray-200 rounded-md hover:bg-gray-50 flex items-center gap-1.5"
+              >
+                <span>🔒</span> Unlock to Edit
+              </button>
+            ) : (
+              <button
+                onClick={startEditing}
+                className="px-4 py-2 text-sm font-medium bg-sage-50 text-sage-700 border border-sage-200 rounded-md hover:bg-sage-100"
+              >
+                Edit
+              </button>
+            )}
             <button
               onClick={() => router.push("/pos")}
               className="text-sm text-gray-500 hover:text-gray-700"
@@ -1106,6 +1163,14 @@ export default function PODetailPage() {
               </p>
               <p className="text-sm text-gray-900">{po.notes || "\u2014"}</p>
             </div>
+            {po.soNumber && (
+              <div className="print:hidden border-l-2 border-blue-200 pl-3">
+                <p className="text-xs font-semibold text-blue-500 uppercase tracking-wider mb-1">
+                  ANS SO #
+                </p>
+                <p className="text-sm text-gray-900 font-medium">{po.soNumber}</p>
+              </div>
+            )}
           </div>
         </div>
 
@@ -1220,14 +1285,6 @@ export default function PODetailPage() {
 
                   return (
                     <React.Fragment key={sectionName}>
-                      {/* Section header */}
-                      {!isSimpleMode && (
-                        <tr className="bg-gray-50">
-                          <td colSpan={colSpan} className="px-4 py-2 text-xs font-bold text-gray-900 uppercase tracking-wider">
-                            {sectionName}
-                          </td>
-                        </tr>
-                      )}
                       {/* Line items */}
                       {items.map((item) => (
                         <tr key={item.id} className="border-b border-gray-100">
@@ -1277,31 +1334,6 @@ export default function PODetailPage() {
                           })()}
                         </tr>
                       ))}
-                      {/* Section subtotal */}
-                      {!isSimpleMode && (
-                        <tr className="border-b border-gray-200">
-                          <td className="px-4 py-2.5 font-semibold text-gray-900">Total</td>
-                          <td></td>
-                          <td className="px-4 py-2.5 text-right font-semibold tabular-nums">
-                            {sectionSticks.toLocaleString()}
-                          </td>
-                          <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-gray-500">
-                            {sectionCartons.toLocaleString()}
-                          </td>
-                          <td></td>
-                          <td className="px-4 py-2.5 text-right font-bold tabular-nums">
-                            ${sectionTotal.toLocaleString("en-US", {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            })}
-                          </td>
-                          {showReceived && (
-                            <td className="px-4 py-2.5 text-right font-semibold tabular-nums">
-                              {items.reduce((sum, i) => sum + (receivedByLineId[i.id] || 0), 0).toLocaleString()}
-                            </td>
-                          )}
-                        </tr>
-                      )}
                     </React.Fragment>
                   );
                 });
@@ -1415,5 +1447,38 @@ export default function PODetailPage() {
         )}
       </div>
     </div>
+
+    {/* SO Number modal — shown when moving ANS PO to Accepted */}
+    {showSoModal && (
+      <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowSoModal(false)}>
+        <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm mx-4" onClick={(e) => e.stopPropagation()}>
+          <h2 className="text-base font-semibold text-gray-900 mb-1">ANS Sales Order Number</h2>
+          <p className="text-sm text-gray-500 mb-4">Enter the SO number from ANS&apos;s acceptance. You can skip this and add it later.</p>
+          <input
+            type="text"
+            value={soInput}
+            onChange={(e) => setSoInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && confirmAccepted()}
+            placeholder="e.g. SO570645"
+            autoFocus
+            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black mb-4"
+          />
+          <div className="flex gap-2 justify-end">
+            <button
+              onClick={() => { setSoInput(""); confirmAccepted(); }}
+              className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-700"
+            >
+              Skip
+            </button>
+            <button
+              onClick={confirmAccepted}
+              className="px-4 py-1.5 text-sm font-medium bg-gray-900 text-white rounded-md hover:bg-gray-800"
+            >
+              Confirm Accepted
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
   );
 }

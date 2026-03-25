@@ -140,7 +140,7 @@ export default function NewPOPage() {
                 updated.costBasis = "Per Each";
                 updated.section = "";
                 updated.qtyCartons = null;
-              } else if (sku.count === "Stick") {
+              } else if (sku.uom === "Stick") {
                 updated.costBasis = "Per Stick";
                 updated.section = "Bulk Sticks";
               } else {
@@ -533,11 +533,6 @@ export default function NewPOPage() {
                   <th className="text-left px-3 py-2 text-xs font-semibold uppercase tracking-wider">
                     SKU
                   </th>
-                  {!isSimpleMode && (
-                    <th className="text-left px-3 py-2 text-xs font-semibold uppercase tracking-wider">
-                      Section
-                    </th>
-                  )}
                   <th className="text-right px-3 py-2 text-xs font-semibold uppercase tracking-wider">
                     {isSimpleMode ? "Qty" : "Qty (Sticks)"}
                   </th>
@@ -549,11 +544,6 @@ export default function NewPOPage() {
                   <th className="text-right px-3 py-2 text-xs font-semibold uppercase tracking-wider">
                     Unit Cost
                   </th>
-                  {!isSimpleMode && (
-                    <th className="text-center px-3 py-2 text-xs font-semibold uppercase tracking-wider">
-                      Cost Basis
-                    </th>
-                  )}
                   <th className="text-right px-3 py-2 text-xs font-semibold uppercase tracking-wider">
                     Total
                   </th>
@@ -618,18 +608,6 @@ export default function NewPOPage() {
                         </div>
                       )}
                     </td>
-                    {!isSimpleMode && (
-                      <td className="px-3 py-2">
-                        <input
-                          type="text"
-                          value={item.section}
-                          onChange={(e) =>
-                            updateLineItem(item.key, { section: e.target.value })
-                          }
-                          className="w-full border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-black"
-                        />
-                      </td>
-                    )}
                     <td className="px-3 py-2">
                       {item.costBasis === "Per Stick" || item.costBasis === "Per Each" ? (
                         <input
@@ -692,13 +670,6 @@ export default function NewPOPage() {
                         placeholder="$0.00"
                       />
                     </td>
-                    {!isSimpleMode && (
-                      <td className="px-3 py-2 text-center">
-                        <span className="text-xs text-gray-500">
-                          {item.costBasis}
-                        </span>
-                      </td>
-                    )}
                     <td className="px-3 py-2 text-right">
                       <span className="text-xs font-semibold tabular-nums">
                         ${item.totalPrice.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
