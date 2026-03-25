@@ -1310,52 +1310,33 @@ export default function PODetailPage() {
                 });
               })()}
             </tbody>
-          </table>
-
-          {/* Grand Total */}
-          <div className="border-t-2 border-gray-300 px-4 py-3 flex justify-between items-center bg-gray-50">
-            <span className="font-bold text-gray-900 uppercase text-sm">Grand Total</span>
-            <div className="flex gap-16 text-sm tabular-nums">
-              {isSimpleMode ? (
-                <>
-                  <span className="font-bold">
-                    {po.lineItems.reduce((s, i) => s + (i.qtySticks || 0), 0).toLocaleString()}
-                  </span>
-                  <span className="font-bold text-lg">
-                    ${po.grandTotal?.toLocaleString("en-US", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    }) || "0.00"}
-                  </span>
-                  {showReceived && (
-                    <span className="font-bold">
-                      {receiptStatus.totalReceived.toLocaleString()}
-                    </span>
-                  )}
-                </>
-              ) : (
-                <>
-                  <span className="font-bold">
-                    {po.lineItems.reduce((s, i) => s + (i.qtySticks || 0), 0).toLocaleString()}
-                  </span>
-                  <span className="font-bold text-gray-500">
+            <tfoot>
+              <tr className="border-t-2 border-gray-300 bg-gray-50">
+                <td className="px-4 py-3 font-bold text-gray-900 uppercase text-sm">Grand Total</td>
+                {!isSimpleMode && <td />}
+                <td className="px-4 py-3 text-right font-bold tabular-nums">
+                  {po.lineItems.reduce((s, i) => s + (i.qtySticks || 0), 0).toLocaleString()}
+                </td>
+                {!isSimpleMode && (
+                  <td className="px-4 py-3 text-right font-bold text-gray-500 tabular-nums">
                     {po.lineItems.reduce((s, i) => s + (i.qtyCartons || 0), 0).toLocaleString()}
-                  </span>
-                  <span className="font-bold text-lg">
-                    ${po.grandTotal?.toLocaleString("en-US", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    }) || "0.00"}
-                  </span>
-                  {showReceived && (
-                    <span className="font-bold">
-                      {receiptStatus.totalReceived.toLocaleString()}
-                    </span>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
+                  </td>
+                )}
+                <td />
+                <td className="px-4 py-3 text-right font-bold text-lg tabular-nums">
+                  ${po.grandTotal?.toLocaleString("en-US", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  }) || "0.00"}
+                </td>
+                {showReceived && (
+                  <td className="px-4 py-3 text-right font-bold tabular-nums">
+                    {receiptStatus.totalReceived.toLocaleString()}
+                  </td>
+                )}
+              </tr>
+            </tfoot>
+          </table>
         </div>
 
         {/* Activity Timeline — not shown in print */}
