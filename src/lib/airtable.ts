@@ -111,6 +111,10 @@ export async function updateRecord(
     headers,
     body: JSON.stringify({ fields }),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err?.error?.message as string) || `Airtable update failed: ${res.status}`);
+  }
   return res.json();
 }
 

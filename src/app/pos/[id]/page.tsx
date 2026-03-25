@@ -251,11 +251,12 @@ export default function PODetailPage() {
     }
     setUpdatingStatus(true);
     try {
-      await fetch(`/api/purchase-orders/${params.id}/status`, {
+      const res = await fetch(`/api/purchase-orders/${params.id}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: newStatus }),
       });
+      if (!res.ok) throw new Error("Failed");
       setPO({ ...po, status: newStatus });
     } catch {
       alert("Error updating status.");
@@ -269,15 +270,16 @@ export default function PODetailPage() {
     setShowSoModal(false);
     setUpdatingStatus(true);
     try {
-      await fetch(`/api/purchase-orders/${params.id}/status`, {
+      const res = await fetch(`/api/purchase-orders/${params.id}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "Accepted", soNumber: soInput || null }),
       });
+      if (!res.ok) throw new Error("Failed");
       setPO({ ...po, status: "Accepted", soNumber: soInput || null });
       setSoInput("");
     } catch {
-      alert("Error updating status.");
+      alert("Error updating status. Check that 'Accepted' is an option in the Airtable Status field.");
     } finally {
       setUpdatingStatus(false);
     }
