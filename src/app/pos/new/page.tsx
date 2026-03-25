@@ -41,11 +41,9 @@ interface LineItem {
   key: string;
   skuId: string;
   sku?: SKU;
-  section: string;
   qtySticks: number;
   qtyCartons: number | null;
   unitCost: number;
-  costBasis: "Per Carton" | "Per Stick" | "Per Each";
   totalPrice: number;
   shipToOverrideId?: string;
 }
@@ -91,11 +89,9 @@ export default function NewPOPage() {
     return {
       key: crypto.randomUUID(),
       skuId: "",
-      section: "28CT Packout",
       qtySticks: 0,
       qtyCartons: null,
       unitCost: 0,
-      costBasis: "Per Carton",
       totalPrice: 0,
     };
   }
@@ -131,56 +127,25 @@ export default function NewPOPage() {
           if (item.key !== key) return item;
           const updated = { ...item, ...updates };
 
-          // Auto-fill from SKU
           if (updates.skuId) {
             const sku = skus.find((s) => s.id === updates.skuId);
             if (sku) {
               updated.sku = sku;
-              if (sku.uom === "Each") {
-                updated.costBasis = "Per Each";
-                updated.section = "";
-                updated.qtyCartons = null;
-              } else if (sku.uom === "Stick") {
-                updated.costBasis = "Per Stick";
-                updated.section = "Bulk Sticks";
-              } else {
-                const count = parseInt(sku.count);
-                if (!isNaN(count)) {
-                  updated.costBasis = "Per Carton";
-                  if (count === 28) updated.section = "28CT Packout";
-                  else if (count === 10) updated.section = "10CT Retail";
-                  else if (count === 14) updated.section = "14CT Amazon";
-                  else if (count === 7) updated.section = "7CT Amazon";
-                  else updated.section = `${count}CT`;
-                }
-              }
+              // Reset qtys when SKU changes
+              updated.qtySticks = 0;
+              updated.qtyCartons = sku.uom === "Carton" ? 0 : null;
             }
           }
 
-          // Recalculate quantities and totals
-          if (
-            updates.qtySticks !== undefined ||
-            updates.qtyCartons !== undefined ||
-            updates.unitCost !== undefined ||
-            updates.costBasis !== undefined ||
-            updates.skuId !== undefined
-          ) {
-            const count = updated.sku ? parseInt(updated.sku.count) : NaN;
-
-            if (updated.costBasis === "Per Carton" && !isNaN(count) && count > 0) {
-              // Carton-based: user enters cartons, sticks auto-calc
-              if (updates.qtyCartons !== undefined) {
-                updated.qtySticks = (updated.qtyCartons || 0) * count;
-              }
-              updated.totalPrice = (updated.qtyCartons || 0) * updated.unitCost;
-            } else if (updated.costBasis === "Per Stick") {
-              // Stick-based: user enters sticks
-              updated.totalPrice = updated.qtySticks * updated.unitCost;
-            } else if (updated.costBasis === "Per Each") {
-              // Each-based: user enters qty (stored in qtySticks)
-              updated.qtyCartons = null;
-              updated.totalPrice = updated.qtySticks * updated.unitCost;
-            }
+          // Recalculate totals based on item UOM
+          const uom = updated.sku?.uom;
+          const count = updated.sku ? parseInt(updated.sku.count) : NaN;
+          if (uom === "Carton" && !isNaN(count) && count > 0) {
+            updated.qtySticks = (updated.qtyCartons || 0) * count;
+            updated.totalPrice = (updated.qtyCartons || 0) * updated.unitCost;
+          } else {
+            updated.qtyCartons = null;
+            updated.totalPrice = updated.qtySticks * updated.unitCost;
           }
 
           return updated;
@@ -200,20 +165,20 @@ export default function NewPOPage() {
 
   const grandTotal = lineItems.reduce((sum, item) => sum + item.totalPrice, 0);
 
-  // Simple mode: hide carton/stick-specific columns when all items are "Each"
+  // Simple mode: hide carton columns when no Carton-UOM items are on the PO
   const isSimpleMode = (() => {
     const itemsWithSkus = lineItems.filter((li) => li.sku);
     if (itemsWithSkus.length > 0) {
-      return itemsWithSkus.every((li) => li.costBasis === "Per Each");
+      return !itemsWithSkus.some((li) => li.sku?.uom === "Carton");
     }
-    // No items selected yet — check if supplier's items are all "Each"
+    // No items selected yet — check if supplier's items are all non-Carton
     if (supplierId) {
       const supplier = suppliers.find((s) => s.id === supplierId);
       const supplierSkus = supplier?.categories?.length
         ? skus.filter((s) => supplier.categories.includes(s.category))
         : [];
       if (supplierSkus.length > 0) {
-        return supplierSkus.every((s) => s.uom === "Each");
+        return !supplierSkus.some((s) => s.uom === "Carton");
       }
     }
     return false;
@@ -265,11 +230,11 @@ export default function NewPOPage() {
             .filter((li) => li.skuId)
             .map((li) => ({
               skuId: li.skuId,
-              section: li.section,
+              uom: li.sku?.uom ?? "",
+              count: li.sku ? parseInt(li.sku.count) || null : null,
               qtySticks: li.qtySticks,
               qtyCartons: li.qtyCartons,
               unitCost: li.unitCost,
-              costBasis: li.costBasis,
               totalPrice: li.totalPrice,
               shipToOverrideId: li.shipToOverrideId,
             })),
@@ -609,7 +574,7 @@ export default function NewPOPage() {
                       )}
                     </td>
                     <td className="px-3 py-2">
-                      {item.costBasis === "Per Stick" || item.costBasis === "Per Each" ? (
+                      {item.sku?.uom !== "Carton" ? (
                         <input
                           type="number"
                           value={item.qtySticks || ""}
@@ -633,7 +598,7 @@ export default function NewPOPage() {
                     </td>
                     {!isSimpleMode && (
                       <td className="px-3 py-2">
-                        {item.costBasis === "Per Carton" ? (
+                        {item.sku?.uom === "Carton" ? (
                           <input
                             type="number"
                             value={item.qtyCartons ?? ""}

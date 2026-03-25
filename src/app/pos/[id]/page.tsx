@@ -116,11 +116,9 @@ interface EditLineItem {
   key: string;
   skuId: string;
   sku?: SKU;
-  section: string;
   qtySticks: number;
   qtyCartons: number | null;
   unitCost: number;
-  costBasis: "Per Carton" | "Per Stick" | "Per Each";
   totalPrice: number;
 }
 
@@ -312,11 +310,9 @@ export default function PODetailPage() {
               supplierItemName: li.sku.supplierItemName || "",
             }
           : undefined,
-        section: li.section,
         qtySticks: li.qtySticks,
         qtyCartons: li.qtyCartons,
         unitCost: li.unitCost,
-        costBasis: li.costBasis as "Per Carton" | "Per Stick" | "Per Each",
         totalPrice: li.totalPrice,
       }))
     );
@@ -339,44 +335,21 @@ export default function PODetailPage() {
             const sku = skus.find((s) => s.id === updates.skuId);
             if (sku) {
               updated.sku = sku;
-              const count = sku.count;
-              if (sku.uom === "Stick") {
-                updated.costBasis = "Per Stick";
-                updated.section = "Bulk Sticks";
-              } else if (count != null) {
-                updated.costBasis = "Per Carton";
-                if (count === 28) updated.section = "28CT Packout";
-                else if (count === 10) updated.section = "10CT Retail";
-                else if (count === 14) updated.section = "14CT Amazon";
-                else if (count === 7) updated.section = "7CT Amazon";
-                else updated.section = `${count}CT`;
-              }
+              // Reset qtys when SKU changes
+              updated.qtySticks = 0;
+              updated.qtyCartons = sku.uom === "Carton" ? 0 : null;
             }
           }
 
-          if (
-            updates.qtySticks !== undefined ||
-            updates.qtyCartons !== undefined ||
-            updates.unitCost !== undefined ||
-            updates.costBasis !== undefined ||
-            updates.skuId !== undefined
-          ) {
-            const count = updated.sku?.count ?? NaN;
-
-            if (updated.costBasis === "Per Carton" && !isNaN(count) && count > 0) {
-              if (updates.qtyCartons !== undefined) {
-                updated.qtySticks = (updated.qtyCartons || 0) * count;
-              }
-              if (updated.sku && updated.qtySticks > 0) {
-                updated.qtyCartons = Math.ceil(updated.qtySticks / count);
-              }
-              updated.totalPrice = (updated.qtyCartons || 0) * updated.unitCost;
-            } else if (updated.costBasis === "Per Stick") {
-              updated.totalPrice = updated.qtySticks * updated.unitCost;
-            } else if (updated.costBasis === "Per Each") {
-              updated.qtyCartons = null;
-              updated.totalPrice = updated.qtySticks * updated.unitCost;
-            }
+          // Recalculate totals based on item UOM
+          const uom = updated.sku?.uom;
+          const count = updated.sku?.count ?? NaN;
+          if (uom === "Carton" && !isNaN(count) && count > 0) {
+            updated.qtySticks = (updated.qtyCartons || 0) * count;
+            updated.totalPrice = (updated.qtyCartons || 0) * updated.unitCost;
+          } else {
+            updated.qtyCartons = null;
+            updated.totalPrice = updated.qtySticks * updated.unitCost;
           }
 
           return updated;
@@ -392,11 +365,9 @@ export default function PODetailPage() {
       {
         key: crypto.randomUUID(),
         skuId: "",
-        section: "28CT Packout",
         qtySticks: 0,
         qtyCartons: null,
         unitCost: 0,
-        costBasis: "Per Carton",
         totalPrice: 0,
       },
     ]);
@@ -458,11 +429,11 @@ export default function PODetailPage() {
             .filter((li) => li.skuId)
             .map((li) => ({
               skuId: li.skuId,
-              section: li.section,
+              uom: li.sku?.uom ?? "",
+              count: li.sku?.count ?? null,
               qtySticks: li.qtySticks,
               qtyCartons: li.qtyCartons,
               unitCost: li.unitCost,
-              costBasis: li.costBasis,
               totalPrice: li.totalPrice,
             })),
         }),
@@ -783,7 +754,7 @@ export default function PODetailPage() {
                         )}
                       </td>
                       <td className="px-3 py-2">
-                        {item.costBasis === "Per Stick" || item.costBasis === "Per Each" ? (
+                        {item.sku?.uom !== "Carton" ? (
                           <input
                             type="number"
                             value={item.qtySticks || ""}
@@ -804,7 +775,7 @@ export default function PODetailPage() {
                         )}
                       </td>
                       <td className="px-3 py-2">
-                        {item.costBasis === "Per Carton" ? (
+                        {item.sku?.uom === "Carton" ? (
                           <input
                             type="number"
                             value={item.qtyCartons ?? ""}
@@ -899,8 +870,8 @@ export default function PODetailPage() {
   }
 
   // ─── VIEW MODE ───
-  const isSimpleMode = po.lineItems.length > 0 && po.lineItems.every(
-    (li) => li.costBasis === "Per Each" || li.sku?.uom === "Each"
+  const isSimpleMode = po.lineItems.length > 0 && !po.lineItems.some(
+    (li) => li.sku?.uom === "Carton"
   );
 
   // Build received qty lookup per PO line item

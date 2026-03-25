@@ -9,7 +9,7 @@ import {
   TABLES,
 } from "@/lib/airtable";
 import { logActivity } from "@/lib/activity-log";
-import { computeLineTotal } from "@/lib/po-calc";
+import { computeLineTotal, deriveCostBasis, deriveSection } from "@/lib/po-calc";
 
 export async function GET(
   _request: NextRequest,
@@ -159,14 +159,14 @@ export async function PUT(
     const lineItems = (body.lineItems || []).map(
       (item: {
         skuId: string;
-        section: string;
+        uom: string;
+        count: number | null;
         qtySticks: number;
         qtyCartons: number | null;
         unitCost: number;
-        costBasis: string;
         totalPrice: number;
       }) => {
-        const totalPrice = computeLineTotal(item.costBasis, item.qtySticks, item.qtyCartons, item.unitCost);
+        const totalPrice = computeLineTotal(item.uom, item.qtySticks, item.qtyCartons, item.unitCost);
         return { ...item, totalPrice };
       }
     );
@@ -200,22 +200,22 @@ export async function PUT(
       const lineItemRecords = lineItems.map(
         (item: {
           skuId: string;
-          section: string;
+          uom: string;
+          count: number | null;
           qtySticks: number;
           qtyCartons: number | null;
           unitCost: number;
-          costBasis: string;
           totalPrice: number;
         }) => ({
           fields: {
             "Line Item ID": `${poNumber}-${item.skuId.slice(-6)}`,
             "Purchase Order": [id],
             SKU: [item.skuId],
-            Section: item.section,
+            Section: deriveSection(item.uom, item.count),
             "Qty Sticks": item.qtySticks,
             "Qty Cartons": item.qtyCartons,
             "Unit Cost": item.unitCost,
-            "Cost Basis": item.costBasis,
+            "Cost Basis": deriveCostBasis(item.uom),
             "Total Price": item.totalPrice,
           },
         })
