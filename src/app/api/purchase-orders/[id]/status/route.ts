@@ -10,9 +10,18 @@ export async function PATCH(
   const { status, soNumber } = await request.json();
 
   try {
-    const fields: Record<string, unknown> = { Status: status };
-    if (soNumber) fields["ANS SO Number"] = soNumber;
-    await updateRecord(TABLES.PURCHASE_ORDERS, id, fields);
+    // Write status first — always succeeds independently of SO number
+    await updateRecord(TABLES.PURCHASE_ORDERS, id, { Status: status });
+
+    // Write SO number separately so a field issue doesn't block the status save
+    if (soNumber) {
+      try {
+        await updateRecord(TABLES.PURCHASE_ORDERS, id, { "ANS SO Number": soNumber });
+      } catch (soErr) {
+        console.error("Failed to save ANS SO Number:", soErr);
+        // Still return success — status was saved; SO number can be entered manually
+      }
+    }
 
     logActivity({
       poId: id,
