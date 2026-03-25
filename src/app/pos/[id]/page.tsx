@@ -913,7 +913,7 @@ export default function PODetailPage() {
   const showReceived = receiptStatus && receiptStatus.totalReceived > 0;
   const colSpan = (isSimpleMode ? 3 : 6) + (showReceived ? 1 : 0);
   return (
-    <div className="min-h-screen bg-gray-50" onClick={() => setShowStatusMenu(false)}>
+    <><div className="min-h-screen bg-gray-50" onClick={() => setShowStatusMenu(false)}>
       <div className="max-w-6xl mx-auto px-6 py-8">
         {justCreated && (
           <div className="print:hidden mb-6 bg-sage-50 border border-sage-200 rounded-lg px-4 py-3 text-sm text-sage-800">
@@ -1449,6 +1449,7 @@ export default function PODetailPage() {
     </div>
 
     {/* SO Number modal — shown when moving ANS PO to Accepted */}
+
     {showSoModal && (
       <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowSoModal(false)}>
         <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm mx-4" onClick={(e) => e.stopPropagation()}>
@@ -1480,5 +1481,6 @@ export default function PODetailPage() {
         </div>
       </div>
     )}
+    </>
   );
 }
