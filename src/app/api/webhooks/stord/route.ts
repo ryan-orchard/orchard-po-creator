@@ -118,6 +118,7 @@ export async function POST(request: NextRequest) {
       "Received Date": data.received_at.split("T")[0],
       "External Receipt ID": externalId,
       "Stord Receipt ID": data.receipt_confirmation_id,
+      ...(data.order?.order_number ? { "PO Reference": data.order.order_number } : {}),
       ...(warehouseId ? { Warehouses: [warehouseId] } : {}),
       ...(data.bol ? { Notes: `BOL: ${data.bol}` } : {}),
     };

@@ -77,6 +77,7 @@ export async function GET() {
         receivedDate: string;
         externalReceiptId: string;
         orderNumber: string;
+        poReference: string;
         receiptNumber: string;
         warehouse: string | null;
         poId: string | null;
@@ -88,13 +89,16 @@ export async function GET() {
       const woIds = r.fields["Work Order"] as string[] | undefined;
       const whIds = r.fields["Warehouses"] as string[] | undefined;
       const externalId = (r.fields["External Receipt ID"] as string) || "";
+      const poRef = (r.fields["PO Reference"] as string) || "";
       const notes = (r.fields["Notes"] as string) || "";
       const notesMatch = notes.match(/^Order:\s*(.+?)(?:\s*\||$)/);
-      const orderNumber = notesMatch ? notesMatch[1].trim() : externalId;
+      // PO Reference wins for matching; fall back to Notes parsing, then External Receipt ID
+      const orderNumber = poRef || (notesMatch ? notesMatch[1].trim() : externalId);
       receiptMap[r.id] = {
         receivedDate: (r.fields["Received Date"] as string) || "",
         externalReceiptId: externalId,
         orderNumber,
+        poReference: poRef,
         receiptNumber: (r.fields["Receipt Number"] as string) || "",
         warehouse: whIds?.[0] ? warehouseMap[whIds[0]] || null : null,
         poId: poIds?.[0] || null,
@@ -174,7 +178,7 @@ export async function GET() {
       allPOs
         .filter((r) => {
           const status = r.fields["Status"] as string;
-          return status === "Issued" || status === "Partially Received";
+          return status === "Issued" || status === "Partially Received" || status === "Accepted";
         })
         .map((r) => r.id)
     );
@@ -314,7 +318,9 @@ export async function GET() {
       receiptId: string;
       receiptDate: string;
       orderNumber: string;
+      poReference: string;
       receiptNumber: string;
+      sourceLineId: string | null;
       warehouse: string | null;
       sku: string;
       skuId: string | null;
@@ -587,7 +593,9 @@ export async function GET() {
         receiptId: receiptIds[0],
         receiptDate: receipt.receivedDate,
         orderNumber: receipt.orderNumber,
+        poReference: receipt.poReference,
         receiptNumber: receipt.receiptNumber,
+        sourceLineId: (rl.fields["Source Line ID"] as string) || null,
         warehouse: receipt.warehouse,
         sku: item?.name || threePlSku || "Unknown",
         skuId,

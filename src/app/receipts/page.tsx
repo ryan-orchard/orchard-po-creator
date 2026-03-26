@@ -58,7 +58,9 @@ interface MatchingLine {
   receiptId: string;
   receiptDate: string;
   orderNumber: string;
+  poReference: string;
   receiptNumber: string;
+  sourceLineId: string | null;
   sku: string;
   skuId: string | null;
   threePlSku: string | null;
@@ -123,6 +125,24 @@ export default function ReceiptsPage() {
   const [excluding, setExcluding] = useState<string | null>(null);
   const [unmatching, setUnmatching] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  type SortField = "date" | "receiptNumber" | "sku" | "qty";
+  type SortDir = "asc" | "desc";
+  const [sortConfig, setSortConfig] = useState<{ field: SortField; dir: SortDir } | null>(null);
+
+  const handleSort = (field: SortField) => {
+    setSortConfig((prev) =>
+      prev?.field === field
+        ? { field, dir: prev.dir === "asc" ? "desc" : "asc" }
+        : { field, dir: "asc" }
+    );
+  };
+
+  const SortIcon = ({ field }: { field: SortField }) => {
+    if (!sortConfig || sortConfig.field !== field) {
+      return <span className="ml-1 text-gray-300 font-normal">↕</span>;
+    }
+    return <span className="ml-1">{sortConfig.dir === "asc" ? "↑" : "↓"}</span>;
+  };
 
   const fetchData = useCallback(async () => {
     try {
@@ -162,8 +182,30 @@ export default function ReceiptsPage() {
           l.matchedWO?.woNumber?.toLowerCase().includes(q)
       );
     }
+    if (sortConfig) {
+      result = [...result].sort((a, b) => {
+        let aVal: string | number = "";
+        let bVal: string | number = "";
+        if (sortConfig.field === "date") {
+          aVal = a.receiptDate || "";
+          bVal = b.receiptDate || "";
+        } else if (sortConfig.field === "receiptNumber") {
+          aVal = a.receiptNumber || "";
+          bVal = b.receiptNumber || "";
+        } else if (sortConfig.field === "sku") {
+          aVal = a.sku || "";
+          bVal = b.sku || "";
+        } else if (sortConfig.field === "qty") {
+          aVal = a.receiptQty;
+          bVal = b.receiptQty;
+        }
+        if (aVal < bVal) return sortConfig.dir === "asc" ? -1 : 1;
+        if (aVal > bVal) return sortConfig.dir === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
     return result;
-  }, [lines, activeTab, search]);
+  }, [lines, activeTab, search, sortConfig]);
 
   const handleConfirm = async (
     line: MatchingLine,
@@ -423,20 +465,32 @@ export default function ReceiptsPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200">
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-20">
-                      Date
+                    <th
+                      className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-20 cursor-pointer select-none hover:text-gray-700"
+                      onClick={() => handleSort("date")}
+                    >
+                      Date<SortIcon field="date" />
                     </th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                      Order #
+                    <th
+                      className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer select-none hover:text-gray-700"
+                      onClick={() => handleSort("receiptNumber")}
+                    >
+                      Order #<SortIcon field="receiptNumber" />
                     </th>
                     <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">
                       Warehouse
                     </th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                      Item
+                    <th
+                      className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer select-none hover:text-gray-700"
+                      onClick={() => handleSort("sku")}
+                    >
+                      Item<SortIcon field="sku" />
                     </th>
-                    <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">
-                      Receipt Qty
+                    <th
+                      className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-24 cursor-pointer select-none hover:text-gray-700"
+                      onClick={() => handleSort("qty")}
+                    >
+                      Receipt Qty<SortIcon field="qty" />
                     </th>
                     <th className="w-8"></th>
                     <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
@@ -570,7 +624,10 @@ function ReceiptLineRow({
           {line.warehouse || "—"}
         </td>
         <td className="px-4 py-3 text-gray-900">
-          {line.sku}
+          <div>{line.sku}</div>
+          {line.sourceLineId && (
+            <div className="text-xs text-gray-400">{line.sourceLineId}</div>
+          )}
         </td>
         <td className="px-4 py-3 text-right font-medium text-gray-900 w-24">
           {line.receiptQty.toLocaleString()}
