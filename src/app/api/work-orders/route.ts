@@ -9,9 +9,29 @@ import { generateNextNumber } from "@/lib/sequence";
 import { logActivity } from "@/lib/activity-log";
 
 export async function GET() {
-  const records = await getRecords(TABLES.WORK_ORDERS, {
-    sort: [{ field: "Issue Date", direction: "desc" }],
-  });
+  const [records, allLineItems, allSKUs] = await Promise.all([
+    getRecords(TABLES.WORK_ORDERS, { sort: [{ field: "Issue Date", direction: "desc" }] }),
+    getRecords(TABLES.WORK_ORDER_LINES),
+    getRecords(TABLES.SKUS),
+  ]);
+
+  // Build SKU name lookup
+  const skuMap = new Map(allSKUs.map((s) => [s.id, s.fields["Standard SKU"] as string]));
+
+  // Group output SKU names by WO
+  const outputSkusByWO: Record<string, string[]> = {};
+  for (const li of allLineItems) {
+    if ((li.fields["Line Type"] as string) !== "Output") continue;
+    const woIds = (li.fields["Work Order"] as string[]) || [];
+    const skuIds = (li.fields["SKU"] as string[]) || [];
+    if (woIds[0] && skuIds[0]) {
+      const skuName = skuMap.get(skuIds[0]);
+      if (skuName) {
+        if (!outputSkusByWO[woIds[0]]) outputSkusByWO[woIds[0]] = [];
+        if (!outputSkusByWO[woIds[0]].includes(skuName)) outputSkusByWO[woIds[0]].push(skuName);
+      }
+    }
+  }
 
   const wos = records.map((r) => ({
     id: r.id,
@@ -22,6 +42,7 @@ export async function GET() {
     issuedDate: r.fields["Issue Date"] as string,
     completedDate: r.fields["Completion Date"] as string,
     lineItems: r.fields["Work Order Lines"] as string[],
+    outputSkus: outputSkusByWO[r.id] || [],
   }));
 
   return NextResponse.json(wos);

@@ -3,6 +3,8 @@
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 
+// --- ANS-specific types ---
+
 interface ParsedLine {
   ansItemNumber: string;
   description: string;
@@ -39,6 +41,38 @@ interface ParseResult {
   isDuplicate: boolean;
 }
 
+// --- Universal (AI-extracted) types ---
+
+interface ExtractedLine {
+  description: string;
+  quantity: number;
+  unit: string;
+  unitPrice: number;
+  amount: number;
+}
+
+interface ExtractedInvoice {
+  invoiceNumber: string;
+  invoiceDate: string;
+  dueDate: string | null;
+  vendor: string;
+  poReference: string;
+  subtotal: number;
+  freight: number;
+  tax: number;
+  invoiceAmount: number;
+  lines: ExtractedLine[];
+}
+
+interface ExtractResult {
+  fileName: string;
+  invoice: ExtractedInvoice;
+  suggestedType: string;
+  isDuplicate: boolean;
+}
+
+const INVOICE_TYPES = ["Supplier", "Freight", "Customs", "Packaging", "Work Order"];
+
 function formatCurrency(n: number): string {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 }
@@ -49,15 +83,32 @@ function formatDate(dateStr: string): string {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
+function computeDueDate(invoiceDate: string, paymentTerms: string): string | null {
+  if (!invoiceDate || !paymentTerms) return null;
+  const netMatch = paymentTerms.match(/net\s*(\d+)/i);
+  if (!netMatch) return null;
+  const days = parseInt(netMatch[1], 10);
+  const base = new Date(invoiceDate + "T00:00:00");
+  base.setDate(base.getDate() + days);
+  return base.toISOString().split("T")[0];
+}
+
 export default function InvoiceImportPage() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [mode, setMode] = useState<"ans" | "universal">("ans");
   const [uploading, setUploading] = useState(false);
-  const [result, setResult] = useState<ParseResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+
+  // ANS mode state
+  const [result, setResult] = useState<ParseResult | null>(null);
+
+  // Universal mode state
+  const [extractResult, setExtractResult] = useState<ExtractResult | null>(null);
+  const [invoiceType, setInvoiceType] = useState<string>("Supplier");
 
   // Clean up blob URL on unmount
   useEffect(() => {
@@ -66,13 +117,21 @@ export default function InvoiceImportPage() {
     };
   }, [pdfUrl]);
 
+  const resetAll = () => {
+    setResult(null);
+    setExtractResult(null);
+    setError(null);
+    setSubmitted(false);
+    if (pdfUrl) { URL.revokeObjectURL(pdfUrl); setPdfUrl(null); }
+  };
+
   const handleFileUpload = async (file: File) => {
     setUploading(true);
     setError(null);
     setResult(null);
+    setExtractResult(null);
     setSubmitted(false);
 
-    // Create blob URL for PDF preview
     if (pdfUrl) URL.revokeObjectURL(pdfUrl);
     setPdfUrl(URL.createObjectURL(file));
 
@@ -80,10 +139,11 @@ export default function InvoiceImportPage() {
       const formData = new FormData();
       formData.append("file", file);
 
+      const endpoint = mode === "ans" ? "/api/invoices/parse" : "/api/invoices/extract";
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 20000);
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
 
-      const response = await fetch("/api/invoices/parse", {
+      const response = await fetch(endpoint, {
         method: "POST",
         body: formData,
         signal: controller.signal,
@@ -97,7 +157,12 @@ export default function InvoiceImportPage() {
       }
 
       const data = await response.json();
-      setResult(data);
+      if (mode === "ans") {
+        setResult(data);
+      } else {
+        setExtractResult(data);
+        setInvoiceType(data.suggestedType || "Supplier");
+      }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
         setError("Parsing timed out. This file may not be a supported invoice format.");
@@ -115,22 +180,65 @@ export default function InvoiceImportPage() {
     if (file) handleFileUpload(file);
   };
 
+  // ANS submit
   const handleSubmit = async () => {
     if (!result) return;
     setSubmitting(true);
-
     try {
+      const dueDate = computeDueDate(result.invoice.invoiceDate, result.invoice.paymentTerms);
       const response = await fetch("/api/invoices", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(result.invoice),
+        body: JSON.stringify({ ...result.invoice, dueDate }),
       });
-
       if (!response.ok) {
         const errData = await response.json();
         throw new Error(errData.error || "Failed to create invoice");
       }
+      setSubmitted(true);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Error creating invoice");
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
+  // Universal submit
+  const handleUniversalSubmit = async () => {
+    if (!extractResult) return;
+    setSubmitting(true);
+    const inv = extractResult.invoice;
+    try {
+      const response = await fetch("/api/invoices", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          invoiceNumber: inv.invoiceNumber,
+          invoiceDate: inv.invoiceDate,
+          dueDate: inv.dueDate,
+          vendor: inv.vendor,
+          poReference: inv.poReference,
+          subtotal: inv.subtotal,
+          freight: inv.freight,
+          tax: inv.tax,
+          invoiceAmount: inv.invoiceAmount,
+          invoiceType,
+          lines: inv.lines.map((l, idx) => ({
+            ansItemNumber: "",
+            description: l.description,
+            quantity: l.quantity,
+            unit: l.unit,
+            unitPrice: l.unitPrice,
+            amount: l.amount,
+            batchNumber: null,
+            airtableSkuId: null,
+          })),
+        }),
+      });
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || "Failed to create invoice");
+      }
       setSubmitted(true);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Error creating invoice");
@@ -140,20 +248,42 @@ export default function InvoiceImportPage() {
   };
 
   const inv = result?.invoice;
+  const hasResult = result !== null || extractResult !== null;
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className={`mx-auto px-6 py-8 ${result ? "max-w-[1800px]" : "max-w-6xl"}`}>
+      <div className={`mx-auto px-6 py-8 ${hasResult ? "max-w-[1800px]" : "max-w-6xl"}`}>
         {/* Header */}
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-gray-900">Import Invoice</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            Upload an ANS invoice PDF to parse and save to Airtable
-          </p>
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Import Invoice</h1>
+            <p className="text-sm text-gray-500 mt-1">
+              {mode === "ans"
+                ? "Upload an ANS invoice PDF to parse and save to Airtable"
+                : "Upload any vendor invoice PDF — AI will extract the data"}
+            </p>
+          </div>
+          {/* Mode toggle */}
+          {!hasResult && (
+            <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+              <button
+                onClick={() => { setMode("ans"); resetAll(); }}
+                className={`px-3 py-1.5 text-sm rounded-md transition-colors ${mode === "ans" ? "bg-white text-gray-900 font-medium shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
+              >
+                ANS Supplier
+              </button>
+              <button
+                onClick={() => { setMode("universal"); resetAll(); }}
+                className={`px-3 py-1.5 text-sm rounded-md transition-colors ${mode === "universal" ? "bg-white text-gray-900 font-medium shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
+              >
+                Other Invoice
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Upload Section */}
-        {!result && (
+        {!hasResult && (
           <div
             onDrop={handleDrop}
             onDragOver={(e) => e.preventDefault()}
@@ -161,8 +291,12 @@ export default function InvoiceImportPage() {
           >
             {uploading ? (
               <div>
-                <p className="text-gray-600 mb-2">Parsing invoice...</p>
-                <p className="text-sm text-gray-400 mb-4">Extracting text from PDF</p>
+                <p className="text-gray-600 mb-2">
+                  {mode === "ans" ? "Parsing invoice..." : "Extracting invoice with AI..."}
+                </p>
+                <p className="text-sm text-gray-400 mb-4">
+                  {mode === "ans" ? "Extracting text from PDF" : "This may take a few seconds"}
+                </p>
                 <button
                   onClick={() => {
                     setUploading(false);
@@ -191,7 +325,9 @@ export default function InvoiceImportPage() {
                   />
                 </svg>
                 <p className="text-gray-600 mb-2">
-                  Drag and drop your ANS invoice PDF here, or
+                  {mode === "ans"
+                    ? "Drag and drop your ANS invoice PDF here, or"
+                    : "Drag and drop any vendor invoice PDF here, or"}
                 </p>
                 <button
                   onClick={() => fileInputRef.current?.click()}
@@ -222,7 +358,181 @@ export default function InvoiceImportPage() {
           </div>
         )}
 
-        {/* Results — split view */}
+        {/* Universal Results — split view */}
+        {extractResult && (
+          <div className="flex gap-6">
+            <div className="flex-1 min-w-0 space-y-6">
+              {extractResult.isDuplicate && (
+                <div className="bg-warm-50 border border-warm-200 rounded-lg p-4">
+                  <p className="text-warm-800 text-sm font-medium">
+                    Invoice {extractResult.invoice.invoiceNumber} already exists in Airtable.
+                  </p>
+                </div>
+              )}
+
+              {/* Invoice Summary */}
+              <div className="bg-white rounded-lg border border-gray-200 p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-semibold text-gray-900">Invoice Summary</h2>
+                  <button onClick={resetAll} className="text-sm text-gray-500 hover:text-gray-700">
+                    Upload different file
+                  </button>
+                </div>
+
+                {/* Type selector */}
+                <div className="mb-4 pb-4 border-b border-gray-100">
+                  <label className="text-xs text-gray-500 block mb-1.5">Invoice Type</label>
+                  <div className="flex gap-2 flex-wrap">
+                    {INVOICE_TYPES.map((t) => (
+                      <button
+                        key={t}
+                        onClick={() => setInvoiceType(t)}
+                        className={`px-3 py-1 text-sm rounded-md border transition-colors ${
+                          invoiceType === t
+                            ? "bg-gray-900 text-white border-gray-900"
+                            : "border-gray-300 text-gray-600 hover:border-gray-400"
+                        }`}
+                      >
+                        {t}
+                        {t === extractResult.suggestedType && invoiceType !== t && (
+                          <span className="ml-1 text-[10px] text-gray-400">AI</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                  <div>
+                    <p className="text-gray-500">Vendor</p>
+                    <p className="font-medium text-gray-900">{extractResult.invoice.vendor || "—"}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-500">Invoice Number</p>
+                    <p className="font-medium text-gray-900">{extractResult.invoice.invoiceNumber || "—"}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-500">Invoice Date</p>
+                    <p className="font-medium text-gray-900">{formatDate(extractResult.invoice.invoiceDate)}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-500">Due Date</p>
+                    <p className="font-medium text-gray-900">
+                      {extractResult.invoice.dueDate ? formatDate(extractResult.invoice.dueDate) : "—"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-gray-500">PO Reference</p>
+                    <p className="font-medium text-gray-900">{extractResult.invoice.poReference || "—"}</p>
+                  </div>
+                </div>
+
+                <div className="mt-4 pt-4 border-t border-gray-100 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                  <div>
+                    <p className="text-gray-500">Subtotal</p>
+                    <p className="font-medium text-gray-900">{formatCurrency(extractResult.invoice.subtotal)}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-500">Freight</p>
+                    <p className="font-medium text-gray-900">{formatCurrency(extractResult.invoice.freight)}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-500">Tax</p>
+                    <p className="font-medium text-gray-900">{formatCurrency(extractResult.invoice.tax)}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-500">Invoice Total</p>
+                    <p className="font-semibold text-gray-900 text-base">{formatCurrency(extractResult.invoice.invoiceAmount)}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Line Items */}
+              <div className="bg-white rounded-lg border border-gray-200 p-5">
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">
+                  Line Items ({extractResult.invoice.lines.length})
+                </h2>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-gray-50 border-b border-gray-200">
+                        <th className="text-left px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Description</th>
+                        <th className="text-right px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Qty</th>
+                        <th className="text-left px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Unit</th>
+                        <th className="text-right px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Unit Price</th>
+                        <th className="text-right px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {extractResult.invoice.lines.map((line, idx) => (
+                        <tr key={idx} className="border-b border-gray-100">
+                          <td className="px-3 py-2.5 text-gray-900">{line.description}</td>
+                          <td className="px-3 py-2.5 text-right text-gray-900">{line.quantity.toLocaleString()}</td>
+                          <td className="px-3 py-2.5 text-gray-500 text-xs">{line.unit}</td>
+                          <td className="px-3 py-2.5 text-right text-gray-900">{formatCurrency(line.unitPrice)}</td>
+                          <td className="px-3 py-2.5 text-right text-gray-900">{formatCurrency(line.amount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t-2 border-gray-200 bg-gray-50">
+                        <td colSpan={4} className="px-3 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase">Total</td>
+                        <td className="px-3 py-2.5 text-right font-semibold text-gray-900">{formatCurrency(extractResult.invoice.invoiceAmount)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+
+                <div className="mt-6 flex items-center justify-between">
+                  <p className="text-sm text-gray-500">
+                    Invoice + {extractResult.invoice.lines.length} line item(s) will be created in Airtable
+                  </p>
+                  {submitted ? (
+                    <div className="flex items-center gap-3">
+                      <span className="text-sage-600 text-sm font-medium">Invoice created successfully</span>
+                      <button
+                        onClick={() => router.push("/invoices")}
+                        className="bg-gray-900 text-white px-4 py-2 text-sm rounded-md hover:bg-gray-800"
+                      >
+                        View Invoices
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={resetAll}
+                        className="border border-gray-300 text-gray-700 px-4 py-2 text-sm rounded-md hover:bg-gray-50"
+                      >
+                        Discard
+                      </button>
+                      <button
+                        onClick={handleUniversalSubmit}
+                        disabled={submitting || extractResult.isDuplicate}
+                        className="bg-gray-900 text-white px-6 py-2 text-sm rounded-md hover:bg-gray-800 disabled:opacity-50"
+                      >
+                        {submitting ? "Creating..." : "Create Invoice in Airtable"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* PDF Preview */}
+            {pdfUrl && (
+              <div className="w-[500px] flex-shrink-0 sticky top-6 self-start">
+                <div className="bg-white rounded-lg border border-gray-200 overflow-hidden" style={{ height: "calc(100vh - 120px)" }}>
+                  <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
+                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Original PDF</p>
+                  </div>
+                  <iframe src={pdfUrl} className="w-full" style={{ height: "calc(100% - 41px)" }} title="Invoice PDF preview" />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ANS Results — split view */}
         {result && inv && (
           <div className="flex gap-6">
             {/* Left: Parsed Data */}
@@ -241,13 +551,7 @@ export default function InvoiceImportPage() {
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-semibold text-gray-900">Invoice Summary</h2>
                 <button
-                  onClick={() => {
-                    setResult(null);
-                    setError(null);
-                    setSubmitted(false);
-                    if (pdfUrl) URL.revokeObjectURL(pdfUrl);
-                    setPdfUrl(null);
-                  }}
+                  onClick={resetAll}
                   className="text-sm text-gray-500 hover:text-gray-700"
                 >
                   Upload different file
@@ -261,6 +565,15 @@ export default function InvoiceImportPage() {
                 <div>
                   <p className="text-gray-500">Invoice Date</p>
                   <p className="font-medium text-gray-900">{formatDate(inv.invoiceDate)}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Due Date</p>
+                  <p className="font-medium text-gray-900">
+                    {(() => {
+                      const due = computeDueDate(inv.invoiceDate, inv.paymentTerms);
+                      return due ? formatDate(due) : "—";
+                    })()}
+                  </p>
                 </div>
                 <div>
                   <p className="text-gray-500">Sales Order</p>
@@ -432,12 +745,7 @@ export default function InvoiceImportPage() {
                 ) : (
                   <div className="flex items-center gap-3">
                     <button
-                      onClick={() => {
-                        setResult(null);
-                        setError(null);
-                        setSubmitted(false);
-                        if (pdfUrl) { URL.revokeObjectURL(pdfUrl); setPdfUrl(null); }
-                      }}
+                      onClick={resetAll}
                       className="border border-gray-300 text-gray-700 px-4 py-2 text-sm rounded-md hover:bg-gray-50"
                     >
                       Discard

@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
-import { useRouter, useParams } from "next/navigation";
+import { useState, useEffect, useMemo, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 
 // --- Types ---
 
@@ -221,12 +222,107 @@ function ExternalLinkIcon() {
   );
 }
 
-// --- Main Page ---
+// --- Invoice picker (shown when no invoiceId in URL) ---
 
-export default function InvoiceMatchPage() {
+interface InvoicePickerItem {
+  id: string;
+  invoiceNumber: string;
+  supplier: string;
+  invoiceDate: string;
+  invoiceAmount: number;
+  invoiceType: string;
+  matchStatus: string;
+}
+
+function InvoicePicker({ onSelect }: { onSelect: (id: string) => void }) {
+  const [invoices, setInvoices] = useState<InvoicePickerItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    fetch("/api/invoices")
+      .then(r => r.json())
+      .then(data => {
+        // Filter to only unmatched / needs action
+        setInvoices(
+          (data as InvoicePickerItem[])
+            .filter(i => !["Approved"].includes(i.matchStatus))
+            .sort((a, b) => b.invoiceNumber.localeCompare(a.invoiceNumber))
+        );
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  const filtered = invoices.filter(i =>
+    search === "" ||
+    i.invoiceNumber.toLowerCase().includes(search.toLowerCase()) ||
+    i.supplier.toLowerCase().includes(search.toLowerCase())
+  );
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <p className="text-gray-400">Loading invoices...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-3xl mx-auto px-6 py-10">
+        <Link href="/invoices" className="inline-flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-600 mb-6">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+          </svg>
+          Invoices
+        </Link>
+        <h1 className="text-2xl font-bold text-gray-900 mb-1">Match Invoice</h1>
+        <p className="text-sm text-gray-500 mb-6">Select an invoice to match.</p>
+        <input
+          type="text"
+          placeholder="Search by invoice # or supplier..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-gold-400"
+          autoFocus
+        />
+        <div className="bg-white border border-gray-200 rounded-xl divide-y divide-gray-100 overflow-hidden">
+          {filtered.map(inv => (
+            <button
+              key={inv.id}
+              onClick={() => onSelect(inv.id)}
+              className="w-full text-left px-4 py-3.5 hover:bg-gray-50 transition-colors flex items-center justify-between gap-3"
+            >
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-semibold text-gray-900">{inv.invoiceNumber}</span>
+                  {inv.invoiceType && (
+                    <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500">{inv.invoiceType}</span>
+                  )}
+                </div>
+                <p className="text-xs text-gray-400 mt-0.5">{inv.supplier} · {formatDate(inv.invoiceDate)}</p>
+              </div>
+              <div className="text-right shrink-0">
+                <p className="text-sm font-semibold text-gray-900">{formatCurrency(inv.invoiceAmount)}</p>
+                {inv.matchStatus && (
+                  <span className="text-[10px] font-medium text-gray-400">{inv.matchStatus}</span>
+                )}
+              </div>
+            </button>
+          ))}
+          {filtered.length === 0 && (
+            <p className="px-4 py-8 text-center text-sm text-gray-400">No invoices found.</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Main match tool ---
+
+function MatchTool({ invoiceId }: { invoiceId: string }) {
   const router = useRouter();
-  const params = useParams();
-  const id = params.id as string;
 
   const [invoice, setInvoice] = useState<InvoiceDetail | null>(null);
   const [matchInfo, setMatchInfo] = useState<MatchInfo | null>(null);
@@ -257,12 +353,12 @@ export default function InvoiceMatchPage() {
 
   const [unmatching, setUnmatching] = useState(false);
 
-  useEffect(() => { loadData(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [id]);
+  useEffect(() => { loadData(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [invoiceId]);
 
   async function loadData() {
     try {
       const [invoiceRes, matchingRes] = await Promise.all([
-        fetch(`/api/invoices/${id}`),
+        fetch(`/api/invoices/${invoiceId}`),
         fetch(`/api/invoices/matching`),
       ]);
       const invoiceData = await invoiceRes.json();
@@ -295,10 +391,9 @@ export default function InvoiceMatchPage() {
         }
       }
 
-      const match = matchingData.invoices?.find((i: { id: string }) => i.id === id);
+      const match = matchingData.invoices?.find((i: { id: string }) => i.id === invoiceId);
       setMatchInfo(match || null);
 
-      // For pending-receipt state, PO is directly linked on the invoice record
       const poId = invoiceData.purchaseOrder?.id || match?.po?.poId;
       const receiptId = match?.matchedReceipt?.receiptId || match?.suggestedReceipt?.receiptId;
 
@@ -380,12 +475,12 @@ export default function InvoiceMatchPage() {
       const lineMatches = poRows
         .filter(r => r.invoiceLineId && r.receiptLineId && r.poLineItemId)
         .map(r => ({ invoiceLineId: r.invoiceLineId, receiptLineId: r.receiptLineId, poLineItemId: r.poLineItemId }));
-      const res = await fetch(`/api/invoices/${id}/match`, {
+      const res = await fetch(`/api/invoices/${invoiceId}/match`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ receiptId: selectedReceiptId, lineMatches, hasDiscrepancy: !poAllPass }),
       });
       if (!res.ok) { alert(`Error: ${(await res.json()).error}`); return; }
-      router.push("/invoices");
+      router.push(`/invoices/${invoiceId}`);
     } catch { alert("Failed to confirm match."); }
     finally { setConfirming(false); }
   }
@@ -394,12 +489,12 @@ export default function InvoiceMatchPage() {
     if (!poDetail) return;
     setConfirming(true);
     try {
-      const res = await fetch(`/api/invoices/${id}/match`, {
+      const res = await fetch(`/api/invoices/${invoiceId}/match`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ poId: poDetail.id, pendingReceipt: true }),
       });
       if (!res.ok) { alert(`Error: ${(await res.json()).error}`); return; }
-      router.push("/invoices");
+      router.push(`/invoices/${invoiceId}`);
     } catch { alert("Failed to save PO link."); }
     finally { setConfirming(false); }
   }
@@ -407,12 +502,12 @@ export default function InvoiceMatchPage() {
   async function handleApprove() {
     setConfirming(true);
     try {
-      const res = await fetch(`/api/invoices/${id}/match`, {
+      const res = await fetch(`/api/invoices/${invoiceId}/match`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ approve: true }),
       });
       if (!res.ok) { alert(`Error: ${(await res.json()).error}`); return; }
-      router.push("/invoices");
+      router.push(`/invoices/${invoiceId}`);
     } catch { alert("Failed to approve invoice."); }
     finally { setConfirming(false); }
   }
@@ -451,12 +546,12 @@ export default function InvoiceMatchPage() {
     if (!woDetail) return;
     setConfirmingWO(true);
     try {
-      const res = await fetch(`/api/invoices/${id}/match`, {
+      const res = await fetch(`/api/invoices/${invoiceId}/match`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ workOrderId: woDetail.id }),
       });
       if (!res.ok) { alert(`Error: ${(await res.json()).error}`); return; }
-      router.push("/invoices");
+      router.push(`/invoices/${invoiceId}`);
     } catch { alert("Failed to match to Work Order."); }
     finally { setConfirmingWO(false); }
   }
@@ -498,12 +593,12 @@ export default function InvoiceMatchPage() {
     if (!shipmentDetail) return;
     setConfirmingShipment(true);
     try {
-      const res = await fetch(`/api/invoices/${id}/match`, {
+      const res = await fetch(`/api/invoices/${invoiceId}/match`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ shipmentId: shipmentDetail.id }),
       });
       if (!res.ok) { alert(`Error: ${(await res.json()).error}`); return; }
-      router.push("/invoices");
+      router.push(`/invoices/${invoiceId}`);
     } catch { alert("Failed to match to Shipment."); }
     finally { setConfirmingShipment(false); }
   }
@@ -511,9 +606,9 @@ export default function InvoiceMatchPage() {
   async function handleUnmatch() {
     setUnmatching(true);
     try {
-      const res = await fetch(`/api/invoices/${id}/unmatch`, { method: "POST" });
+      const res = await fetch(`/api/invoices/${invoiceId}/unmatch`, { method: "POST" });
       if (!res.ok) { alert(`Error: ${(await res.json()).error}`); return; }
-      router.push("/invoices");
+      router.push(`/invoices/${invoiceId}`);
     } catch { alert("Failed to unmatch."); }
     finally { setUnmatching(false); }
   }
@@ -525,7 +620,6 @@ export default function InvoiceMatchPage() {
     return <div className="min-h-screen bg-gray-50 flex items-center justify-center"><p className="text-gray-500">Invoice not found.</p></div>;
   }
 
-  // The active receipt for WO vs PO/Shipment
   const activeReceipt = matchType === "wo" ? woReceiptDetail : receiptDetail;
 
   return (
@@ -534,12 +628,12 @@ export default function InvoiceMatchPage() {
 
         {/* Header */}
         <div className="mb-6">
-          <button onClick={() => router.push("/invoices")} className="text-sm text-gray-500 hover:text-gray-700 mb-2 flex items-center gap-1">
+          <Link href={`/invoices/${invoiceId}`} className="text-sm text-gray-500 hover:text-gray-700 mb-2 flex items-center gap-1">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
             </svg>
-            Back to Invoices
-          </button>
+            {invoice.invoiceNumber}
+          </Link>
           <h1 className="text-2xl font-bold text-gray-900">Match Invoice {invoice.invoiceNumber}</h1>
           {matchInfo?.flags && matchInfo.flags.length > 0 && (
             <div className="mt-2">
@@ -749,7 +843,6 @@ export default function InvoiceMatchPage() {
                   </div>
                   <div className="border border-gray-200 rounded overflow-hidden max-h-64 overflow-y-auto divide-y divide-gray-100">
                     {availableWOs.map(wo => {
-                      // Recommend WOs whose output SKUs overlap with invoice line SKUs
                       const invoiceSkus = new Set(invoice?.lines.map(l => l.skuName).filter(Boolean) || []);
                       const overlap = wo.outputSkus.some(s => invoiceSkus.has(s));
                       return (
@@ -1125,7 +1218,7 @@ export default function InvoiceMatchPage() {
           </div>
         )}
 
-        {/* Shipment confirmation block — no table needed */}
+        {/* Shipment confirmation block */}
         {matchType === "shipment" && shipmentDetail && (
           <div className="bg-white rounded-lg border border-gray-200 p-5 mb-6">
             <p className="text-sm text-gray-600">
@@ -1156,7 +1249,6 @@ export default function InvoiceMatchPage() {
             )}
           </div>
           <div className="flex items-center gap-3">
-            {/* Discrepancy: offer approve-anyway */}
             {isDiscrepancy && (
               <button onClick={handleApprove} disabled={confirming}
                 className="bg-sage-600 text-white px-6 py-2 text-sm font-semibold rounded-md hover:bg-sage-700 disabled:opacity-50">
@@ -1164,7 +1256,6 @@ export default function InvoiceMatchPage() {
               </button>
             )}
 
-            {/* WO: approve */}
             {matchType === "wo" && !isApproved && !isDiscrepancy && woDetail && (
               <button onClick={handleConfirmWO} disabled={confirmingWO}
                 className="bg-sage-600 text-white px-6 py-2 text-sm font-semibold rounded-md hover:bg-sage-700 disabled:opacity-50">
@@ -1172,7 +1263,6 @@ export default function InvoiceMatchPage() {
               </button>
             )}
 
-            {/* Shipment: approve */}
             {matchType === "shipment" && !isApproved && !isDiscrepancy && shipmentDetail && (
               <button onClick={handleConfirmShipment} disabled={confirmingShipment}
                 className="bg-sage-600 text-white px-6 py-2 text-sm font-semibold rounded-md hover:bg-sage-700 disabled:opacity-50">
@@ -1180,7 +1270,6 @@ export default function InvoiceMatchPage() {
               </button>
             )}
 
-            {/* PO + receipt: approve or flag discrepancy */}
             {matchType === "po" && !isApproved && !isDiscrepancy && poDetail && receiptDetail && (
               <button onClick={handleConfirmPO} disabled={confirming}
                 className={`text-white px-6 py-2 text-sm font-semibold rounded-md transition-colors disabled:opacity-50 ${
@@ -1190,11 +1279,10 @@ export default function InvoiceMatchPage() {
               </button>
             )}
 
-            {/* PO only (no receipt yet): save as pending */}
             {matchType === "po" && !isApproved && !isDiscrepancy && !isPendingReceipt && poDetail && !receiptDetail && (
               <button onClick={handlePendingPO} disabled={confirming}
                 className="bg-gray-700 text-white px-6 py-2 text-sm font-semibold rounded-md hover:bg-gray-800 disabled:opacity-50">
-                {confirming ? "Saving..." : "Confirm PO — Awaiting Receipt"}
+                {confirming ? "Saving..." : "Confirm PO \u2014 Awaiting Receipt"}
               </button>
             )}
           </div>
@@ -1202,5 +1290,38 @@ export default function InvoiceMatchPage() {
 
       </div>
     </div>
+  );
+}
+
+// --- Page wrapper (handles search params) ---
+
+function MatchPageInner() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(
+    searchParams.get("invoiceId")
+  );
+
+  function handleSelect(id: string) {
+    setSelectedInvoiceId(id);
+    router.replace(`/match?invoiceId=${id}`);
+  }
+
+  if (!selectedInvoiceId) {
+    return <InvoicePicker onSelect={handleSelect} />;
+  }
+
+  return <MatchTool invoiceId={selectedInvoiceId} />;
+}
+
+export default function MatchPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <p className="text-gray-400">Loading...</p>
+      </div>
+    }>
+      <MatchPageInner />
+    </Suspense>
   );
 }

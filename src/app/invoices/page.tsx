@@ -15,6 +15,14 @@ interface ComparisonLine {
   priceMatch: boolean;
 }
 
+const INVOICE_TYPE_COLORS: Record<string, string> = {
+  Supplier: "bg-gray-100 text-gray-600",
+  Packaging: "bg-warm-100 text-warm-700",
+  Freight: "bg-blue-100 text-blue-700",
+  Customs: "bg-orange-100 text-orange-700",
+  "Work Order": "bg-gold-100 text-gold-700",
+};
+
 interface InvoiceMatch {
   id: string;
   invoiceNumber: string;
@@ -23,8 +31,9 @@ interface InvoiceMatch {
   supplier: string;
   poReference: string;
   invoiceAmount: number;
-  matchStatus: "open" | "matched" | "discrepancy";
+  matchStatus: "open" | "pending-receipt" | "discrepancy" | "approved";
   paymentStatus: string;
+  invoiceType: string;
   lineCount: number;
   po: { poId: string; poNumber: string; status: string } | null;
   suggestedReceipt: {
@@ -45,9 +54,10 @@ interface InvoiceMatch {
   flags: string[];
 }
 
-type Tab = "open" | "matched" | "discrepancy" | "paid";
+type Tab = "needs-action" | "discrepancy" | "complete" | "paid";
 
-type SortKey = "invoiceNumber" | "invoiceDate" | "dueDate" | "poReference" | "invoiceAmount" | "paymentStatus";
+type CardFilter = "all-unpaid" | "past-due" | "upcoming" | "ready-to-pay" | null;
+type SortKey = "invoiceNumber" | "supplier" | "invoiceDate" | "dueDate" | "poReference" | "invoiceAmount" | "paymentStatus";
 type SortDir = "asc" | "desc";
 
 // --- Helpers ---
@@ -79,23 +89,25 @@ export default function InvoicesPage() {
   const [invoices, setInvoices] = useState<InvoiceMatch[]>([]);
   const [counts, setCounts] = useState({
     open: 0,
-    matched: 0,
+    pendingReceipt: 0,
     discrepancy: 0,
+    approved: 0,
   });
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<Tab>("open");
+  const [activeTab, setActiveTab] = useState<Tab>("needs-action");
   const [search, setSearch] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [unmatching, setUnmatching] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("invoiceDate");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [cardFilter, setCardFilter] = useState<CardFilter>(null);
 
   const fetchData = useCallback(async () => {
     try {
       const res = await fetch("/api/invoices/matching");
       const data = await res.json();
       setInvoices(data.invoices || []);
-      setCounts(data.counts || { open: 0, matched: 0, discrepancy: 0 });
+      setCounts(data.counts || { open: 0, pendingReceipt: 0, discrepancy: 0, approved: 0 });
     } catch (err) {
       console.error("Failed to fetch invoice matching data:", err);
     } finally {
@@ -108,15 +120,36 @@ export default function InvoicesPage() {
   }, [fetchData]);
 
   const filteredInvoices = useMemo(() => {
+    const today = new Date().toISOString().split("T")[0];
     let result: InvoiceMatch[];
-    if (activeTab === "paid") {
+
+    if (cardFilter) {
+      switch (cardFilter) {
+        case "all-unpaid":
+          result = invoices.filter((i) => i.paymentStatus !== "Paid");
+          break;
+        case "past-due":
+          result = invoices.filter((i) => i.paymentStatus !== "Paid" && i.dueDate && i.dueDate < today);
+          break;
+        case "upcoming":
+          result = invoices.filter((i) => i.paymentStatus !== "Paid" && i.dueDate && i.dueDate >= today);
+          break;
+        case "ready-to-pay":
+          result = invoices.filter((i) => i.matchStatus === "approved" && i.paymentStatus !== "Paid");
+          break;
+        default:
+          result = [...invoices];
+      }
+    } else if (activeTab === "paid") {
       result = invoices.filter((i) => i.paymentStatus === "Paid");
-    } else if (activeTab === "open") {
-      result = invoices.filter(
-        (i) => i.matchStatus === "open" && i.paymentStatus !== "Paid"
-      );
+    } else if (activeTab === "needs-action") {
+      result = invoices.filter((i) => (i.matchStatus === "open" || i.matchStatus === "pending-receipt") && i.paymentStatus !== "Paid");
+    } else if (activeTab === "discrepancy") {
+      result = invoices.filter((i) => i.matchStatus === "discrepancy");
+    } else if (activeTab === "complete") {
+      result = invoices.filter((i) => i.matchStatus === "approved" && i.paymentStatus !== "Paid");
     } else {
-      result = invoices.filter((i) => i.matchStatus === activeTab);
+      result = [...invoices];
     }
     if (search.trim()) {
       const q = search.trim().toLowerCase();
@@ -135,6 +168,9 @@ export default function InvoicesPage() {
       switch (sortKey) {
         case "invoiceNumber":
           cmp = a.invoiceNumber.localeCompare(b.invoiceNumber);
+          break;
+        case "supplier":
+          cmp = (a.supplier || "").localeCompare(b.supplier || "");
           break;
         case "invoiceDate":
           cmp = a.invoiceDate.localeCompare(b.invoiceDate);
@@ -166,7 +202,7 @@ export default function InvoicesPage() {
       0
     );
     const readyToPay = unpaidInvoices.filter(
-      (i) => i.matchStatus === "matched"
+      (i) => i.matchStatus === "approved"
     );
     const totalReadyToPay = readyToPay.reduce(
       (sum, i) => sum + i.invoiceAmount,
@@ -210,11 +246,13 @@ export default function InvoicesPage() {
     [invoices]
   );
 
-  const openCount = useMemo(
-    () =>
-      invoices.filter(
-        (i) => i.matchStatus === "open" && i.paymentStatus !== "Paid"
-      ).length,
+  const needsActionCount = useMemo(
+    () => invoices.filter((i) => (i.matchStatus === "open" || i.matchStatus === "pending-receipt") && i.paymentStatus !== "Paid").length,
+    [invoices]
+  );
+
+  const completeCount = useMemo(
+    () => invoices.filter((i) => i.matchStatus === "approved" && i.paymentStatus !== "Paid").length,
     [invoices]
   );
 
@@ -238,19 +276,13 @@ export default function InvoicesPage() {
   };
 
   const handleRowClick = (invoice: InvoiceMatch) => {
-    if (activeTab === "matched" || activeTab === "paid") {
-      // Toggle inline expansion for matched/paid invoices
-      setExpandedId(expandedId === invoice.id ? null : invoice.id);
-    } else {
-      // Navigate to three-panel match view for open and discrepancy
-      router.push(`/invoices/${invoice.id}/match`);
-    }
+    router.push(`/invoices/${invoice.id}`);
   };
 
   const tabs: { key: Tab; label: string; count: number }[] = [
-    { key: "open", label: "Open", count: openCount },
-    { key: "matched", label: "Matched", count: counts.matched },
+    { key: "needs-action", label: "Needs Action", count: needsActionCount },
     { key: "discrepancy", label: "Discrepancy", count: counts.discrepancy },
+    { key: "complete", label: "Complete", count: completeCount },
     { key: "paid", label: "Paid", count: paidCount },
   ];
 
@@ -269,51 +301,63 @@ export default function InvoicesPage() {
             onClick={() => router.push("/invoices/import")}
             className="bg-gray-900 text-white px-4 py-2 text-sm rounded-md hover:bg-gray-800"
           >
-            + Import Invoice
+            + Add Invoice
           </button>
         </div>
 
         {/* Summary Cards */}
         {!loading && invoices.length > 0 && (
           <div className="grid grid-cols-4 gap-4 mb-6">
-            <div className="bg-white rounded-lg border border-gray-200 px-5 py-4">
-              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+            <button
+              onClick={() => setCardFilter(cardFilter === "all-unpaid" ? null : "all-unpaid")}
+              className={`text-left rounded-lg border px-5 py-4 transition-colors ${cardFilter === "all-unpaid" ? "bg-gray-900 border-gray-900" : "bg-white border-gray-200 hover:border-gray-300 hover:bg-gray-50"}`}
+            >
+              <p className={`text-xs font-medium uppercase tracking-wider ${cardFilter === "all-unpaid" ? "text-gray-400" : "text-gray-500"}`}>
                 Total Unpaid
               </p>
-              <p className="text-2xl font-bold text-gray-900 mt-1">
+              <p className={`text-2xl font-bold mt-1 ${cardFilter === "all-unpaid" ? "text-white" : "text-gray-900"}`}>
                 {formatCurrency(summaryStats.totalUnpaid)}
               </p>
-            </div>
-            <div className="bg-white rounded-lg border border-burgundy-200 px-5 py-4">
-              <p className="text-xs font-medium text-burgundy-500 uppercase tracking-wider">
+            </button>
+            <button
+              onClick={() => setCardFilter(cardFilter === "past-due" ? null : "past-due")}
+              className={`text-left rounded-lg border px-5 py-4 transition-colors ${cardFilter === "past-due" ? "bg-burgundy-600 border-burgundy-600" : "bg-white border-burgundy-200 hover:border-burgundy-300 hover:bg-burgundy-50"}`}
+            >
+              <p className={`text-xs font-medium uppercase tracking-wider ${cardFilter === "past-due" ? "text-burgundy-200" : "text-burgundy-500"}`}>
                 Past Due
               </p>
-              <p className="text-2xl font-bold text-burgundy-600 mt-1">
+              <p className={`text-2xl font-bold mt-1 ${cardFilter === "past-due" ? "text-white" : "text-burgundy-600"}`}>
                 {formatCurrency(summaryStats.totalPastDue)}
               </p>
-              <p className="text-xs text-burgundy-300 mt-0.5">
+              <p className={`text-xs mt-0.5 ${cardFilter === "past-due" ? "text-burgundy-200" : "text-burgundy-300"}`}>
                 {summaryStats.pastDueCount} invoice{summaryStats.pastDueCount !== 1 ? "s" : ""}
               </p>
-            </div>
-            <div className="bg-white rounded-lg border border-gray-200 px-5 py-4">
-              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+            </button>
+            <button
+              onClick={() => setCardFilter(cardFilter === "upcoming" ? null : "upcoming")}
+              className={`text-left rounded-lg border px-5 py-4 transition-colors ${cardFilter === "upcoming" ? "bg-warm-600 border-warm-600" : "bg-white border-gray-200 hover:border-warm-300 hover:bg-warm-50"}`}
+            >
+              <p className={`text-xs font-medium uppercase tracking-wider ${cardFilter === "upcoming" ? "text-warm-200" : "text-gray-500"}`}>
                 Upcoming
               </p>
-              <p className="text-2xl font-bold text-warm-600 mt-1">
+              <p className={`text-2xl font-bold mt-1 ${cardFilter === "upcoming" ? "text-white" : "text-warm-600"}`}>
                 {formatCurrency(summaryStats.totalUpcoming)}
               </p>
-              <p className="text-xs text-gray-400 mt-0.5">
+              <p className={`text-xs mt-0.5 ${cardFilter === "upcoming" ? "text-warm-200" : "text-gray-400"}`}>
                 {summaryStats.upcomingCount} invoice{summaryStats.upcomingCount !== 1 ? "s" : ""}
               </p>
-            </div>
-            <div className="bg-white rounded-lg border border-gray-200 px-5 py-4">
-              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+            </button>
+            <button
+              onClick={() => setCardFilter(cardFilter === "ready-to-pay" ? null : "ready-to-pay")}
+              className={`text-left rounded-lg border px-5 py-4 transition-colors ${cardFilter === "ready-to-pay" ? "bg-sage-700 border-sage-700" : "bg-white border-gray-200 hover:border-sage-300 hover:bg-sage-50"}`}
+            >
+              <p className={`text-xs font-medium uppercase tracking-wider ${cardFilter === "ready-to-pay" ? "text-sage-200" : "text-gray-500"}`}>
                 Ready to Pay
               </p>
-              <p className="text-2xl font-bold text-sage-700 mt-1">
+              <p className={`text-2xl font-bold mt-1 ${cardFilter === "ready-to-pay" ? "text-white" : "text-sage-700"}`}>
                 {formatCurrency(summaryStats.totalReadyToPay)}
               </p>
-            </div>
+            </button>
           </div>
         )}
 
@@ -343,6 +387,7 @@ export default function InvoicesPage() {
                     onClick={() => {
                       setActiveTab(tab.key);
                       setExpandedId(null);
+                      setCardFilter(null);
                     }}
                     className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
                       activeTab === tab.key
@@ -408,21 +453,41 @@ export default function InvoicesPage() {
               </div>
             </div>
 
+            {/* Card filter label */}
+            {cardFilter && (
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-sm text-gray-600">
+                  Showing:{" "}
+                  <span className="font-medium text-gray-900">
+                    {cardFilter === "all-unpaid" && "All Unpaid"}
+                    {cardFilter === "past-due" && "Past Due"}
+                    {cardFilter === "upcoming" && "Upcoming"}
+                    {cardFilter === "ready-to-pay" && "Ready to Pay"}
+                  </span>
+                </span>
+                <button
+                  onClick={() => setCardFilter(null)}
+                  className="text-xs text-gray-400 hover:text-gray-600 underline"
+                >
+                  Clear
+                </button>
+              </div>
+            )}
+
             {/* Table */}
             <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200">
-                    <SortableHeader label="Invoice #" sortKey="invoiceNumber" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[16%]" />
-                    <SortableHeader label="Date" sortKey="invoiceDate" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[9%]" />
-                    <SortableHeader label="Due" sortKey="dueDate" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[9%]" />
-                    <SortableHeader label="PO Ref" sortKey="poReference" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[12%]" />
-                    <SortableHeader label="Amount" sortKey="invoiceAmount" currentKey={sortKey} dir={sortDir} onSort={handleSort} align="right" className="w-[12%]" />
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-[16%]">
-                      Review Status
-                    </th>
-                    <SortableHeader label="Payment" sortKey="paymentStatus" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[12%]" />
-                    <th className="px-4 py-3 w-[14%]"></th>
+                    <SortableHeader label="Invoice #" sortKey="invoiceNumber" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[13%]" />
+                    <SortableHeader label="Payment" sortKey="paymentStatus" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[9%]" />
+                    <SortableHeader label="Vendor" sortKey="supplier" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[16%]" />
+                    <SortableHeader label="Date" sortKey="invoiceDate" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[8%]" />
+                    <SortableHeader label="Due" sortKey="dueDate" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[8%]" />
+                    <SortableHeader label="Amount" sortKey="invoiceAmount" currentKey={sortKey} dir={sortDir} onSort={handleSort} align="right" className="w-[10%]" />
+                    <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-[8%]">Price</th>
+                    <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-[8%]">Linked</th>
+                    <th className="px-4 py-3 w-[8%]"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -449,13 +514,15 @@ export default function InvoicesPage() {
                 <div className="p-8 text-center text-gray-400 text-sm">
                   {search
                     ? `No results matching "${search}"`
-                    : activeTab === "open"
-                    ? "All invoices have been actioned!"
+                    : activeTab === "needs-action"
+                    ? "All invoices have been actioned."
                     : activeTab === "discrepancy"
                     ? "No invoices with discrepancies."
+                    : activeTab === "complete"
+                    ? "No completed invoices yet."
                     : activeTab === "paid"
                     ? "No paid invoices yet."
-                    : "No matched invoices yet."}
+                    : ""}
                 </div>
               )}
             </div>
@@ -463,6 +530,46 @@ export default function InvoicesPage() {
         )}
       </div>
     </div>
+  );
+}
+
+// --- Invoice Check Helpers ---
+
+function getChecks(invoice: InvoiceMatch) {
+  const hasPriceIssue = invoice.comparison?.lines.some((l) => !l.priceMatch) ?? false;
+  const hasQtyIssue = invoice.comparison?.lines.some((l) => !l.qtyMatch) ?? false;
+  const priceValidated = invoice.matchStatus === "approved" || invoice.matchStatus === "discrepancy";
+  return {
+    priceOk: priceValidated && !hasPriceIssue,
+    priceFlag: hasPriceIssue,
+    linked: invoice.matchedReceipt !== null,
+    linkedFlag: hasQtyIssue && invoice.matchedReceipt !== null,
+  };
+}
+
+function CheckIcon({ ok, flag }: { ok: boolean; flag?: boolean }) {
+  if (flag) {
+    return (
+      <span className="flex items-center justify-center w-6 h-6 rounded-full bg-warm-100">
+        <svg className="w-3.5 h-3.5 text-warm-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </span>
+    );
+  }
+  if (ok) {
+    return (
+      <span className="flex items-center justify-center w-6 h-6 rounded-full bg-sage-100">
+        <svg className="w-3.5 h-3.5 text-sage-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+        </svg>
+      </span>
+    );
+  }
+  return (
+    <span className="flex items-center justify-center w-6 h-6 rounded-full bg-gray-100">
+      <span className="w-2.5 h-0.5 bg-gray-300 rounded-full block" />
+    </span>
   );
 }
 
@@ -479,7 +586,7 @@ function InvoiceRow({
 }: {
   invoice: InvoiceMatch;
   isExpanded: boolean;
-  activeTab: Tab;
+  activeTab: "needs-action" | "discrepancy" | "complete" | "paid";
   onClick: () => void;
   onToggleExpand: () => void;
   isUnmatching: boolean;
@@ -493,79 +600,24 @@ function InvoiceRow({
         }`}
         onClick={onClick}
       >
+        {/* Invoice # + type badge */}
         <td className="px-4 py-3">
-          <div className="font-medium text-gray-900">
-            {invoice.invoiceNumber}
+          <div className="flex items-center gap-1.5">
+            <span className="font-semibold text-gray-900 text-sm">
+              {invoice.invoiceNumber}
+            </span>
+            {invoice.invoiceType && invoice.invoiceType !== "Supplier" && (
+              <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${INVOICE_TYPE_COLORS[invoice.invoiceType] || "bg-gray-100 text-gray-600"}`}>
+                {invoice.invoiceType}
+              </span>
+            )}
           </div>
-          {invoice.supplier && (
-            <div className="text-xs text-gray-400">{invoice.supplier}</div>
-          )}
-        </td>
-        <td className="px-4 py-3 text-gray-600">
-          {formatDate(invoice.invoiceDate)}
-        </td>
-        <td className="px-4 py-3">
-          {invoice.dueDate ? (
-            <span
-              className={
-                invoice.paymentStatus !== "Paid" &&
-                invoice.dueDate < new Date().toISOString().split("T")[0]
-                  ? "text-burgundy-600 font-medium"
-                  : "text-gray-600"
-              }
-            >
-              {formatDate(invoice.dueDate)}
-            </span>
-          ) : (
-            <span className="text-gray-300 text-xs">&mdash;</span>
-          )}
-        </td>
-        <td className="px-4 py-3">
-          {invoice.poReference ? (
-            <span className="text-gray-700">
-              {invoice.poReference}
-            </span>
-          ) : (
-            <span className="text-gray-300 text-xs">No ref</span>
-          )}
-        </td>
-        <td className="px-4 py-3 text-right font-medium text-gray-900">
-          {formatCurrency(invoice.invoiceAmount)}
         </td>
 
-        {/* Status / Receipt column */}
-        <td className="px-4 py-3">
-          {(activeTab === "matched" || activeTab === "discrepancy") &&
-          invoice.matchedReceipt ? (
-            <span
-              className={`font-medium ${
-                activeTab === "matched" ? "text-sage-700" : "text-warm-700"
-              }`}
-            >
-              {invoice.matchedReceipt.receiptNumber}
-            </span>
-          ) : invoice.flags.length > 0 ? (
-            <span className="text-warm-600 text-xs font-medium">
-              {invoice.flags[0]}
-            </span>
-          ) : invoice.suggestedReceipt ? (
-            <span className="text-xs text-gray-500">
-              Suggested: {invoice.suggestedReceipt.receiptNumber}
-            </span>
-          ) : (
-            <span className="text-gray-300 text-xs">No match found</span>
-          )}
-        </td>
-
-        {/* Payment Status */}
+        {/* Payment Status — moved next to Invoice # */}
         <td className="px-4 py-3">
           {invoice.paymentStatus ? (
-            <span
-              className={`px-2 py-0.5 rounded text-xs font-medium ${
-                paymentStatusColors[invoice.paymentStatus] ||
-                "bg-gray-100 text-gray-600"
-              }`}
-            >
+            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${paymentStatusColors[invoice.paymentStatus] || "bg-gray-100 text-gray-600"}`}>
               {invoice.paymentStatus}
             </span>
           ) : (
@@ -573,19 +625,66 @@ function InvoiceRow({
           )}
         </td>
 
+        {/* Vendor */}
+        <td className="px-4 py-3 text-sm text-gray-600">
+          {invoice.supplier || <span className="text-gray-300">&mdash;</span>}
+        </td>
+
+        {/* Date */}
+        <td className="px-4 py-3 text-sm text-gray-500">
+          {formatDate(invoice.invoiceDate)}
+        </td>
+
+        {/* Due */}
+        <td className="px-4 py-3 text-sm">
+          {invoice.dueDate ? (
+            <span className={
+              invoice.paymentStatus !== "Paid" &&
+              invoice.dueDate < new Date().toISOString().split("T")[0]
+                ? "text-burgundy-600 font-semibold"
+                : "text-gray-500"
+            }>
+              {formatDate(invoice.dueDate)}
+            </span>
+          ) : (
+            <span className="text-gray-300">&mdash;</span>
+          )}
+        </td>
+
+        {/* Amount */}
+        <td className="px-4 py-3 text-right font-semibold text-gray-900 text-sm">
+          {formatCurrency(invoice.invoiceAmount)}
+        </td>
+
+        {/* Price check */}
+        {(() => { const c = getChecks(invoice); return (
+          <>
+            <td className="px-4 py-3 text-center">
+              <div className="flex justify-center">
+                <CheckIcon ok={c.priceOk} flag={c.priceFlag} />
+              </div>
+            </td>
+            <td className="px-4 py-3 text-center">
+              <div className="flex justify-center">
+                <CheckIcon ok={c.linked} flag={c.linkedFlag} />
+              </div>
+            </td>
+          </>
+        ); })()}
+
         {/* Action */}
         <td className="px-4 py-3 text-right">
-          {activeTab === "open" && (
+          {activeTab === "needs-action" && (
             <span className="text-xs text-gold-600 font-medium">
               Review &rarr;
             </span>
           )}
           {activeTab === "discrepancy" && (
             <span className="text-xs text-warm-600 font-medium">
-              Review &rarr;
+              Resolve &rarr;
             </span>
           )}
-          {activeTab === "matched" && (
+          {activeTab === "complete" && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -603,10 +702,10 @@ function InvoiceRow({
         </td>
       </tr>
 
-      {/* Expanded panel — Matched tab only (read-only comparison) */}
-      {isExpanded && activeTab === "matched" && invoice.comparison && (
+      {/* Expanded panel — Complete/Paid tab only (read-only comparison) */}
+      {isExpanded && (activeTab === "complete" || activeTab === "paid") && invoice.comparison && (
         <tr>
-          <td colSpan={8} className="p-0">
+          <td colSpan={9} className="p-0">
             <div className="bg-gray-50 border-t border-gray-200 px-6 py-5">
               <div className="flex justify-between items-center mb-3">
                 <div className="flex items-center gap-3">

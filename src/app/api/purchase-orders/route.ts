@@ -10,9 +10,28 @@ import { logActivity } from "@/lib/activity-log";
 import { computeLineTotal, deriveCostBasis, deriveSection } from "@/lib/po-calc";
 
 export async function GET() {
-  const records = await getRecords(TABLES.PURCHASE_ORDERS, {
-    sort: [{ field: "Date", direction: "desc" }],
-  });
+  const [records, allLineItems, allSKUs] = await Promise.all([
+    getRecords(TABLES.PURCHASE_ORDERS, { sort: [{ field: "Date", direction: "desc" }] }),
+    getRecords(TABLES.PO_LINE_ITEMS),
+    getRecords(TABLES.SKUS),
+  ]);
+
+  // Build SKU name lookup
+  const skuMap = new Map(allSKUs.map((s) => [s.id, s.fields["Standard SKU"] as string]));
+
+  // Group SKU names by PO
+  const skusByPO: Record<string, string[]> = {};
+  for (const li of allLineItems) {
+    const poIds = (li.fields["Purchase Order"] as string[]) || [];
+    const skuIds = (li.fields["SKU"] as string[]) || [];
+    if (poIds[0] && skuIds[0]) {
+      const skuName = skuMap.get(skuIds[0]);
+      if (skuName) {
+        if (!skusByPO[poIds[0]]) skusByPO[poIds[0]] = [];
+        if (!skusByPO[poIds[0]].includes(skuName)) skusByPO[poIds[0]].push(skuName);
+      }
+    }
+  }
 
   const pos = records.map((r) => ({
     id: r.id,
@@ -27,6 +46,7 @@ export async function GET() {
     notes: r.fields["Notes"] as string,
     grandTotal: r.fields["Grand Total"] as number,
     lineItems: r.fields["PO Line Items"] as string[],
+    skus: skusByPO[r.id] || [],
   }));
 
   return NextResponse.json(pos);

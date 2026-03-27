@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   getRecord,
+  getRecords,
   updateRecord,
   deleteRecord,
   TABLES,
@@ -87,6 +88,19 @@ export async function GET(
       }
     }
 
+    // Fetch receipts linked to this shipment
+    const allReceipts = await getRecords(TABLES.RECEIPTS);
+    const linkedReceipts = allReceipts
+      .filter((r) => {
+        const ids = (r.fields["Shipment"] as string[] | undefined) || [];
+        return ids[0] === id;
+      })
+      .map((r) => ({
+        id: r.id,
+        receiptNumber: (r.fields["Receipt Number"] as string) || "",
+        receivedDate: (r.fields["Received Date"] as string) || "",
+      }));
+
     return NextResponse.json({
       id: record.id,
       shipmentNumber: record.fields["Shipment Number"] as string,
@@ -103,6 +117,7 @@ export async function GET(
       shipTo,
       status: record.fields["Status"] as string,
       lineItems: lineItemsWithSkus,
+      receipts: linkedReceipts,
     });
   } catch {
     return NextResponse.json({ error: "Shipment not found" }, { status: 404 });

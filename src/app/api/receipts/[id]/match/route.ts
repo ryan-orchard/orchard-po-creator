@@ -68,17 +68,31 @@ async function handlePOMatch(
     );
   }
 
-  // 1. Link receipt lines to PO line items and set Match Status
+  // 1. Link receipt lines to PO line items, set Match Status, and write provisional costs
   if (lineMatches.length > 0) {
+    // Fetch PO line unit costs for provisional pricing
+    const validMatches = lineMatches.filter((m) => m.receiptLineId && m.poLineItemId);
+    const poLineItemCostMap: Record<string, number> = {};
     await Promise.all(
-      lineMatches
-        .filter((m) => m.receiptLineId && m.poLineItemId)
-        .map((m) =>
-          updateRecord(TABLES.RECEIPT_LINES, m.receiptLineId, {
-            "PO Line Item": [m.poLineItemId],
-            "Match Status": "Matched",
-          })
-        )
+      [...new Set(validMatches.map((m) => m.poLineItemId))].map(async (plId) => {
+        const pl = await getRecord(TABLES.PO_LINE_ITEMS, plId);
+        poLineItemCostMap[plId] = (pl.fields["Unit Cost"] as number) || 0;
+      })
+    );
+
+    await Promise.all(
+      validMatches.map((m) => {
+        const updates: Record<string, unknown> = {
+          "PO Line Item": [m.poLineItemId],
+          "Match Status": "Matched",
+        };
+        const provisionalCost = poLineItemCostMap[m.poLineItemId];
+        if (provisionalCost > 0) {
+          updates["Supplier Unit Cost"] = provisionalCost;
+          updates["Cost Source"] = "Provisional";
+        }
+        return updateRecord(TABLES.RECEIPT_LINES, m.receiptLineId, updates);
+      })
     );
   }
 

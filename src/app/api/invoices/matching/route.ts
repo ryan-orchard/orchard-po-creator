@@ -241,8 +241,9 @@ export async function GET() {
       supplier: string;
       poReference: string;
       invoiceAmount: number;
-      matchStatus: "open" | "matched" | "discrepancy";
+      matchStatus: "open" | "pending-receipt" | "discrepancy" | "approved";
       paymentStatus: string;
+      invoiceType: string;
       lineCount: number;
       po: { poId: string; poNumber: string; status: string } | null;
       suggestedReceipt: {
@@ -347,8 +348,8 @@ export async function GET() {
 
           receiptOptions.sort((a, b) => b.overlapScore - a.overlapScore);
 
-          // For matched/discrepancy invoices, derive the matched receipt from line-level links
-          if (matchStatus === "matched" || matchStatus === "discrepancy") {
+          // For approved/discrepancy invoices, derive the matched receipt from line-level links
+          if (matchStatus === "approved" || matchStatus === "discrepancy") {
             // Find which receipt the invoice lines are linked to
             const linkedReceiptLineIds = invoiceLines
               .map((il) => il.receiptLineId)
@@ -371,8 +372,8 @@ export async function GET() {
             }
           }
 
-          // For open invoices, suggest the best receipt
-          if (matchStatus === "open") {
+          // For open/pending-receipt invoices, suggest the best receipt
+          if (matchStatus === "open" || matchStatus === "pending-receipt") {
             const best = receiptOptions[0];
             if (best && best.overlapScore > 0) {
               suggestedReceipt = {
@@ -416,6 +417,7 @@ export async function GET() {
         invoiceAmount: (inv.fields["Total Amount"] as number) || 0,
         matchStatus,
         paymentStatus: (inv.fields["Payment Status"] as string) || "Unpaid",
+        invoiceType: (inv.fields["Type"] as string) || "Supplier",
         lineCount: invoiceLines.length,
         po,
         suggestedReceipt,
@@ -426,19 +428,20 @@ export async function GET() {
       });
     }
 
-    // Sort: open first, then discrepancy, then matched
+    // Sort: open → pending-receipt → discrepancy → approved
     invoices.sort((a, b) => {
-      const statusOrder = { open: 0, discrepancy: 1, matched: 2 };
-      if (statusOrder[a.matchStatus] !== statusOrder[b.matchStatus]) {
-        return statusOrder[a.matchStatus] - statusOrder[b.matchStatus];
-      }
+      const statusOrder: Record<string, number> = { open: 0, "pending-receipt": 1, discrepancy: 2, approved: 3 };
+      const ao = statusOrder[a.matchStatus] ?? 9;
+      const bo = statusOrder[b.matchStatus] ?? 9;
+      if (ao !== bo) return ao - bo;
       return (b.invoiceDate || "").localeCompare(a.invoiceDate || "");
     });
 
     const counts = {
       open: invoices.filter((i) => i.matchStatus === "open").length,
-      matched: invoices.filter((i) => i.matchStatus === "matched").length,
+      pendingReceipt: invoices.filter((i) => i.matchStatus === "pending-receipt").length,
       discrepancy: invoices.filter((i) => i.matchStatus === "discrepancy").length,
+      approved: invoices.filter((i) => i.matchStatus === "approved").length,
     };
 
     return NextResponse.json({ invoices, counts });
@@ -460,15 +463,17 @@ export async function GET() {
 function normalizeMatchStatus(
   matchStatusField: string,
   invoiceLines: { receiptLineId: string | null }[]
-): "open" | "matched" | "discrepancy" {
-  const s = matchStatusField.toLowerCase();
-  if (s === "matched") return "matched";
+): "open" | "pending-receipt" | "discrepancy" | "approved" {
+  const s = matchStatusField.toLowerCase().trim();
+  if (s === "approved") return "approved";
   if (s === "discrepancy") return "discrepancy";
+  if (s === "pending receipt") return "pending-receipt";
+  if (s === "matched") return "approved"; // legacy: treat as approved
   if (s === "open") return "open";
 
   // Legacy: derive from line-level links
   const hasLinks = invoiceLines.some((il) => il.receiptLineId);
-  if (hasLinks) return "matched"; // legacy matched, assume clean
+  if (hasLinks) return "approved";
   return "open";
 }
 

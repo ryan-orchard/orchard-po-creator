@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getRecord, getRecords, TABLES } from "@/lib/airtable";
+import { getRecord, getRecords, updateRecord, TABLES } from "@/lib/airtable";
 
 export async function GET(
   _request: NextRequest,
@@ -75,6 +75,29 @@ export async function GET(
           batchNumber: (lf["Batch Number"] as string) || "",
         };
       });
+    }
+
+    // Invoice type and direct link fields
+    const invoiceType = (f["Type"] as string) || "Supplier";
+
+    let linkedShipment: { id: string; shipmentNumber: string } | null = null;
+    const linkedShipmentIds = f["Shipment"] as string[] | undefined;
+    if (linkedShipmentIds?.length) {
+      const shipment = await getRecord(TABLES.SHIPMENTS, linkedShipmentIds[0]);
+      linkedShipment = {
+        id: shipment.id,
+        shipmentNumber: (shipment.fields["Shipment Number"] as string) || "",
+      };
+    }
+
+    let linkedWorkOrder: { id: string; woNumber: string } | null = null;
+    const linkedWorkOrderIds = f["Work Orders"] as string[] | undefined;
+    if (linkedWorkOrderIds?.length) {
+      const wo = await getRecord(TABLES.WORK_ORDERS, linkedWorkOrderIds[0]);
+      linkedWorkOrder = {
+        id: wo.id,
+        woNumber: (wo.fields["WO Number"] as string) || "",
+      };
     }
 
     // Fetch linked PO, receipt, and shipment data if invoice is matched
@@ -166,7 +189,11 @@ export async function GET(
       invoiceAmount: (f["Total Amount"] as number) || 0,
       reviewStatus: (f["Review Status"] as string) || "Pending",
       paymentStatus: (f["Payment Status"] as string) || "Unpaid",
+      classification: (f["Classification"] as string) || "",
       notes: (f["Notes"] as string) || "",
+      invoiceType,
+      linkedShipment,
+      linkedWorkOrder,
       lines,
       purchaseOrder,
       receipts,
@@ -176,6 +203,43 @@ export async function GET(
     console.error("Error fetching invoice:", error);
     return NextResponse.json(
       { error: "Failed to fetch invoice" },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * PATCH /api/invoices/[id]
+ *
+ * Update linkable fields on an invoice.
+ * Body: { shipmentId?: string | null, workOrderId?: string | null }
+ */
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    const body = await request.json();
+    const updates: Record<string, unknown> = {};
+
+    if ("shipmentId" in body) {
+      updates["Shipment"] = body.shipmentId ? [body.shipmentId] : [];
+    }
+    if ("workOrderId" in body) {
+      updates["Work Orders"] = body.workOrderId ? [body.workOrderId] : [];
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return NextResponse.json({ error: "No fields to update" }, { status: 400 });
+    }
+
+    await updateRecord(TABLES.INVOICES, id, updates);
+    return NextResponse.json({ success: true, id });
+  } catch (error) {
+    console.error("Error updating invoice:", error);
+    return NextResponse.json(
+      { error: `Failed to update invoice: ${(error as Error).message}` },
       { status: 500 }
     );
   }

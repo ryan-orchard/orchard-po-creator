@@ -70,13 +70,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Look up ANS supplier record
+    // Look up supplier — ANS by code (existing invoices) or by name (universal invoices)
     let supplierId: string | null = null;
-    const suppliers = await getRecords(TABLES.SUPPLIERS, {
-      filterByFormula: `{Code} = "ANS"`,
-    });
-    if (suppliers.length > 0) {
-      supplierId = suppliers[0].id;
+    if (!body.invoiceType) {
+      // ANS supplier invoices (existing flow)
+      const suppliers = await getRecords(TABLES.SUPPLIERS, {
+        filterByFormula: `{Code} = "ANS"`,
+      });
+      if (suppliers.length > 0) supplierId = suppliers[0].id;
+    } else if (body.vendor) {
+      // Universal invoices — look up by name
+      const suppliers = await getRecords(TABLES.SUPPLIERS, {
+        filterByFormula: `{Supplier Name} = "${body.vendor}"`,
+      });
+      if (suppliers.length > 0) supplierId = suppliers[0].id;
     }
 
     // Create invoice header
@@ -98,6 +105,12 @@ export async function POST(request: NextRequest) {
       "Match Status": "Open",
     };
 
+    if (body.invoiceType) {
+      invoiceFields["Type"] = body.invoiceType;
+    }
+    if (body.dueDate) {
+      invoiceFields["Invoice Due Date"] = body.dueDate;
+    }
     if (supplierId) {
       invoiceFields["Supplier"] = [supplierId];
     }

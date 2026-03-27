@@ -38,6 +38,90 @@ export async function PATCH(
       hasDiscrepancy?: boolean;
     };
 
+    // Approve a discrepancy (or any invoice) — explicit human sign-off
+    if (body.approve) {
+      const invoiceRecord = await getRecord(TABLES.INVOICES, invoiceId);
+      const invoiceNumber = (invoiceRecord?.fields["Invoice Number"] as string) || invoiceId;
+      await updateRecord(TABLES.INVOICES, invoiceId, { "Match Status": "Approved" });
+      logActivity({
+        action: "invoice_approved",
+        description: `Invoice ${invoiceNumber} approved for payment`,
+        actor: "Ryan Belanger",
+        relatedRecordType: "invoice",
+        relatedRecordId: invoiceId,
+      });
+      return NextResponse.json({ success: true, invoiceId, matchStatus: "Approved" });
+    }
+
+    // PO-only match — confirm pricing before receipt arrives
+    if (body.pendingReceipt && body.poId) {
+      const po = await getRecord(TABLES.PURCHASE_ORDERS, body.poId);
+      if (!po) return NextResponse.json({ error: "PO not found" }, { status: 404 });
+      await updateRecord(TABLES.INVOICES, invoiceId, {
+        "Purchase Order": [body.poId],
+        "Match Status": "Pending Receipt",
+      });
+      const poNumber = (po.fields["PO Number"] as string) || body.poId;
+      const invoiceRecord = await getRecord(TABLES.INVOICES, invoiceId);
+      const invoiceNumber = (invoiceRecord?.fields["Invoice Number"] as string) || invoiceId;
+      logActivity({
+        poId: body.poId,
+        action: "invoice_matched",
+        description: `Invoice ${invoiceNumber} linked to ${poNumber} — awaiting receipt`,
+        actor: "Ryan Belanger",
+        relatedRecordType: "invoice",
+        relatedRecordId: invoiceId,
+      });
+      return NextResponse.json({ success: true, invoiceId, poId: body.poId, poNumber, matchStatus: "Pending Receipt" });
+    }
+
+    // Shipment match: link the invoice to the Shipment
+    if (body.shipmentId) {
+      const shipment = await getRecord(TABLES.SHIPMENTS, body.shipmentId);
+      if (!shipment) {
+        return NextResponse.json({ error: "Shipment not found" }, { status: 404 });
+      }
+      await updateRecord(TABLES.INVOICES, invoiceId, {
+        "Shipment": [body.shipmentId],
+        "Match Status": "Approved",
+      });
+      const shipmentNumber = (shipment.fields["Shipment Number"] as string) || body.shipmentId;
+      const invoiceRecord = await getRecord(TABLES.INVOICES, invoiceId);
+      const invoiceNumber = (invoiceRecord?.fields["Invoice Number"] as string) || invoiceId;
+      logActivity({
+        action: "invoice_matched",
+        description: `Invoice ${invoiceNumber} matched to ${shipmentNumber}`,
+        actor: "Ryan Belanger",
+        relatedRecordType: "invoice",
+        relatedRecordId: invoiceId,
+      });
+      return NextResponse.json({ success: true, invoiceId, shipmentId: body.shipmentId, shipmentNumber, matchStatus: "Matched" });
+    }
+
+    // WO match: simpler path — just link the invoice to the WO
+    if (body.workOrderId) {
+      const wo = await getRecord(TABLES.WORK_ORDERS, body.workOrderId);
+      if (!wo) {
+        return NextResponse.json({ error: "Work Order not found" }, { status: 404 });
+      }
+      await updateRecord(TABLES.INVOICES, invoiceId, {
+        "Work Orders": [body.workOrderId],
+        "Match Status": "Approved",
+      });
+      const woNumber = (wo.fields["WO Number"] as string) || body.workOrderId;
+      const invoiceRecord = await getRecord(TABLES.INVOICES, invoiceId);
+      const invoiceNumber = (invoiceRecord?.fields["Invoice Number"] as string) || invoiceId;
+      logActivity({
+        woId: body.workOrderId,
+        action: "invoice_matched",
+        description: `Invoice ${invoiceNumber} matched to ${woNumber}`,
+        actor: "Ryan Belanger",
+        relatedRecordType: "invoice",
+        relatedRecordId: invoiceId,
+      });
+      return NextResponse.json({ success: true, invoiceId, workOrderId: body.workOrderId, woNumber, matchStatus: "Matched" });
+    }
+
     if (!receiptId) {
       return NextResponse.json(
         { error: "receiptId is required" },
@@ -82,7 +166,7 @@ export async function PATCH(
     }
 
     // 2. Set header PO link and match status
-    const matchStatus = hasDiscrepancy ? "Discrepancy" : "Matched";
+    const matchStatus = hasDiscrepancy ? "Discrepancy" : "Approved";
     await updateRecord(TABLES.INVOICES, invoiceId, {
       "Purchase Order": [receiptPOLink],
       "Match Status": matchStatus,
