@@ -1183,7 +1183,7 @@ export default function PODetailPage() {
                     {po.invoices.map((inv: LinkedInvoice) => (
                       <a
                         key={inv.id}
-                        href={`/invoices/${inv.id}/match`}
+                        href={`/match?invoiceId=${inv.id}`}
                         className="inline-flex items-center gap-1.5 px-2.5 py-1 text-sm font-medium text-warm-700 bg-warm-50 border border-warm-200 rounded-md hover:bg-warm-100 transition-colors"
                       >
                         #{inv.invoiceNumber}

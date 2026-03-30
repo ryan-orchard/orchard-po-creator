@@ -126,7 +126,9 @@ function getValidationState(invoice: InvoiceDetail): ValidationState {
       linkedCheck: {
         ok: linkedOk,
         flag: false,
-        label: linkedOk ? receipts[0].receiptNumber : "No receipt linked",
+        label: linkedOk
+          ? `${receipts.length} receipt${receipts.length > 1 ? "s" : ""} linked`
+          : "No receipt linked",
       },
       cta,
       showMarkReviewed: false,
@@ -441,13 +443,20 @@ export default function InvoiceDetailPage() {
       href: invoice.purchaseOrder ? `/pos/${invoice.purchaseOrder.id}` : null,
       empty: !invoice.purchaseOrder,
     });
-    const rec = invoice.receipts[0] ?? null;
+    const receiptCount = invoice.receipts.length;
+    const totalReceiptCartons = invoice.receipts.reduce(
+      (sum, r) => sum + r.lines.reduce((s, l) => s + l.qtyReceived, 0), 0
+    );
     timelineNodes.push({
       icon: "receipt",
-      label: rec?.receiptNumber ?? "Receipt Match",
-      sub: rec ? `Received ${formatDate(rec.receivedDate)}` : "Not linked",
-      href: rec ? `/receipts/${rec.id}` : null,
-      empty: !rec,
+      label: receiptCount > 0
+        ? `${receiptCount} receipt${receiptCount > 1 ? "s" : ""}`
+        : "Receipt Match",
+      sub: receiptCount > 0
+        ? `${totalReceiptCartons.toLocaleString()} cartons received`
+        : "Not linked",
+      href: receiptCount > 0 ? `/match?invoiceId=${invoice.id}` : null,
+      empty: receiptCount === 0,
     });
   } else if (invoice.invoiceType === "Freight" || invoice.invoiceType === "Customs") {
     timelineNodes.push({

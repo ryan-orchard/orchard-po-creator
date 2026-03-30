@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 // --- Types ---
 
@@ -673,14 +674,22 @@ function InvoiceRow({
         {/* Action */}
         <td className="px-4 py-3 text-right">
           {activeTab === "needs-action" && (
-            <span className="text-xs text-gold-600 font-medium">
-              Review &rarr;
-            </span>
+            <Link
+              href={`/match?invoiceId=${invoice.id}`}
+              onClick={(e) => e.stopPropagation()}
+              className="text-xs text-gold-600 font-medium hover:text-gold-700"
+            >
+              Match &rarr;
+            </Link>
           )}
           {activeTab === "discrepancy" && (
-            <span className="text-xs text-warm-600 font-medium">
+            <Link
+              href={`/match?invoiceId=${invoice.id}`}
+              onClick={(e) => e.stopPropagation()}
+              className="text-xs text-warm-600 font-medium hover:text-warm-700"
+            >
               Resolve &rarr;
-            </span>
+            </Link>
           )}
           {activeTab === "complete" && (
             <button

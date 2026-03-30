@@ -350,7 +350,7 @@ export default function WorkOrderDetailPage({
               {wo.invoices.map((inv) => (
                 <Link
                   key={inv.id}
-                  href={inv.matchStatus === "Open" || inv.matchStatus === "Discrepancy" ? `/invoices/${inv.id}/match` : "/invoices"}
+                  href={`/match?invoiceId=${inv.id}`}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-warm-50 border border-warm-200 text-warm-800 rounded-full text-xs font-medium hover:bg-warm-100 transition-colors"
                 >
                   <span>{inv.invoiceNumber}</span>
