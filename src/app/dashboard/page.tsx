@@ -3,257 +3,171 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 
-interface Invoice {
-  id: string;
-  invoiceNumber: string;
-  invoiceDate: string;
-  poReference: string;
-  supplier: string | null;
-  invoiceAmount: number;
-  status: string;
-  lineCount: number;
+interface DashboardData {
+  unmatchedReceiptLines: number;
+  invoicesWithoutReceipt: number;
+  readyToPay: number;
+  posInProgress: number;
 }
 
 export default function DashboardPage() {
   const router = useRouter();
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [reviewCount, setReviewCount] = useState(0);
+  const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([
-      fetch("/api/invoices").then((r) => r.json()),
-      fetch("/api/receipts/count").then((r) => r.json()),
-    ])
-      .then(([invoiceData, countData]) => {
-        setInvoices(invoiceData);
-        setReviewCount(countData.review || 0);
+    fetch("/api/dashboard")
+      .then((r) => r.json())
+      .then((d) => {
+        setData(d);
         setLoading(false);
       })
       .catch(() => setLoading(false));
   }, []);
 
-  const pending = invoices.filter((i) => i.status === "Pending Review");
-  const matched = invoices.filter((i) => i.status === "Matched");
-  const discrepancy = invoices.filter((i) => i.status === "Discrepancy");
-  const paid = invoices.filter((i) => i.status === "Paid");
-  const pendingValue = pending.reduce((s, i) => s + (i.invoiceAmount || 0), 0);
-  const totalValue = invoices.reduce((s, i) => s + (i.invoiceAmount || 0), 0);
+  const today = new Date().toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="max-w-6xl mx-auto px-6 py-8">
+      <div className="max-w-4xl mx-auto px-6 py-8">
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-          <p className="text-sm text-gray-500 mt-1">Audit overview and action items</p>
+          <p className="text-sm text-gray-500 mt-1">Magna &middot; {today}</p>
         </div>
 
         {loading ? (
-          <p className="text-gray-500">Loading...</p>
+          <p className="text-gray-400 text-sm">Loading&hellip;</p>
+        ) : !data ? (
+          <p className="text-gray-400 text-sm">Failed to load dashboard.</p>
         ) : (
-          <>
-            {/* Client Review Banner */}
-            {reviewCount > 0 && (
-              <button
-                onClick={() => router.push("/receipts?tab=review")}
-                className="w-full mb-8 bg-warm-50 border-2 border-warm-300 rounded-lg px-5 py-4 text-left hover:bg-warm-100 transition-colors flex items-center justify-between"
-              >
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-full bg-warm-200 flex items-center justify-center">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-warm-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-                    </svg>
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-warm-900">Needs Your Input</p>
-                    <p className="text-xs text-warm-700">{reviewCount} receipt {reviewCount === 1 ? "line" : "lines"} flagged for client review</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="bg-warm-200 text-warm-900 text-sm font-bold px-3 py-1 rounded-full tabular-nums">
-                    {reviewCount}
-                  </span>
-                  <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-warm-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                  </svg>
-                </div>
-              </button>
-            )}
+          <div className="grid grid-cols-2 gap-4">
+            {/* New receipts at the warehouse */}
+            <ActionCard
+              label="New Receipts at Warehouse"
+              description="Receipt lines not yet matched to a PO"
+              count={data.unmatchedReceiptLines}
+              countLabel="unmatched lines"
+              href="/receipts"
+              color="warm"
+              urgent={data.unmatchedReceiptLines > 0}
+            />
 
-            {/* Summary Cards */}
-            <div className="grid grid-cols-4 gap-4 mb-8">
-              <div className="bg-gray-900 text-white rounded-lg px-5 py-5">
-                <p className="text-xs font-medium uppercase tracking-wider opacity-70">Total Invoices</p>
-                <p className="text-3xl font-bold mt-1 tabular-nums">{invoices.length}</p>
-                <p className="text-xs opacity-50 mt-1">
-                  {totalValue.toLocaleString("en-US", { style: "currency", currency: "USD" })}
-                </p>
-              </div>
-              <div className="bg-warm-50 border border-warm-200 rounded-lg px-5 py-5">
-                <p className="text-xs font-medium uppercase tracking-wider text-warm-700">Pending Review</p>
-                <p className="text-3xl font-bold mt-1 tabular-nums text-warm-900">{pending.length}</p>
-                <p className="text-xs text-warm-600 mt-1">
-                  {pendingValue.toLocaleString("en-US", { style: "currency", currency: "USD" })}
-                </p>
-              </div>
-              <div className="bg-gold-50 border border-gold-200 rounded-lg px-5 py-5">
-                <p className="text-xs font-medium uppercase tracking-wider text-gold-700">Ready to Pay</p>
-                <p className="text-3xl font-bold mt-1 tabular-nums text-gold-900">{matched.length}</p>
-                <p className="text-xs text-gold-600 mt-1">Passed all checks</p>
-              </div>
-              <div className="bg-sage-50 border border-sage-200 rounded-lg px-5 py-5">
-                <p className="text-xs font-medium uppercase tracking-wider text-sage-700">Paid</p>
-                <p className="text-3xl font-bold mt-1 tabular-nums text-sage-800">{paid.length}</p>
-                <p className="text-xs text-sage-600 mt-1">Complete</p>
-              </div>
-            </div>
+            {/* Invoices without a receipt */}
+            <ActionCard
+              label="Invoices Without Receipt"
+              description="Invoices not yet linked to a receipt"
+              count={data.invoicesWithoutReceipt}
+              countLabel="invoices"
+              href="/invoices"
+              color="warm"
+              urgent={data.invoicesWithoutReceipt > 0}
+            />
 
-            {/* Invoice Review */}
-            <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Invoice Review</h2>
-            <div className="grid grid-cols-2 gap-4 mb-4">
-              {/* Invoice Match — Action */}
-              <button
-                onClick={() => {}}
-                className="bg-white rounded-lg border-2 border-gray-900 p-5 text-left hover:bg-gray-50 transition-colors"
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-warm-100 flex items-center justify-center">
-                      <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-warm-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
-                      </svg>
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-gray-900">Invoice Match</p>
-                      <p className="text-xs text-gray-500">Match invoices to POs and receipts</p>
-                    </div>
-                  </div>
-                  {pending.length > 0 && (
-                    <span className="bg-warm-100 text-warm-800 text-xs font-bold px-2.5 py-1 rounded-full tabular-nums">
-                      {pending.length}
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-gray-400 italic">Coming soon</p>
-              </button>
+            {/* POs in progress */}
+            <ActionCard
+              label="POs In Progress"
+              description="Draft, Issued, or Accepted"
+              count={data.posInProgress}
+              countLabel="purchase orders"
+              href="/pos"
+              color="gray"
+              urgent={false}
+            />
 
-              {/* Stord Invoice Audit — Action */}
-              <button
-                onClick={() => {}}
-                className="bg-white rounded-lg border border-gray-200 p-5 text-left hover:bg-gray-50 transition-colors"
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-plum-100 flex items-center justify-center">
-                      <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-plum-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5M9 11.25v1.5M12 9v3.75m3-6v6" />
-                      </svg>
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-gray-900">Stord Invoice Audit</p>
-                      <p className="text-xs text-gray-500">3PL charges vs actual activity</p>
-                    </div>
-                  </div>
-                  {pending.length > 0 && (
-                    <span className="bg-plum-100 text-plum-800 text-xs font-bold px-2.5 py-1 rounded-full tabular-nums">
-                      {pending.length}
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-gray-400 italic">Coming soon</p>
-              </button>
-            </div>
-
-            {/* Match Outcomes */}
-            <div className="grid grid-cols-2 gap-4 mb-8">
-              <div className="bg-white rounded-lg border border-gray-200 p-4 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-7 h-7 rounded-full bg-sage-100 flex items-center justify-center">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5 text-sage-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-gray-900">Ready to Pay</p>
-                    <p className="text-xs text-gray-500">Passed all checks</p>
-                  </div>
-                </div>
-                <span className="text-lg font-bold tabular-nums text-sage-700">{matched.length}</span>
-              </div>
-
-              <div className="bg-white rounded-lg border border-gray-200 p-4 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-7 h-7 rounded-full bg-burgundy-100 flex items-center justify-center">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5 text-burgundy-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
-                    </svg>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-gray-900">Resolve Discrepancy</p>
-                    <p className="text-xs text-gray-500">Needs manual review</p>
-                  </div>
-                </div>
-                <span className="text-lg font-bold tabular-nums text-burgundy-700">{discrepancy.length}</span>
-              </div>
-            </div>
-
-            {/* Invoices Pending Audit */}
-            {pending.length > 0 && (
-              <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-                <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-                  <h2 className="text-sm font-semibold text-gray-900">Invoices Pending Review</h2>
-                  <button
-                    onClick={() => router.push("/invoices")}
-                    className="text-xs text-gray-500 hover:text-gray-700"
-                  >
-                    View all →
-                  </button>
-                </div>
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-gray-50 border-b border-gray-200">
-                      <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">Invoice #</th>
-                      <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">Supplier</th>
-                      <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">Date</th>
-                      <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">PO Ref</th>
-                      <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
-                      <th className="text-right px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pending.slice(0, 10).map((inv) => (
-                      <tr
-                        key={inv.id}
-                        onClick={() => router.push(`/invoices/${inv.id}`)}
-                        className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
-                      >
-                        <td className="px-4 py-2.5 font-semibold text-gray-900">{inv.invoiceNumber}</td>
-                        <td className="px-4 py-2.5 text-gray-600">{inv.supplier || "—"}</td>
-                        <td className="px-4 py-2.5 text-gray-600">
-                          {inv.invoiceDate
-                            ? new Date(inv.invoiceDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-                            : "—"}
-                        </td>
-                        <td className="px-4 py-2.5 text-gray-600 text-xs">{inv.poReference || "—"}</td>
-                        <td className="px-4 py-2.5">
-                          <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-warm-100 text-warm-800">
-                            {inv.status}
-                          </span>
-                        </td>
-                        <td className="px-4 py-2.5 text-right font-medium text-gray-900">
-                          {inv.invoiceAmount
-                            ? inv.invoiceAmount.toLocaleString("en-US", { style: "currency", currency: "USD" })
-                            : "—"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </>
+            {/* Ready to pay */}
+            <ActionCard
+              label="Ready to Pay"
+              description="Invoices matched and approved"
+              count={data.readyToPay}
+              countLabel="invoices"
+              href="/invoices?filter=ready-to-pay"
+              color="sage"
+              urgent={data.readyToPay > 0}
+            />
+          </div>
         )}
       </div>
     </div>
+  );
+}
+
+function ActionCard({
+  label,
+  description,
+  count,
+  countLabel,
+  href,
+  color,
+  urgent,
+}: {
+  label: string;
+  description: string;
+  count: number;
+  countLabel: string;
+  href: string;
+  color: "warm" | "sage" | "gray";
+  urgent: boolean;
+}) {
+  const router = useRouter();
+
+  const colorStyles: Record<string, { card: string; count: string; label: string; desc: string }> = {
+    warm: {
+      card: urgent
+        ? "bg-warm-50 border-warm-200 hover:bg-warm-100"
+        : "bg-white border-gray-200 hover:bg-gray-50",
+      count: urgent ? "text-warm-800" : "text-gray-400",
+      label: urgent ? "text-warm-900" : "text-gray-500",
+      desc: urgent ? "text-warm-600" : "text-gray-400",
+    },
+    sage: {
+      card: urgent
+        ? "bg-sage-50 border-sage-200 hover:bg-sage-100"
+        : "bg-white border-gray-200 hover:bg-gray-50",
+      count: urgent ? "text-sage-800" : "text-gray-400",
+      label: urgent ? "text-sage-900" : "text-gray-500",
+      desc: urgent ? "text-sage-600" : "text-gray-400",
+    },
+    gray: {
+      card: "bg-white border-gray-200 hover:bg-gray-50",
+      count: count > 0 ? "text-gray-700" : "text-gray-400",
+      label: "text-gray-700",
+      desc: "text-gray-400",
+    },
+  };
+
+  const s = colorStyles[color];
+
+  return (
+    <button
+      onClick={() => router.push(href)}
+      className={`rounded-lg border px-6 py-5 text-left transition-colors ${s.card}`}
+    >
+      <div className="flex items-start justify-between">
+        <div>
+          <p className={`text-xs font-semibold uppercase tracking-wider mb-2 ${s.label}`}>
+            {label}
+          </p>
+          <p className={`text-4xl font-bold tabular-nums ${s.count}`}>
+            {count}
+          </p>
+          <p className={`text-xs mt-1 ${s.desc}`}>{countLabel}</p>
+        </div>
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          className={`w-4 h-4 mt-1 ${urgent ? s.label : "text-gray-300"}`}
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+        </svg>
+      </div>
+      <p className={`text-sm mt-3 ${s.desc}`}>{description}</p>
+    </button>
   );
 }

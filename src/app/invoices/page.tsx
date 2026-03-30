@@ -129,10 +129,10 @@ export default function InvoicesPage() {
           result = invoices.filter((i) => i.paymentStatus !== "Paid");
           break;
         case "past-due":
-          result = invoices.filter((i) => i.paymentStatus !== "Paid" && i.dueDate && i.dueDate < today);
+          result = invoices.filter((i) => i.paymentStatus !== "Paid" && i.dueDate && i.dueDate <= today);
           break;
         case "upcoming":
-          result = invoices.filter((i) => i.paymentStatus !== "Paid" && i.dueDate && i.dueDate >= today);
+          result = invoices.filter((i) => i.paymentStatus !== "Paid" && i.dueDate && i.dueDate > today);
           break;
         case "ready-to-pay":
           result = invoices.filter((i) => i.matchStatus === "approved" && i.paymentStatus !== "Paid");
@@ -191,7 +191,7 @@ export default function InvoicesPage() {
       return sortDir === "asc" ? cmp : -cmp;
     });
     return result;
-  }, [invoices, activeTab, search, sortKey, sortDir]);
+  }, [invoices, activeTab, cardFilter, search, sortKey, sortDir]);
 
   // Summary stats
   const summaryStats = useMemo(() => {
@@ -209,14 +209,14 @@ export default function InvoicesPage() {
       0
     );
     const pastDue = unpaidInvoices.filter(
-      (i) => i.dueDate && i.dueDate < today
+      (i) => i.dueDate && i.dueDate <= today
     );
     const totalPastDue = pastDue.reduce(
       (sum, i) => sum + i.invoiceAmount,
       0
     );
     const upcoming = unpaidInvoices.filter(
-      (i) => i.dueDate && i.dueDate >= today
+      (i) => i.dueDate && i.dueDate > today
     );
     const totalUpcoming = upcoming.reduce(
       (sum, i) => sum + i.invoiceAmount,
@@ -486,7 +486,7 @@ export default function InvoicesPage() {
                     <SortableHeader label="Due" sortKey="dueDate" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[8%]" />
                     <SortableHeader label="Amount" sortKey="invoiceAmount" currentKey={sortKey} dir={sortDir} onSort={handleSort} align="right" className="w-[10%]" />
                     <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-[8%]">Price</th>
-                    <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-[8%]">Linked</th>
+                    <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-[8%]">Receipt</th>
                     <th className="px-4 py-3 w-[8%]"></th>
                   </tr>
                 </thead>
@@ -537,13 +537,11 @@ export default function InvoicesPage() {
 
 function getChecks(invoice: InvoiceMatch) {
   const hasPriceIssue = invoice.comparison?.lines.some((l) => !l.priceMatch) ?? false;
-  const hasQtyIssue = invoice.comparison?.lines.some((l) => !l.qtyMatch) ?? false;
   const priceValidated = invoice.matchStatus === "approved" || invoice.matchStatus === "discrepancy";
   return {
     priceOk: priceValidated && !hasPriceIssue,
     priceFlag: hasPriceIssue,
-    linked: invoice.matchedReceipt !== null,
-    linkedFlag: hasQtyIssue && invoice.matchedReceipt !== null,
+    receiptLinked: invoice.matchedReceipt !== null,
   };
 }
 
@@ -656,7 +654,7 @@ function InvoiceRow({
           {formatCurrency(invoice.invoiceAmount)}
         </td>
 
-        {/* Price check */}
+        {/* Price check + Receipt check */}
         {(() => { const c = getChecks(invoice); return (
           <>
             <td className="px-4 py-3 text-center">
@@ -666,7 +664,7 @@ function InvoiceRow({
             </td>
             <td className="px-4 py-3 text-center">
               <div className="flex justify-center">
-                <CheckIcon ok={c.linked} flag={c.linkedFlag} />
+                <CheckIcon ok={c.receiptLinked} />
               </div>
             </td>
           </>

@@ -17,14 +17,17 @@ interface Supplier {
   name: string;
 }
 
-const STATUS_TABS = ["All", "Draft", "Issued", "Received", "Closed"] as const;
+const STATUS_TABS = ["All", "Draft", "Issued", "Accepted", "Received", "Closed"] as const;
 
 const statusColors: Record<string, string> = {
   Draft: "bg-warm-100 text-warm-800",
   Issued: "bg-gold-100 text-gold-800",
+  Accepted: "bg-blue-100 text-blue-800",
   Received: "bg-sage-100 text-sage-800",
   Closed: "bg-gray-100 text-gray-600",
 };
+
+type CardFilter = "open" | "Draft" | "Issued" | "Accepted" | null;
 
 type SortField = "poNumber" | "supplier" | "status" | "grandTotal" | "date";
 type SortDir = "asc" | "desc";
@@ -36,6 +39,7 @@ export default function POListPage() {
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string>("All");
+  const [cardFilter, setCardFilter] = useState<CardFilter>(null);
   const [sortField, setSortField] = useState<SortField>("date");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
@@ -76,7 +80,13 @@ export default function POListPage() {
     }
   };
 
-  const filteredPOs = activeTab === "All"
+  const OPEN_STATUSES = ["Draft", "Issued", "Accepted"];
+
+  const filteredPOs = cardFilter === "open"
+    ? pos.filter((po) => OPEN_STATUSES.includes(po.status))
+    : cardFilter
+    ? pos.filter((po) => po.status === cardFilter)
+    : activeTab === "All"
     ? pos
     : pos.filter((po) => po.status === activeTab);
 
@@ -142,25 +152,48 @@ export default function POListPage() {
         {/* Summary Cards */}
         {!loading && (
           <div className="grid grid-cols-4 gap-4 mb-6">
-            <div className="bg-gray-900 text-white rounded-lg px-5 py-4">
-              <p className="text-xs font-medium uppercase tracking-wider opacity-70">Total POs</p>
-              <p className="text-2xl font-bold mt-1 tabular-nums">{pos.length}</p>
-              <p className="text-xs opacity-50 mt-1">
-                {pos.reduce((s, p) => s + (p.grandTotal || 0), 0).toLocaleString("en-US", { style: "currency", currency: "USD" })}
+            {/* Total Open POs */}
+            <button
+              onClick={() => { setCardFilter(cardFilter === "open" ? null : "open"); setActiveTab("All"); }}
+              className={`text-left rounded-lg px-5 py-4 transition-colors ${cardFilter === "open" ? "bg-gray-900 text-white" : "bg-gray-900 text-white opacity-90 hover:opacity-100"}`}
+            >
+              <p className="text-xs font-medium uppercase tracking-wider opacity-70">Open POs</p>
+              <p className="text-2xl font-bold mt-1 tabular-nums">
+                {pos.filter((p) => ["Draft", "Issued", "Accepted"].includes(p.status)).length}
               </p>
-            </div>
-            <div className="bg-warm-50 border border-warm-200 rounded-lg px-5 py-4">
-              <p className="text-xs font-medium uppercase tracking-wider text-warm-700">Draft</p>
-              <p className="text-2xl font-bold mt-1 tabular-nums text-warm-900">{tabCounts["Draft"]}</p>
-            </div>
-            <div className="bg-gold-50 border border-gold-200 rounded-lg px-5 py-4">
-              <p className="text-xs font-medium uppercase tracking-wider text-gold-700">Issued</p>
-              <p className="text-2xl font-bold mt-1 tabular-nums text-gold-900">{tabCounts["Issued"]}</p>
-            </div>
-            <div className="bg-sage-50 border border-sage-200 rounded-lg px-5 py-4">
-              <p className="text-xs font-medium uppercase tracking-wider text-sage-700">Received</p>
-              <p className="text-2xl font-bold mt-1 tabular-nums text-sage-800">{tabCounts["Received"]}</p>
-            </div>
+              <p className="text-xs opacity-50 mt-1">
+                {pos.filter((p) => ["Draft", "Issued", "Accepted"].includes(p.status))
+                  .reduce((s, p) => s + (p.grandTotal || 0), 0)
+                  .toLocaleString("en-US", { style: "currency", currency: "USD" })}
+              </p>
+            </button>
+
+            {/* Draft */}
+            <button
+              onClick={() => { setCardFilter(cardFilter === "Draft" ? null : "Draft"); setActiveTab("All"); }}
+              className={`text-left rounded-lg border px-5 py-4 transition-colors ${cardFilter === "Draft" ? "bg-warm-600 border-warm-600" : "bg-warm-50 border-warm-200 hover:bg-warm-100"}`}
+            >
+              <p className={`text-xs font-medium uppercase tracking-wider ${cardFilter === "Draft" ? "text-warm-100" : "text-warm-700"}`}>Draft</p>
+              <p className={`text-2xl font-bold mt-1 tabular-nums ${cardFilter === "Draft" ? "text-white" : "text-warm-900"}`}>{tabCounts["Draft"]}</p>
+            </button>
+
+            {/* Issued */}
+            <button
+              onClick={() => { setCardFilter(cardFilter === "Issued" ? null : "Issued"); setActiveTab("All"); }}
+              className={`text-left rounded-lg border px-5 py-4 transition-colors ${cardFilter === "Issued" ? "bg-gold-600 border-gold-600" : "bg-gold-50 border-gold-200 hover:bg-gold-100"}`}
+            >
+              <p className={`text-xs font-medium uppercase tracking-wider ${cardFilter === "Issued" ? "text-gold-100" : "text-gold-700"}`}>Issued</p>
+              <p className={`text-2xl font-bold mt-1 tabular-nums ${cardFilter === "Issued" ? "text-white" : "text-gold-900"}`}>{tabCounts["Issued"]}</p>
+            </button>
+
+            {/* Accepted */}
+            <button
+              onClick={() => { setCardFilter(cardFilter === "Accepted" ? null : "Accepted"); setActiveTab("All"); }}
+              className={`text-left rounded-lg border px-5 py-4 transition-colors ${cardFilter === "Accepted" ? "bg-blue-600 border-blue-600" : "bg-blue-50 border-blue-200 hover:bg-blue-100"}`}
+            >
+              <p className={`text-xs font-medium uppercase tracking-wider ${cardFilter === "Accepted" ? "text-blue-100" : "text-blue-700"}`}>Accepted</p>
+              <p className={`text-2xl font-bold mt-1 tabular-nums ${cardFilter === "Accepted" ? "text-white" : "text-blue-900"}`}>{tabCounts["Accepted"]}</p>
+            </button>
           </div>
         )}
 
@@ -169,7 +202,7 @@ export default function POListPage() {
           {STATUS_TABS.map((tab) => (
             <button
               key={tab}
-              onClick={() => setActiveTab(tab)}
+              onClick={() => { setActiveTab(tab); setCardFilter(null); }}
               className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
                 activeTab === tab
                   ? "border-gray-900 text-gray-900"
