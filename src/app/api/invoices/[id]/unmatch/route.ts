@@ -43,7 +43,7 @@ export async function POST(
     // 2. Clear header PO link and reset status
     await updateRecord(TABLES.INVOICES, invoiceId, {
       "Purchase Order": [],
-      "Match Status": "Open",
+      "Status": "Open",
     });
 
     return NextResponse.json({

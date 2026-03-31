@@ -41,7 +41,7 @@ export async function GET(
       invoiceAmount: (f["Total Amount"] as number) || 0,
       paymentStatus: (f["Payment Status"] as string) || "Unpaid",
       invoiceType: (f["Type"] as string) || "Supplier",
-      matchStatus: (f["Match Status"] as string) || "Open",
+      matchStatus: (f["Status"] as string) || "Open",
       poReference: (f["PO Reference"] as string) || "",
     };
 
@@ -127,7 +127,7 @@ export async function GET(
     } else {
       // No order linked: show all open receipts so user can still confirm without a PO/WO
       allReceipts = allReceipts.filter((r) => {
-        const status = (r.fields["Match Status"] as string) || "";
+        const status = (r.fields["Status"] as string) || "";
         return !status || status === "Open";
       });
     }
@@ -182,7 +182,7 @@ export async function GET(
         totalCartons,
         confirmed,
         lineCount: thisReceiptLines.length,
-        matchStatus: (rf["Match Status"] as string) || "Open",
+        matchStatus: (rf["Status"] as string) || "Open",
       };
     });
 

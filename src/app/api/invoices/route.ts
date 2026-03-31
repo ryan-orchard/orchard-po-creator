@@ -39,7 +39,7 @@ export async function GET() {
         salesOrder: (r.fields["Sales Order"] as string) || "",
         purchaseOrder: poLink || null,
         invoiceAmount: (r.fields["Total Amount"] as number) || 0,
-        reviewStatus: (r.fields["Review Status"] as string) || "Pending",
+        matchStatus: (r.fields["Status"] as string) || "Open",
         paymentStatus: (r.fields["Payment Status"] as string) || "Unpaid",
         lineCount: (r.fields["Invoice Lines"] as string[])?.length || 0,
       };
@@ -100,9 +100,8 @@ export async function POST(request: NextRequest) {
       Freight: body.freight || 0,
       Tax: body.tax || 0,
       "Total Amount": body.invoiceAmount || 0,
-      "Review Status": "Pending",
       "Payment Status": "Unpaid",
-      "Match Status": "Open",
+      "Status": "Open",
     };
 
     if (body.invoiceType) {

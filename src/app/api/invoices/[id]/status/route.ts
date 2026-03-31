@@ -8,15 +8,14 @@ export async function PATCH(
   try {
     const { id } = await params;
     const body = await request.json();
-    const { reviewStatus, paymentStatus, matchStatus, reviewNotes, classification } = body as {
-      reviewStatus?: string;
+    const { paymentStatus, matchStatus, reviewNotes, classification } = body as {
       paymentStatus?: string;
       matchStatus?: string;
       reviewNotes?: string;
       classification?: string;
     };
 
-    if (!reviewStatus && !paymentStatus && !matchStatus && reviewNotes === undefined && classification === undefined) {
+    if (!paymentStatus && !matchStatus && reviewNotes === undefined && classification === undefined) {
       return NextResponse.json(
         { error: "At least one status field is required" },
         { status: 400 }
@@ -24,9 +23,8 @@ export async function PATCH(
     }
 
     const fields: Record<string, unknown> = {};
-    if (reviewStatus) fields["Review Status"] = reviewStatus;
     if (paymentStatus) fields["Payment Status"] = paymentStatus;
-    if (matchStatus) fields["Match Status"] = matchStatus;
+    if (matchStatus) fields["Status"] = matchStatus;
     if (reviewNotes !== undefined) fields["Review Notes"] = reviewNotes;
     if (classification !== undefined) fields["Classification"] = classification;
 

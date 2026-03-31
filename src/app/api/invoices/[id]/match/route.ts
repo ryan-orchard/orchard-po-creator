@@ -42,7 +42,7 @@ export async function PATCH(
     if (body.approve) {
       const invoiceRecord = await getRecord(TABLES.INVOICES, invoiceId);
       const invoiceNumber = (invoiceRecord?.fields["Invoice Number"] as string) || invoiceId;
-      await updateRecord(TABLES.INVOICES, invoiceId, { "Match Status": "Matched" });
+      await updateRecord(TABLES.INVOICES, invoiceId, { "Status": "Matched" });
       logActivity({
         action: "invoice_approved",
         description: `Invoice ${invoiceNumber} approved for payment`,
@@ -59,7 +59,7 @@ export async function PATCH(
       if (!po) return NextResponse.json({ error: "PO not found" }, { status: 404 });
       await updateRecord(TABLES.INVOICES, invoiceId, {
         "Purchase Order": [body.poId],
-        "Match Status": "Pending Receipt",
+        "Status": "Open",
       });
       const poNumber = (po.fields["PO Number"] as string) || body.poId;
       const invoiceRecord = await getRecord(TABLES.INVOICES, invoiceId);
@@ -72,7 +72,7 @@ export async function PATCH(
         relatedRecordType: "invoice",
         relatedRecordId: invoiceId,
       });
-      return NextResponse.json({ success: true, invoiceId, poId: body.poId, poNumber, matchStatus: "Pending Receipt" });
+      return NextResponse.json({ success: true, invoiceId, poId: body.poId, poNumber, matchStatus: "Open" });
     }
 
     // Shipment match: link the invoice to the Shipment
@@ -83,7 +83,7 @@ export async function PATCH(
       }
       await updateRecord(TABLES.INVOICES, invoiceId, {
         "Shipment": [body.shipmentId],
-        "Match Status": "Matched",
+        "Status": "Matched",
       });
       const shipmentNumber = (shipment.fields["Shipment Number"] as string) || body.shipmentId;
       const invoiceRecord = await getRecord(TABLES.INVOICES, invoiceId);
@@ -106,7 +106,7 @@ export async function PATCH(
       }
       await updateRecord(TABLES.INVOICES, invoiceId, {
         "Work Orders": [body.workOrderId],
-        "Match Status": "Matched",
+        "Status": "Matched",
       });
       const woNumber = (wo.fields["WO Number"] as string) || body.workOrderId;
       const invoiceRecord = await getRecord(TABLES.INVOICES, invoiceId);
@@ -169,7 +169,7 @@ export async function PATCH(
     const matchStatus = hasDiscrepancy ? "Discrepancy" : "Matched";
     await updateRecord(TABLES.INVOICES, invoiceId, {
       "Purchase Order": [receiptPOLink],
-      "Match Status": matchStatus,
+      "Status": matchStatus,
     });
 
     // Get invoice number for the log

@@ -84,7 +84,7 @@ async function handlePOMatch(
       validMatches.map((m) => {
         const updates: Record<string, unknown> = {
           "PO Line Item": [m.poLineItemId],
-          "Match Status": "Matched",
+          "Status": "Matched",
         };
         const provisionalCost = poLineItemCostMap[m.poLineItemId];
         if (provisionalCost > 0) {
@@ -241,7 +241,7 @@ async function handleWOMatch(
         .map((m) =>
           updateRecord(TABLES.RECEIPT_LINES, m.receiptLineId, {
             "Work Order Lines": [m.woLineItemId],
-            "Match Status": "Matched",
+            "Status": "Matched",
           })
         )
     );

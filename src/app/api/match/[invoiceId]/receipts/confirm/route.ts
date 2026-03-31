@@ -80,7 +80,7 @@ export async function POST(
         // Set Receipt Line Match Status = Matched
         updates.push(
           updateRecord(TABLES.RECEIPT_LINES, rl.id, {
-            "Match Status": "Matched",
+            "Status": "Matched",
           })
         );
         linesMatched++;
@@ -91,7 +91,7 @@ export async function POST(
 
     // Update Invoice Match Status = Matched
     await updateRecord(TABLES.INVOICES, invoiceId, {
-      "Match Status": "Matched",
+      "Status": "Matched",
     });
 
     // Log activity
@@ -177,13 +177,13 @@ export async function DELETE(
 
     // Reset Receipt Line Match Status
     for (const rl of receiptLines) {
-      updates.push(updateRecord(TABLES.RECEIPT_LINES, rl.id, { "Match Status": "Open" }));
+      updates.push(updateRecord(TABLES.RECEIPT_LINES, rl.id, { "Status": "Open" }));
     }
 
     await Promise.all(updates);
 
     // Reset invoice match status to Pending Receipt
-    await updateRecord(TABLES.INVOICES, invoiceId, { "Match Status": "Pending Receipt" });
+    await updateRecord(TABLES.INVOICES, invoiceId, { "Status": "Open" });
 
     return NextResponse.json({ success: true, receiptId });
   } catch (error) {

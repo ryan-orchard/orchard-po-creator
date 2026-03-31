@@ -34,7 +34,7 @@ interface InvoiceDetail {
   freight: number;
   tax: number;
   invoiceAmount: number;
-  reviewStatus: string;
+  matchStatus: string;
   paymentStatus: string;
   classification: string;
   notes: string;
@@ -100,12 +100,12 @@ interface ValidationState {
 
 function getValidationState(invoice: InvoiceDetail): ValidationState {
   const matchHref = `/match?invoiceId=${invoice.id}`;
-  const { invoiceType, reviewStatus, purchaseOrder, receipts, linkedShipment, linkedWorkOrder } = invoice;
+  const { invoiceType, matchStatus, purchaseOrder, receipts, linkedShipment, linkedWorkOrder } = invoice;
 
   if (invoiceType === "Supplier" || invoiceType === "Packaging") {
     const hasPO = !!purchaseOrder;
-    const priceOk = hasPO && reviewStatus === "Matched";
-    const priceFlag = hasPO && reviewStatus === "Discrepancy";
+    const priceOk = hasPO && matchStatus === "Matched";
+    const priceFlag = hasPO && matchStatus === "Discrepancy";
     const linkedOk = receipts.length > 0;
     let cta: { label: string; href: string } | null = null;
     if (!hasPO) cta = { label: "Link to PO →", href: matchHref };
@@ -137,7 +137,7 @@ function getValidationState(invoice: InvoiceDetail): ValidationState {
 
   if (invoiceType === "Freight" || invoiceType === "Customs") {
     const hasShipment = !!linkedShipment;
-    const isReviewed = reviewStatus === "Matched";
+    const isReviewed = matchStatus === "Matched";
     return {
       priceCheck: { ok: isReviewed, flag: false, label: isReviewed ? "Reviewed & approved" : "Awaiting user review" },
       linkedCheck: { ok: hasShipment, flag: false, label: hasShipment ? linkedShipment!.shipmentNumber : "No shipment linked" },
@@ -152,7 +152,7 @@ function getValidationState(invoice: InvoiceDetail): ValidationState {
 
   if (invoiceType === "Work Order") {
     const hasWO = !!linkedWorkOrder;
-    const isReviewed = reviewStatus === "Matched";
+    const isReviewed = matchStatus === "Matched";
     return {
       priceCheck: { ok: isReviewed, flag: false, label: isReviewed ? "Reviewed & approved" : "Awaiting user review" },
       linkedCheck: { ok: hasWO, flag: false, label: hasWO ? linkedWorkOrder!.woNumber : "No work order linked" },
@@ -213,7 +213,7 @@ interface ComparisonRow {
 }
 
 function getComparisonRows(invoice: InvoiceDetail): ComparisonRow[] {
-  const { invoiceType, reviewStatus, purchaseOrder, receipts, linkedShipment, linkedWorkOrder, lines, invoiceAmount } = invoice;
+  const { invoiceType, matchStatus, purchaseOrder, receipts, linkedShipment, linkedWorkOrder, lines, invoiceAmount } = invoice;
   const totalInvoiceQty = lines.reduce((s, l) => s + l.qtyBilled, 0);
   const receipt = receipts[0] ?? null;
   const totalReceiptQty = receipt ? receipt.lines.reduce((s, l) => s + l.qtyReceived, 0) : null;
@@ -221,8 +221,8 @@ function getComparisonRows(invoice: InvoiceDetail): ComparisonRow[] {
 
   if (invoiceType === "Supplier" || invoiceType === "Packaging") {
     const hasPO = !!purchaseOrder;
-    const priceOk = hasPO && reviewStatus === "Matched";
-    const priceFlag = hasPO && reviewStatus === "Discrepancy";
+    const priceOk = hasPO && matchStatus === "Matched";
+    const priceFlag = hasPO && matchStatus === "Discrepancy";
     const qtyOk = totalReceiptQty !== null && totalInvoiceQty === totalReceiptQty;
     const qtyFlag = totalReceiptQty !== null && totalInvoiceQty !== totalReceiptQty;
     return [
@@ -249,7 +249,7 @@ function getComparisonRows(invoice: InvoiceDetail): ComparisonRow[] {
 
   if (invoiceType === "Freight" || invoiceType === "Customs") {
     const hasShipment = !!linkedShipment;
-    const isReviewed = reviewStatus === "Matched";
+    const isReviewed = matchStatus === "Matched";
     return [
       {
         label: "Price",
@@ -270,7 +270,7 @@ function getComparisonRows(invoice: InvoiceDetail): ComparisonRow[] {
 
   if (invoiceType === "Work Order") {
     const hasWO = !!linkedWorkOrder;
-    const isReviewed = reviewStatus === "Matched";
+    const isReviewed = matchStatus === "Matched";
     return [
       {
         label: "Price",
@@ -568,7 +568,7 @@ export default function InvoiceDetailPage() {
                 )}
                 {validation.showMarkReviewed && (
                   <button
-                    onClick={() => patchStatus({ reviewStatus: "Matched" }, { reviewStatus: "Matched" })}
+                    onClick={() => patchStatus({ matchStatus: "Matched" }, { matchStatus: "Matched" })}
                     className="text-xs text-gray-500 hover:text-gray-700"
                   >
                     Mark as reviewed

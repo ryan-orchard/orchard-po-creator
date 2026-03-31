@@ -50,7 +50,7 @@ export async function POST(
     }
 
     // 1. Clear the match link and set Match Status to Open
-    const clearFields: Record<string, unknown> = { "Match Status": "Open" };
+    const clearFields: Record<string, unknown> = { "Status": "Open" };
     if (isPOMatch) clearFields["PO Line Item"] = [];
     if (isWOMatch) clearFields["Work Order Lines"] = [];
     await updateRecord(TABLES.RECEIPT_LINES, receiptLineId, clearFields);

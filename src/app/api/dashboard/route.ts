@@ -11,23 +11,23 @@ export async function GET() {
 
   // Receipt lines not yet matched to a PO
   const unmatchedReceiptLines = allReceiptLines.filter((rl) => {
-    const status = rl.fields["Match Status"] as string | undefined;
+    const status = rl.fields["Status"] as string | undefined;
     return !status || status === "Open";
   }).length;
 
   // Invoices not yet matched to a receipt (open or pending receipt, not paid)
   const invoicesWithoutReceipt = allInvoices.filter((inv) => {
-    const status = ((inv.fields["Match Status"] as string) || "").toLowerCase();
+    const status = ((inv.fields["Status"] as string) || "").toLowerCase();
     const payment = (inv.fields["Payment Status"] as string) || "";
     return (
-      (status === "open" || status === "pending receipt" || status === "") &&
+      (status === "open" || status === "") &&
       payment !== "Paid"
     );
   }).length;
 
   // Invoices approved and not yet paid
   const readyToPay = allInvoices.filter((inv) => {
-    const status = ((inv.fields["Match Status"] as string) || "").toLowerCase();
+    const status = ((inv.fields["Status"] as string) || "").toLowerCase();
     const payment = (inv.fields["Payment Status"] as string) || "";
     return status === "approved" && payment !== "Paid";
   }).length;

@@ -355,7 +355,7 @@ export async function GET() {
       const poLineItemLinks = rl.fields["PO Line Item"] as string[] | undefined;
       const woLineItemLinks = rl.fields["Work Order Lines"] as string[] | undefined;
       const skuIds = rl.fields["SKU"] as string[] | undefined;
-      const matchStatus = (rl.fields["Match Status"] as string) || "Open";
+      const matchStatus = (rl.fields["Status"] as string) || "Open";
 
       // Resolve SKU
       let skuId = skuIds?.[0] || null;

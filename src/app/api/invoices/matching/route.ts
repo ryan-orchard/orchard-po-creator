@@ -83,6 +83,8 @@ export async function GET() {
       };
       if (
         status === "Issued" ||
+        status === "Accepted" ||
+        status === "Shipped" ||
         status === "Partially Received" ||
         status === "Received"
       ) {
@@ -273,7 +275,7 @@ export async function GET() {
       const flags: string[] = [];
 
       // Derive match status from line-level state and Airtable field
-      const matchStatusField = (inv.fields["Match Status"] as string) || "";
+      const matchStatusField = (inv.fields["Status"] as string) || "";
       const matchStatus = normalizeMatchStatus(matchStatusField, invoiceLines);
 
       // Find PO
@@ -467,7 +469,6 @@ function normalizeMatchStatus(
   const s = matchStatusField.toLowerCase().trim();
   if (s === "approved") return "approved";
   if (s === "discrepancy") return "discrepancy";
-  if (s === "pending receipt") return "pending-receipt";
   if (s === "matched") return "approved"; // legacy: treat as approved
   if (s === "open") return "open";
 

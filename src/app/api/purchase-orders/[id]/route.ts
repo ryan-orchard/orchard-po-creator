@@ -89,7 +89,7 @@ export async function GET(
           id: inv.id,
           invoiceNumber: inv.fields["Invoice Number"] as string,
           invoiceDate: (inv.fields["Invoice Date"] as string) || null,
-          matchStatus: (inv.fields["Match Status"] as string) || null,
+          matchStatus: (inv.fields["Status"] as string) || null,
           totalAmount: (inv.fields["Total Amount"] as number) || null,
         };
       }),

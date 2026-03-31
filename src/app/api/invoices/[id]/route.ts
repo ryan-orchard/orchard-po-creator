@@ -187,7 +187,7 @@ export async function GET(
       freight: (f["Freight"] as number) || 0,
       tax: (f["Tax"] as number) || 0,
       invoiceAmount: (f["Total Amount"] as number) || 0,
-      reviewStatus: (f["Review Status"] as string) || "Pending",
+      matchStatus: (f["Status"] as string) || "Open",
       paymentStatus: (f["Payment Status"] as string) || "Unpaid",
       classification: (f["Classification"] as string) || "",
       notes: (f["Notes"] as string) || "",

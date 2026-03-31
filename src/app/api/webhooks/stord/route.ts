@@ -135,7 +135,7 @@ export async function POST(request: NextRequest) {
           ...(mapping?.airtableId ? { SKU: [mapping.airtableId] } : {}),
           "Qty Received": parseFloat(item.quantity) || 0,
           "3PL SKU": item.sku,
-          "Match Status": "Open",
+          "Status": "Open",
           ...(item.lot_number ? { "Lot Number": item.lot_number } : {}),
         },
       };

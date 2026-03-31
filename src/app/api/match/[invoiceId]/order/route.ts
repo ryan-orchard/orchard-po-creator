@@ -37,7 +37,7 @@ export async function POST(
 
       const updates: Record<string, unknown> = {
         "Purchase Order": [body.id],
-        "Match Status": "Pending Receipt",
+        "Status": "Open",
       };
       // Only clear WO if one is currently linked
       if (currentWOIds.length > 0) updates["Work Orders"] = [];
@@ -53,7 +53,7 @@ export async function POST(
         relatedRecordId: invoiceId,
       });
 
-      return NextResponse.json({ success: true, type: "po", poNumber, matchStatus: "Pending Receipt" });
+      return NextResponse.json({ success: true, type: "po", poNumber, matchStatus: "Open" });
     }
 
     if (body.type === "wo") {
@@ -64,7 +64,7 @@ export async function POST(
 
       const updates: Record<string, unknown> = {
         "Work Orders": [body.id],
-        "Match Status": "Matched",
+        "Status": "Matched",
       };
       // Only clear PO if one is currently linked
       if (currentPOIds.length > 0) updates["Purchase Order"] = [];
@@ -85,7 +85,7 @@ export async function POST(
 
     if (body.type === "none") {
       // Set to Matched (no receipt/PO needed for credit card purchases)
-      const updates: Record<string, unknown> = { "Match Status": "Matched" };
+      const updates: Record<string, unknown> = { "Status": "Matched" };
       if (currentPOIds.length > 0) updates["Purchase Order"] = [];
       if (currentWOIds.length > 0) updates["Work Orders"] = [];
 
@@ -103,7 +103,7 @@ export async function POST(
     }
 
     if (body.type === "unlink") {
-      const updates: Record<string, unknown> = { "Match Status": "Open" };
+      const updates: Record<string, unknown> = { "Status": "Open" };
       if (currentPOIds.length > 0) updates["Purchase Order"] = [];
       if (currentWOIds.length > 0) updates["Work Orders"] = [];
 

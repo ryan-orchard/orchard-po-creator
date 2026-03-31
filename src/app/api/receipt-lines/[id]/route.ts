@@ -37,7 +37,7 @@ export async function PATCH(
           { status: 400 }
         );
       }
-      fields["Match Status"] = body.matchStatus;
+      fields["Status"] = body.matchStatus;
     }
 
     if (body.reviewNote !== undefined) {
