@@ -57,6 +57,14 @@ interface POOption {
   lineItems: string[];
 }
 
+interface POLineItem {
+  id: string;
+  sku: { standardSku: string; uom: string } | null;
+  qtySticks: number;
+  qtyCartons: number;
+  unitCost: number;
+}
+
 interface WOOption {
   id: string;
   woNumber: string;
@@ -64,6 +72,13 @@ interface WOOption {
   issuedDate: string;
   description: string;
   lineItems: string[];
+}
+
+interface WOLineItem {
+  id: string;
+  sku: { standardSku: string; uom: string } | null;
+  lineType: string;
+  qty: number;
 }
 
 // --- Helpers ---
@@ -219,6 +234,9 @@ function OrderPanel({
   const [wos, setWOs] = useState<WOOption[]>([]);
   const [selectedPO, setSelectedPO] = useState<POOption | null>(null);
   const [selectedWO, setSelectedWO] = useState<WOOption | null>(null);
+  const [selectedPOLines, setSelectedPOLines] = useState<POLineItem[]>([]);
+  const [selectedWOLines, setSelectedWOLines] = useState<WOLineItem[]>([]);
+  const [loadingDetail, setLoadingDetail] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -238,6 +256,46 @@ function OrderPanel({
     }
   }, []);
 
+  const selectPO = useCallback(async (po: POOption) => {
+    if (selectedPO?.id === po.id) {
+      setSelectedPO(null);
+      setSelectedPOLines([]);
+      return;
+    }
+    setSelectedPO(po);
+    setSelectedPOLines([]);
+    setLoadingDetail(true);
+    try {
+      const res = await fetch(`/api/purchase-orders/${po.id}`);
+      if (res.ok) {
+        const data = await res.json();
+        setSelectedPOLines(data.lineItems || []);
+      }
+    } finally {
+      setLoadingDetail(false);
+    }
+  }, [selectedPO]);
+
+  const selectWO = useCallback(async (wo: WOOption) => {
+    if (selectedWO?.id === wo.id) {
+      setSelectedWO(null);
+      setSelectedWOLines([]);
+      return;
+    }
+    setSelectedWO(wo);
+    setSelectedWOLines([]);
+    setLoadingDetail(true);
+    try {
+      const res = await fetch(`/api/work-orders/${wo.id}`);
+      if (res.ok) {
+        const data = await res.json();
+        setSelectedWOLines(data.lineItems || []);
+      }
+    } finally {
+      setLoadingDetail(false);
+    }
+  }, [selectedWO]);
+
   const linkOrder = useCallback(async (type: "po" | "wo" | "none" | "unlink", id?: string) => {
     setSaving(true);
     setError("");
@@ -256,6 +314,8 @@ function OrderPanel({
         setQuery("");
         setSelectedPO(null);
         setSelectedWO(null);
+        setSelectedPOLines([]);
+        setSelectedWOLines([]);
       }
     } finally {
       setSaving(false);
@@ -358,7 +418,7 @@ function OrderPanel({
           {filteredPOs.map(po => (
             <button
               key={po.id}
-              onClick={() => setSelectedPO(selectedPO?.id === po.id ? null : po)}
+              onClick={() => selectPO(po)}
               className={`w-full text-left px-3 py-2.5 rounded-lg border transition-colors
                 ${selectedPO?.id === po.id
                   ? "border-gray-900 bg-gray-50"
@@ -376,7 +436,6 @@ function OrderPanel({
         {/* Selected PO detail + confirm */}
         {selectedPO && (
           <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 mb-4">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 mb-2">Selected</p>
             <div className="flex items-start justify-between mb-3">
               <div>
                 <p className="text-base font-bold text-gray-900">{selectedPO.poNumber}</p>
@@ -386,11 +445,38 @@ function OrderPanel({
                 {selectedPO.grandTotal > 0 && (
                   <p className="text-sm font-semibold text-gray-900">{formatCurrency(selectedPO.grandTotal)}</p>
                 )}
-                <p className="text-xs text-gray-400 mt-0.5">
-                  {selectedPO.lineItems?.length ?? 0} line item{selectedPO.lineItems?.length !== 1 ? "s" : ""}
-                </p>
+                <span className="inline-block text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 mt-1">
+                  {selectedPO.status}
+                </span>
               </div>
             </div>
+
+            {/* Line items */}
+            {loadingDetail ? (
+              <p className="text-xs text-gray-400 mb-3">Loading line items…</p>
+            ) : selectedPOLines.length > 0 ? (
+              <table className="w-full text-xs mb-4">
+                <thead>
+                  <tr className="border-b border-gray-200">
+                    <th className="text-left font-medium text-gray-400 pb-1.5">SKU</th>
+                    <th className="text-right font-medium text-gray-400 pb-1.5">Sticks</th>
+                    <th className="text-right font-medium text-gray-400 pb-1.5">Cartons</th>
+                    <th className="text-right font-medium text-gray-400 pb-1.5">Unit Cost</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {selectedPOLines.map(li => (
+                    <tr key={li.id}>
+                      <td className="py-1.5 font-medium text-gray-800">{li.sku?.standardSku ?? "—"}</td>
+                      <td className="py-1.5 text-right text-gray-600">{li.qtySticks?.toLocaleString() ?? "—"}</td>
+                      <td className="py-1.5 text-right text-gray-600">{li.qtyCartons?.toLocaleString() ?? "—"}</td>
+                      <td className="py-1.5 text-right text-gray-600">{li.unitCost ? formatCurrency(li.unitCost) : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : null}
+
             <button
               onClick={() => linkOrder("po", selectedPO.id)}
               disabled={saving}
@@ -438,7 +524,7 @@ function OrderPanel({
           {filteredWOs.map(wo => (
             <button
               key={wo.id}
-              onClick={() => setSelectedWO(selectedWO?.id === wo.id ? null : wo)}
+              onClick={() => selectWO(wo)}
               className={`w-full text-left px-3 py-2.5 rounded-lg border transition-colors
                 ${selectedWO?.id === wo.id
                   ? "border-gray-900 bg-gray-50"
@@ -458,7 +544,6 @@ function OrderPanel({
         {/* Selected WO detail + confirm */}
         {selectedWO && (
           <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 mb-4">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 mb-2">Selected</p>
             <div className="flex items-start justify-between mb-3">
               <div>
                 <p className="text-base font-bold text-gray-900">{selectedWO.woNumber}</p>
@@ -475,6 +560,31 @@ function OrderPanel({
                 )}
               </div>
             </div>
+
+            {/* Line items */}
+            {loadingDetail ? (
+              <p className="text-xs text-gray-400 mb-3">Loading line items…</p>
+            ) : selectedWOLines.length > 0 ? (
+              <table className="w-full text-xs mb-4">
+                <thead>
+                  <tr className="border-b border-gray-200">
+                    <th className="text-left font-medium text-gray-400 pb-1.5">SKU</th>
+                    <th className="text-left font-medium text-gray-400 pb-1.5">Type</th>
+                    <th className="text-right font-medium text-gray-400 pb-1.5">Qty</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {selectedWOLines.map(li => (
+                    <tr key={li.id}>
+                      <td className="py-1.5 font-medium text-gray-800">{li.sku?.standardSku ?? "—"}</td>
+                      <td className="py-1.5 text-gray-500">{li.lineType}</td>
+                      <td className="py-1.5 text-right text-gray-600">{li.qty?.toLocaleString() ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : null}
+
             <button
               onClick={() => linkOrder("wo", selectedWO.id)}
               disabled={saving}
@@ -557,7 +667,7 @@ function ReceiptsPanel({
 }: {
   receipts: MatchState["receipts"];
   invoiceId: string;
-  order: MatchState["order"];
+  order: MatchState["order"] | null;
   onRefresh: () => void;
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -619,23 +729,14 @@ function ReceiptsPanel({
     }
   };
 
-  if (!order) {
-    return (
-      <div>
-        <h3 className="text-sm font-semibold text-gray-900 mb-4">Receipts</h3>
-        <div className="py-8 text-center">
-          <p className="text-sm text-gray-400">Link an order above to see its receipts here.</p>
-        </div>
-      </div>
-    );
-  }
-
   if (receipts.length === 0) {
     return (
       <div>
         <h3 className="text-sm font-semibold text-gray-900 mb-4">Receipts</h3>
         <div className="py-8 text-center">
-          <p className="text-sm text-gray-400">No receipts found for this {order.type === "po" ? "PO" : "work order"}.</p>
+          <p className="text-sm text-gray-400">
+            {order ? `No receipts found for this ${order.type === "po" ? "PO" : "work order"}.` : "No open receipts."}
+          </p>
         </div>
       </div>
     );
@@ -807,16 +908,12 @@ function MatchPageContent() {
     ? order.status
     : "Link a PO, WO, or no order";
 
-  const receiptCardTitle = !order && !noOrderConfirmed
-    ? "Link order first"
-    : summary.totalReceipts > 0
+  const receiptCardTitle = summary.totalReceipts > 0
     ? `${summary.confirmedCount} of ${summary.totalReceipts} confirmed`
     : "No receipts";
-  const receiptCardSub = !order && !noOrderConfirmed
-    ? "—"
-    : summary.totalReceipts > 0
-    ? `${summary.totalReceipts} receipt${summary.totalReceipts !== 1 ? "s" : ""} found`
-    : "No receipts for this order";
+  const receiptCardSub = summary.totalReceipts > 0
+    ? `${summary.totalReceipts} receipt${summary.totalReceipts !== 1 ? "s" : ""} available`
+    : order ? "No receipts for this order" : "Select to search receipts";
 
   return (
     <div className="min-h-screen bg-gray-50">

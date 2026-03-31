@@ -125,8 +125,11 @@ export async function GET(
         }
       });
     } else {
-      // No order linked: return no receipts
-      allReceipts = [];
+      // No order linked: show all open receipts so user can still confirm without a PO/WO
+      allReceipts = allReceipts.filter((r) => {
+        const status = (r.fields["Match Status"] as string) || "";
+        return !status || status === "Open";
+      });
     }
 
     // Fetch receipt lines for all relevant receipts
