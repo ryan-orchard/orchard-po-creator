@@ -64,7 +64,7 @@ export async function POST(
 
       const updates: Record<string, unknown> = {
         "Work Orders": [body.id],
-        "Match Status": "Approved",
+        "Match Status": "Matched",
       };
       // Only clear PO if one is currently linked
       if (currentPOIds.length > 0) updates["Purchase Order"] = [];
@@ -84,8 +84,8 @@ export async function POST(
     }
 
     if (body.type === "none") {
-      // Set to Approved (no receipt/PO needed for credit card purchases)
-      const updates: Record<string, unknown> = { "Match Status": "Approved" };
+      // Set to Matched (no receipt/PO needed for credit card purchases)
+      const updates: Record<string, unknown> = { "Match Status": "Matched" };
       if (currentPOIds.length > 0) updates["Purchase Order"] = [];
       if (currentWOIds.length > 0) updates["Work Orders"] = [];
 

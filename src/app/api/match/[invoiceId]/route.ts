@@ -189,7 +189,8 @@ export async function GET(
     // Summary
     const confirmedReceipts = receipts.filter((r) => r.confirmed);
     const totalCartons = receipts.reduce((s, r) => s + r.totalCartons, 0);
-    const noOrderState = !linkedPOIds.length && !linkedWOIds.length && invoice.matchStatus === "Approved";
+    const noOrderState = !linkedPOIds.length && !linkedWOIds.length &&
+      (invoice.matchStatus === "Matched" || invoice.matchStatus === "Approved");
     const orderLinked = !!order || noOrderState;
     const receiptsConfirmed = receipts.length > 0 && confirmedReceipts.length === receipts.length;
 

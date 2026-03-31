@@ -89,9 +89,9 @@ export async function POST(
 
     await Promise.all(updates);
 
-    // Update Invoice Match Status = Approved
+    // Update Invoice Match Status = Matched
     await updateRecord(TABLES.INVOICES, invoiceId, {
-      "Match Status": "Approved",
+      "Match Status": "Matched",
     });
 
     // Log activity

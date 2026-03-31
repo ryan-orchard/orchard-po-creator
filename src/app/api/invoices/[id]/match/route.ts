@@ -42,7 +42,7 @@ export async function PATCH(
     if (body.approve) {
       const invoiceRecord = await getRecord(TABLES.INVOICES, invoiceId);
       const invoiceNumber = (invoiceRecord?.fields["Invoice Number"] as string) || invoiceId;
-      await updateRecord(TABLES.INVOICES, invoiceId, { "Match Status": "Approved" });
+      await updateRecord(TABLES.INVOICES, invoiceId, { "Match Status": "Matched" });
       logActivity({
         action: "invoice_approved",
         description: `Invoice ${invoiceNumber} approved for payment`,
@@ -50,7 +50,7 @@ export async function PATCH(
         relatedRecordType: "invoice",
         relatedRecordId: invoiceId,
       });
-      return NextResponse.json({ success: true, invoiceId, matchStatus: "Approved" });
+      return NextResponse.json({ success: true, invoiceId, matchStatus: "Matched" });
     }
 
     // PO-only match — confirm pricing before receipt arrives
@@ -83,7 +83,7 @@ export async function PATCH(
       }
       await updateRecord(TABLES.INVOICES, invoiceId, {
         "Shipment": [body.shipmentId],
-        "Match Status": "Approved",
+        "Match Status": "Matched",
       });
       const shipmentNumber = (shipment.fields["Shipment Number"] as string) || body.shipmentId;
       const invoiceRecord = await getRecord(TABLES.INVOICES, invoiceId);
@@ -106,7 +106,7 @@ export async function PATCH(
       }
       await updateRecord(TABLES.INVOICES, invoiceId, {
         "Work Orders": [body.workOrderId],
-        "Match Status": "Approved",
+        "Match Status": "Matched",
       });
       const woNumber = (wo.fields["WO Number"] as string) || body.workOrderId;
       const invoiceRecord = await getRecord(TABLES.INVOICES, invoiceId);
@@ -166,7 +166,7 @@ export async function PATCH(
     }
 
     // 2. Set header PO link and match status
-    const matchStatus = hasDiscrepancy ? "Discrepancy" : "Approved";
+    const matchStatus = hasDiscrepancy ? "Discrepancy" : "Matched";
     await updateRecord(TABLES.INVOICES, invoiceId, {
       "Purchase Order": [receiptPOLink],
       "Match Status": matchStatus,
