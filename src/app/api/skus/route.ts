@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
+import { requireOperator } from "@/lib/auth";
 import { getRecords, createRecord, TABLES } from "@/lib/airtable";
 
 export async function POST(req: Request) {
+  const authError = await requireOperator();
+  if (authError) return authError;
+
   const body = await req.json();
   const fields: Record<string, unknown> = {
     "Standard SKU": body.standardSku,

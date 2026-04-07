@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import { cookies } from "next/headers";
+import { auth } from "@clerk/nextjs/server";
+import { ClerkProvider } from "@clerk/nextjs";
 import { Geist, Geist_Mono } from "next/font/google";
 import Sidebar from "@/components/Sidebar";
-import { AUTH_COOKIE_NAME } from "@/lib/auth";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -25,18 +25,20 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const cookieStore = await cookies();
-  const isAuthenticated = cookieStore.has(AUTH_COOKIE_NAME);
+  const { userId } = await auth();
+  const isAuthenticated = !!userId;
 
   return (
     <html lang="en">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        {isAuthenticated && <Sidebar />}
-        <main className={isAuthenticated ? "ml-56 print:ml-0" : ""}>
-          {children}
-        </main>
+        <ClerkProvider>
+          {isAuthenticated && <Sidebar />}
+          <main className={isAuthenticated ? "ml-56 print:ml-0" : ""}>
+            {children}
+          </main>
+        </ClerkProvider>
       </body>
     </html>
   );

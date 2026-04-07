@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireOperator } from "@/lib/auth";
 import { getRecords, updateRecord, TABLES } from "@/lib/airtable";
 
 /**
@@ -11,8 +12,11 @@ import { getRecords, updateRecord, TABLES } from "@/lib/airtable";
  */
 export async function POST(
   _request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  {
+ params }: { params: Promise<{ id: string }> }
 ) {
+  const authError = await requireOperator();
+  if (authError) return authError;
   try {
     const { id: invoiceId } = await params;
 

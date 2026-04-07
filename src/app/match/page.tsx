@@ -1,1006 +1,1136 @@
 "use client";
 
-import { useState, useEffect, useCallback, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
-import Link from "next/link";
+import { useEffect, useState, useCallback } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 
-// --- Types ---
+// ── Types ────────────────────────────────────────────────────────────────────
 
-interface MatchState {
-  invoice: {
-    id: string;
-    invoiceNumber: string;
-    supplier: string;
-    invoiceDate: string;
-    invoiceAmount: number;
-    paymentStatus: string;
-    invoiceType: string;
-    matchStatus: string;
-    poReference: string;
-  };
-  order: {
-    type: "po" | "wo";
-    id: string;
-    number: string;
-    status: string;
-    date: string;
-    supplier: string;
-  } | null;
-  noOrderConfirmed: boolean;
-  receipts: {
-    id: string;
-    receiptNumber: string;
-    receivedDate: string;
-    warehouse: string;
-    totalCartons: number;
-    confirmed: boolean;
-    lineCount: number;
-    matchStatus: string;
-  }[];
-  summary: {
-    invoiceLinked: boolean;
-    orderLinked: boolean;
-    receiptsConfirmed: boolean;
-    confirmedCount: number;
-    totalReceipts: number;
-    totalCartons: number;
-    linkedCount: number;
-  };
-}
-
-interface POOption {
+interface InvoiceLine {
   id: string;
-  poNumber: string;
-  status: string;
-  date: string;
-  grandTotal: number;
-  lineItems: string[];
-}
-
-interface POLineItem {
-  id: string;
-  sku: { standardSku: string; uom: string } | null;
-  qtySticks: number;
-  qtyCartons: number;
-  unitCost: number;
-}
-
-interface WOOption {
-  id: string;
-  woNumber: string;
-  status: string;
-  issuedDate: string;
+  skuId: string | null;
+  skuName: string | null;
+  ansItemNumber: string;
   description: string;
-  lineItems: string[];
+  qtyBilled: number;
+  unitCost: number;
+  amount: number;
 }
 
-interface WOLineItem {
+interface POLine {
   id: string;
-  sku: { standardSku: string; uom: string } | null;
-  lineType: string;
+  skuId: string | null;
+  skuName: string | null;
+  qtyOrdered: number;
+  unitCost: number;
+  costBasis: string;
+}
+
+interface WOLine {
+  id: string;
+  skuId: string | null;
+  skuName: string | null;
+  lineType: "Input" | "Output";
   qty: number;
 }
 
-// --- Helpers ---
+interface ReceiptLine {
+  id: string;
+  skuId: string | null;
+  skuName: string | null;
+  qtyReceived: number;
+}
 
-function formatCurrency(n: number) {
+interface Receipt {
+  id: string;
+  receiptNumber: string;
+  receivedDate: string;
+  lines: ReceiptLine[];
+}
+
+interface CheckStripRow {
+  skuName: string;
+  invoiceQty: number | null;
+  invoicePrice: number | null;
+  poQty: number | null;
+  poPrice: number | null;
+  receiptQty: number | null;
+  priceMatch: boolean | null;
+  qtyMatch: boolean | null;
+}
+
+interface MatchPayload {
+  invoice: {
+    id: string;
+    invoiceNumber: string;
+    invoiceDate: string;
+    supplier: string;
+    supplierId: string | null;
+    invoiceType: string;
+    salesOrder: string;
+    poReference: string;
+    paymentTerms: string;
+    trackingNumber: string;
+    shipTo: string;
+    subtotal: number;
+    freight: number;
+    tax: number;
+    invoiceAmount: number;
+    matchStatus: string;
+    paymentStatus: string;
+    notes: string;
+    lines: InvoiceLine[];
+  };
+  po: {
+    id: string;
+    poNumber: string;
+    status: string;
+    supplier: string;
+    lines: POLine[];
+  } | null;
+  wo: {
+    id: string;
+    woNumber: string;
+    status: string;
+    description: string;
+    lines: WOLine[];
+  } | null;
+  receipts: Receipt[];
+  checkStrip: CheckStripRow[];
+}
+
+interface POSearchResult {
+  id: string;
+  poNumber: string;
+  status: string;
+  skus: string[];
+}
+
+interface WOSearchResult {
+  id: string;
+  woNumber: string;
+  status: string;
+  outputSkus: string[];
+}
+
+interface ReceiptSearchResult {
+  id: string;
+  receiptNumber: string;
+  receivedDate: string;
+  purchaseOrder: string | null;
+  warehouse: string | null;
+  lines: { id: string }[];
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function fmt(n: number) {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 }
 
-function formatDate(s: string | null | undefined) {
-  if (!s) return "—";
-  const d = new Date(s);
-  if (isNaN(d.getTime())) return s;
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+function fmtDate(d: string) {
+  if (!d) return "";
+  return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-// --- Progress Bar ---
-
-function ProgressBar({ linkedCount }: { linkedCount: number }) {
-  const steps = ["Invoice", "Order", "Receipts"];
+function StatusBadge({ status, type = "match" }: { status: string; type?: "match" | "payment" }) {
+  const colors: Record<string, string> = {
+    Open: "bg-stone-100 text-stone-500",
+    Matched: "bg-emerald-50 text-emerald-700",
+    Discrepancy: "bg-amber-50 text-amber-700",
+    Unpaid: "bg-stone-100 text-stone-500",
+    Paid: "bg-emerald-50 text-emerald-700",
+    Disputed: "bg-red-50 text-red-700",
+  };
   return (
-    <div className="flex items-center mb-6">
-      {steps.map((step, i) => {
-        const done = i < linkedCount;
-        const active = i === linkedCount && linkedCount < 3;
-        return (
-          <div key={step} className={`flex items-center ${i < 2 ? "flex-1" : ""}`}>
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-colors
-                ${done ? "bg-sage-600 text-white" : active ? "bg-amber-400 text-white" : "bg-gray-200 text-gray-500"}`}>
-                {done ? (
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                  </svg>
-                ) : (i + 1)}
-              </div>
-              <span className={`text-sm font-medium ${done ? "text-sage-700" : active ? "text-gray-900" : "text-gray-400"}`}>
-                {step}
-              </span>
-            </div>
-            {i < 2 && (
-              <div className={`flex-1 h-px mx-4 ${done ? "bg-sage-500" : "bg-gray-200"}`} />
-            )}
-          </div>
-        );
-      })}
-    </div>
+    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${colors[status] ?? "bg-stone-100 text-stone-500"}`}>
+      {type === "payment" ? `💳 ${status}` : status}
+    </span>
   );
 }
 
-// --- Selector Card ---
+// ── Search Dropdowns ──────────────────────────────────────────────────────────
 
-type CardId = "invoice" | "order" | "receipts";
-
-interface SelectorCardProps {
-  id: CardId;
-  active: boolean;
-  linked: boolean;
-  partial?: boolean;
-  title: string;
-  subtitle: string;
-  onClick: () => void;
-}
-
-function SelectorCard({ id, active, linked, partial, title, subtitle, onClick }: SelectorCardProps) {
-  const statusDot = linked
-    ? <span className="w-5 h-5 rounded-full bg-sage-100 flex items-center justify-center flex-shrink-0">
-        <svg className="w-3 h-3 text-sage-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-        </svg>
-      </span>
-    : partial
-    ? <span className="w-5 h-5 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
-        <span className="w-2 h-2 rounded-full bg-amber-400" />
-      </span>
-    : <span className="w-5 h-5 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
-        <span className="w-2 h-2 rounded-full bg-gray-300" />
-      </span>;
-
-  return (
-    <button
-      onClick={onClick}
-      className={`flex-1 text-left p-4 rounded-xl border-2 transition-all cursor-pointer min-h-[100px]
-        ${active
-          ? "border-gray-900 bg-white shadow-sm"
-          : "border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm"}`}
-    >
-      <div className="flex items-start justify-between gap-2 h-full">
-        <div className="min-w-0 flex flex-col">
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 mb-1">{id}</p>
-          <p className="text-sm font-semibold text-gray-900 truncate">{title}</p>
-          <p className="text-xs text-gray-500 mt-1 leading-snug">{subtitle}</p>
-        </div>
-        {statusDot}
-      </div>
-    </button>
-  );
-}
-
-// --- Invoice Panel ---
-
-function InvoicePanel({ invoice }: { invoice: MatchState["invoice"] }) {
-  const rows = [
-    { label: "Invoice #", value: invoice.invoiceNumber },
-    { label: "Supplier", value: invoice.supplier || "—" },
-    { label: "Invoice Date", value: formatDate(invoice.invoiceDate) },
-    { label: "Amount", value: formatCurrency(invoice.invoiceAmount) },
-    { label: "Payment Status", value: invoice.paymentStatus || "—" },
-    { label: "PO Reference", value: invoice.poReference || "—" },
-  ];
-
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-semibold text-gray-900">Invoice Details</h3>
-        <Link
-          href={`/invoices/${invoice.id}`}
-          className="text-xs text-gray-400 hover:text-gray-700 flex items-center gap-1"
-        >
-          View invoice
-          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-          </svg>
-        </Link>
-      </div>
-      <dl className="grid grid-cols-2 gap-x-8 gap-y-3">
-        {rows.map(({ label, value }) => (
-          <div key={label}>
-            <dt className="text-xs text-gray-400">{label}</dt>
-            <dd className="text-sm font-medium text-gray-900 mt-0.5">{value}</dd>
-          </div>
-        ))}
-      </dl>
-    </div>
-  );
-}
-
-// --- Order Panel ---
-
-function OrderPanel({
-  order,
-  noOrderConfirmed,
-  invoiceId,
-  onRefresh,
+function SearchDropdown<T>({
+  items,
+  loading,
+  query,
+  onQueryChange,
+  renderItem,
+  onSelect,
+  onCancel,
+  placeholder,
 }: {
-  order: MatchState["order"];
-  noOrderConfirmed: boolean;
-  invoiceId: string;
-  onRefresh: () => void;
+  items: T[];
+  loading: boolean;
+  query: string;
+  onQueryChange: (q: string) => void;
+  renderItem: (item: T) => React.ReactNode;
+  onSelect: (item: T) => void;
+  onCancel: () => void;
+  placeholder: string;
 }) {
-  const [mode, setMode] = useState<"summary" | "search-po" | "search-wo">("summary");
-  const [query, setQuery] = useState("");
-  const [pos, setPOs] = useState<POOption[]>([]);
-  const [wos, setWOs] = useState<WOOption[]>([]);
-  const [selectedPO, setSelectedPO] = useState<POOption | null>(null);
-  const [selectedWO, setSelectedWO] = useState<WOOption | null>(null);
-  const [selectedPOLines, setSelectedPOLines] = useState<POLineItem[]>([]);
-  const [selectedWOLines, setSelectedWOLines] = useState<WOLineItem[]>([]);
-  const [loadingDetail, setLoadingDetail] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-
-  const loadPOs = useCallback(async () => {
-    const res = await fetch("/api/purchase-orders");
-    if (res.ok) {
-      const data = await res.json();
-      setPOs(Array.isArray(data) ? data : []);
-    }
-  }, []);
-
-  const loadWOs = useCallback(async () => {
-    const res = await fetch("/api/work-orders");
-    if (res.ok) {
-      const data = await res.json();
-      setWOs(Array.isArray(data) ? data : []);
-    }
-  }, []);
-
-  const selectPO = useCallback(async (po: POOption) => {
-    if (selectedPO?.id === po.id) {
-      setSelectedPO(null);
-      setSelectedPOLines([]);
-      return;
-    }
-    setSelectedPO(po);
-    setSelectedPOLines([]);
-    setLoadingDetail(true);
-    try {
-      const res = await fetch(`/api/purchase-orders/${po.id}`);
-      if (res.ok) {
-        const data = await res.json();
-        setSelectedPOLines(data.lineItems || []);
-      }
-    } finally {
-      setLoadingDetail(false);
-    }
-  }, [selectedPO]);
-
-  const selectWO = useCallback(async (wo: WOOption) => {
-    if (selectedWO?.id === wo.id) {
-      setSelectedWO(null);
-      setSelectedWOLines([]);
-      return;
-    }
-    setSelectedWO(wo);
-    setSelectedWOLines([]);
-    setLoadingDetail(true);
-    try {
-      const res = await fetch(`/api/work-orders/${wo.id}`);
-      if (res.ok) {
-        const data = await res.json();
-        setSelectedWOLines(data.lineItems || []);
-      }
-    } finally {
-      setLoadingDetail(false);
-    }
-  }, [selectedWO]);
-
-  const linkOrder = useCallback(async (type: "po" | "wo" | "none" | "unlink", id?: string) => {
-    setSaving(true);
-    setError("");
-    try {
-      const res = await fetch(`/api/match/${invoiceId}/order`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type, id }),
-      });
-      if (!res.ok) {
-        const d = await res.json();
-        setError(d.error || "Failed");
-      } else {
-        onRefresh();
-        setMode("summary");
-        setQuery("");
-        setSelectedPO(null);
-        setSelectedWO(null);
-        setSelectedPOLines([]);
-        setSelectedWOLines([]);
-      }
-    } finally {
-      setSaving(false);
-    }
-  }, [invoiceId, onRefresh]);
-
-  const filteredPOs = pos.filter(p =>
-    !query || p.poNumber?.toLowerCase().includes(query.toLowerCase())
-  );
-  const filteredWOs = wos.filter(w =>
-    !query || w.woNumber?.toLowerCase().includes(query.toLowerCase()) ||
-    w.description?.toLowerCase().includes(query.toLowerCase())
-  );
-
-  // Linked state
-  if (order || noOrderConfirmed) {
-    return (
-      <div>
-        <div className="flex items-start justify-between mb-4">
-          <h3 className="text-sm font-semibold text-gray-900">Linked Order</h3>
-          <button
-            onClick={() => linkOrder("unlink")}
-            disabled={saving}
-            className="text-xs text-gray-400 hover:text-red-500 transition-colors"
-          >
-            Remove link
-          </button>
-        </div>
-
-        {noOrderConfirmed ? (
-          <div className="rounded-lg bg-gray-50 border border-gray-200 p-4">
-            <p className="text-sm font-semibold text-gray-900">No order</p>
-            <p className="text-xs text-gray-500 mt-1">Credit card or direct purchase — no PO or WO.</p>
-          </div>
-        ) : order ? (
-          <div className="rounded-xl bg-gray-50 border border-gray-200 p-5">
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="text-[11px] text-gray-400 uppercase tracking-wider mb-0.5">
-                  {order.type === "po" ? "Purchase Order" : "Work Order"}
-                </p>
-                <p className="text-lg font-bold text-gray-900">{order.number}</p>
-                {order.supplier && <p className="text-sm text-gray-500 mt-0.5">{order.supplier}</p>}
-              </div>
-              <div className="text-right">
-                <span className="inline-block text-xs font-medium px-2 py-0.5 rounded-full bg-sage-100 text-sage-700">
-                  {order.status}
-                </span>
-                {order.date && <p className="text-xs text-gray-400 mt-1.5">{formatDate(order.date)}</p>}
-              </div>
-            </div>
-            <div className="mt-4 pt-4 border-t border-gray-200">
-              <Link
-                href={order.type === "po" ? `/pos/${order.id}` : `/work-orders/${order.id}`}
-                className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-gray-900"
-              >
-                View {order.type === "po" ? "PO" : "work order"}
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                </svg>
-              </Link>
-            </div>
-          </div>
-        ) : null}
-
-        {error && <p className="text-xs text-red-500 mt-2">{error}</p>}
-      </div>
-    );
-  }
-
-  // PO search
-  if (mode === "search-po") {
-    return (
-      <div>
-        <div className="flex items-center gap-2 mb-4">
-          <button
-            onClick={() => { setMode("summary"); setQuery(""); setSelectedPO(null); }}
-            className="text-gray-400 hover:text-gray-600"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
-            </svg>
-          </button>
-          <h3 className="text-sm font-semibold text-gray-900">Select a Purchase Order</h3>
-        </div>
-
-        <input
-          autoFocus
-          type="text"
-          placeholder="Search by PO number…"
-          value={query}
-          onChange={e => { setQuery(e.target.value); setSelectedPO(null); }}
-          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-gray-900"
-        />
-
-        <div className="space-y-1.5 max-h-48 overflow-y-auto mb-4">
-          {filteredPOs.length === 0 && (
-            <p className="text-sm text-gray-400 py-4 text-center">No purchase orders found</p>
-          )}
-          {filteredPOs.map(po => (
-            <button
-              key={po.id}
-              onClick={() => selectPO(po)}
-              className={`w-full text-left px-3 py-2.5 rounded-lg border transition-colors
-                ${selectedPO?.id === po.id
-                  ? "border-gray-900 bg-gray-50"
-                  : "border-gray-200 hover:border-gray-300"}`}
-            >
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-semibold text-gray-900">{po.poNumber}</p>
-                <span className="text-xs text-gray-400">{po.status}</span>
-              </div>
-              {po.date && <p className="text-xs text-gray-400 mt-0.5">{formatDate(po.date)}</p>}
-            </button>
-          ))}
-        </div>
-
-        {/* Selected PO detail + confirm */}
-        {selectedPO && (
-          <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 mb-4">
-            <div className="flex items-start justify-between mb-3">
-              <div>
-                <p className="text-base font-bold text-gray-900">{selectedPO.poNumber}</p>
-                <p className="text-xs text-gray-500 mt-0.5">{formatDate(selectedPO.date)}</p>
-              </div>
-              <div className="text-right">
-                {selectedPO.grandTotal > 0 && (
-                  <p className="text-sm font-semibold text-gray-900">{formatCurrency(selectedPO.grandTotal)}</p>
-                )}
-                <span className="inline-block text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 mt-1">
-                  {selectedPO.status}
-                </span>
-              </div>
-            </div>
-
-            {/* Line items */}
-            {loadingDetail ? (
-              <p className="text-xs text-gray-400 mb-3">Loading line items…</p>
-            ) : selectedPOLines.length > 0 ? (
-              <table className="w-full text-xs mb-4">
-                <thead>
-                  <tr className="border-b border-gray-200">
-                    <th className="text-left font-medium text-gray-400 pb-1.5">SKU</th>
-                    <th className="text-right font-medium text-gray-400 pb-1.5">Sticks</th>
-                    <th className="text-right font-medium text-gray-400 pb-1.5">Cartons</th>
-                    <th className="text-right font-medium text-gray-400 pb-1.5">Unit Cost</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {selectedPOLines.map(li => (
-                    <tr key={li.id}>
-                      <td className="py-1.5 font-medium text-gray-800">{li.sku?.standardSku ?? "—"}</td>
-                      <td className="py-1.5 text-right text-gray-600">{li.qtySticks?.toLocaleString() ?? "—"}</td>
-                      <td className="py-1.5 text-right text-gray-600">{li.qtyCartons?.toLocaleString() ?? "—"}</td>
-                      <td className="py-1.5 text-right text-gray-600">{li.unitCost ? formatCurrency(li.unitCost) : "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : null}
-
-            <button
-              onClick={() => linkOrder("po", selectedPO.id)}
-              disabled={saving}
-              className="w-full py-2.5 rounded-lg bg-gray-900 text-white text-sm font-semibold hover:bg-gray-700 disabled:opacity-50 transition-colors"
-            >
-              {saving ? "Linking…" : `Link to ${selectedPO.poNumber}`}
-            </button>
-          </div>
-        )}
-
-        {error && <p className="text-xs text-red-500">{error}</p>}
-      </div>
-    );
-  }
-
-  // WO search
-  if (mode === "search-wo") {
-    return (
-      <div>
-        <div className="flex items-center gap-2 mb-4">
-          <button
-            onClick={() => { setMode("summary"); setQuery(""); setSelectedWO(null); }}
-            className="text-gray-400 hover:text-gray-600"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
-            </svg>
-          </button>
-          <h3 className="text-sm font-semibold text-gray-900">Select a Work Order</h3>
-        </div>
-
-        <input
-          autoFocus
-          type="text"
-          placeholder="Search by WO number…"
-          value={query}
-          onChange={e => { setQuery(e.target.value); setSelectedWO(null); }}
-          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-gray-900"
-        />
-
-        <div className="space-y-1.5 max-h-48 overflow-y-auto mb-4">
-          {filteredWOs.length === 0 && (
-            <p className="text-sm text-gray-400 py-4 text-center">No work orders found</p>
-          )}
-          {filteredWOs.map(wo => (
-            <button
-              key={wo.id}
-              onClick={() => selectWO(wo)}
-              className={`w-full text-left px-3 py-2.5 rounded-lg border transition-colors
-                ${selectedWO?.id === wo.id
-                  ? "border-gray-900 bg-gray-50"
-                  : "border-gray-200 hover:border-gray-300"}`}
-            >
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-semibold text-gray-900">{wo.woNumber}</p>
-                <span className="text-xs text-gray-400">{wo.status}</span>
-              </div>
-              {wo.description && (
-                <p className="text-xs text-gray-500 mt-0.5 truncate">{wo.description}</p>
-              )}
-            </button>
-          ))}
-        </div>
-
-        {/* Selected WO detail + confirm */}
-        {selectedWO && (
-          <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 mb-4">
-            <div className="flex items-start justify-between mb-3">
-              <div>
-                <p className="text-base font-bold text-gray-900">{selectedWO.woNumber}</p>
-                {selectedWO.description && (
-                  <p className="text-xs text-gray-500 mt-0.5">{selectedWO.description}</p>
-                )}
-              </div>
-              <div className="text-right">
-                <span className="inline-block text-xs font-medium px-2 py-0.5 rounded-full bg-sage-100 text-sage-700">
-                  {selectedWO.status}
-                </span>
-                {selectedWO.issuedDate && (
-                  <p className="text-xs text-gray-400 mt-1">{formatDate(selectedWO.issuedDate)}</p>
-                )}
-              </div>
-            </div>
-
-            {/* Line items */}
-            {loadingDetail ? (
-              <p className="text-xs text-gray-400 mb-3">Loading line items…</p>
-            ) : selectedWOLines.length > 0 ? (
-              <table className="w-full text-xs mb-4">
-                <thead>
-                  <tr className="border-b border-gray-200">
-                    <th className="text-left font-medium text-gray-400 pb-1.5">SKU</th>
-                    <th className="text-left font-medium text-gray-400 pb-1.5">Type</th>
-                    <th className="text-right font-medium text-gray-400 pb-1.5">Qty</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {selectedWOLines.map(li => (
-                    <tr key={li.id}>
-                      <td className="py-1.5 font-medium text-gray-800">{li.sku?.standardSku ?? "—"}</td>
-                      <td className="py-1.5 text-gray-500">{li.lineType}</td>
-                      <td className="py-1.5 text-right text-gray-600">{li.qty?.toLocaleString() ?? "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : null}
-
-            <button
-              onClick={() => linkOrder("wo", selectedWO.id)}
-              disabled={saving}
-              className="w-full py-2.5 rounded-lg bg-gray-900 text-white text-sm font-semibold hover:bg-gray-700 disabled:opacity-50 transition-colors"
-            >
-              {saving ? "Linking…" : `Link to ${selectedWO.woNumber}`}
-            </button>
-          </div>
-        )}
-
-        {error && <p className="text-xs text-red-500">{error}</p>}
-      </div>
-    );
-  }
-
-  // Default: choose order type
   return (
-    <div>
-      <h3 className="text-sm font-semibold text-gray-900 mb-1">Link an Order</h3>
-      <p className="text-xs text-gray-500 mb-4">
-        Select the PO or work order this invoice is for, or confirm there is no associated order.
+    <div className="mt-3 border border-stone-200 rounded-lg overflow-hidden bg-white shadow-sm">
+      <div className="p-3 border-b border-stone-200">
+        <input
+          autoFocus
+          type="text"
+          value={query}
+          onChange={(e) => onQueryChange(e.target.value)}
+          placeholder={placeholder}
+          className="w-full text-sm outline-none placeholder:text-stone-400"
+        />
+      </div>
+      <div className="max-h-52 overflow-y-auto">
+        {loading ? (
+          <div className="p-4 text-xs text-stone-400 text-center">Loading…</div>
+        ) : items.length === 0 ? (
+          <div className="p-4 text-xs text-stone-400 text-center">No results</div>
+        ) : (
+          items.slice(0, 20).map((item, i) => (
+            <button
+              key={i}
+              onClick={() => onSelect(item)}
+              className="w-full px-3 py-2.5 text-left hover:bg-stone-50 border-b border-stone-100 last:border-0"
+            >
+              {renderItem(item)}
+            </button>
+          ))
+        )}
+      </div>
+      <div className="p-2 border-t border-stone-100">
+        <button onClick={onCancel} className="text-[11px] text-stone-400 hover:text-stone-600">
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Check Strip ───────────────────────────────────────────────────────────────
+
+function CheckStrip({ rows, hasReceipts }: { rows: CheckStripRow[]; hasReceipts: boolean }) {
+  if (rows.length === 0) return null;
+
+  // Split into invoice-present rows and receipt-only rows
+  const invoiceRows = rows.filter((r) => r.invoiceQty !== null);
+  const extraRows = rows.filter((r) => r.invoiceQty === null);
+
+  const renderPill = (row: CheckStripRow) => {
+    const priceWarn = row.priceMatch === false;
+    const qtyWarn = row.qtyMatch === false;
+    return (
+      <div
+        key={row.skuName}
+        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-medium ${
+          priceWarn || qtyWarn
+            ? "bg-amber-50 border-amber-200 text-amber-800"
+            : "bg-emerald-50 border-emerald-200 text-emerald-800"
+        }`}
+      >
+        <span className="text-stone-600 font-normal">{row.skuName}</span>
+        {row.priceMatch !== null && (
+          <span className={row.priceMatch ? "text-emerald-600" : "text-amber-600"}>
+            Price {row.priceMatch ? "✓" : "⚠"}
+          </span>
+        )}
+        {row.qtyMatch !== null && (
+          <span className={row.qtyMatch ? "text-emerald-600" : "text-amber-600"}>
+            Qty {row.qtyMatch
+              ? "✓"
+              : `⚠ ${row.invoiceQty} billed / ${row.receiptQty ?? row.poQty} ${hasReceipts ? "received" : "ordered"}`
+            }
+          </span>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="px-5 py-4">
+      <p className="text-[10px] font-semibold tracking-widest text-stone-400 uppercase mb-3">
+        Price &amp; Qty Check
       </p>
-      <div className="space-y-2">
-        <button
-          onClick={async () => {
-            setMode("search-po");
-            await loadPOs();
-          }}
-          className="w-full flex items-center justify-between px-4 py-3.5 rounded-xl border border-gray-200 hover:border-gray-400 hover:bg-gray-50 transition-all text-left"
-        >
-          <div>
-            <p className="text-sm font-semibold text-gray-900">Purchase Order</p>
-            <p className="text-xs text-gray-400 mt-0.5">Supplier invoice with a PO</p>
-          </div>
-          <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-          </svg>
-        </button>
-        <button
-          onClick={async () => {
-            setMode("search-wo");
-            await loadWOs();
-          }}
-          className="w-full flex items-center justify-between px-4 py-3.5 rounded-xl border border-gray-200 hover:border-gray-400 hover:bg-gray-50 transition-all text-left"
-        >
-          <div>
-            <p className="text-sm font-semibold text-gray-900">Work Order</p>
-            <p className="text-xs text-gray-400 mt-0.5">ANS kitting or production invoice</p>
-          </div>
-          <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-          </svg>
-        </button>
-        <button
-          onClick={() => linkOrder("none")}
-          disabled={saving}
-          className="w-full flex items-center justify-between px-4 py-3.5 rounded-xl border border-gray-200 hover:border-gray-400 hover:bg-gray-50 transition-all text-left disabled:opacity-50"
-        >
-          <div>
-            <p className="text-sm font-semibold text-gray-900">No order</p>
-            <p className="text-xs text-gray-400 mt-0.5">Credit card or direct purchase — no PO or WO</p>
-          </div>
-          <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-          </svg>
-        </button>
+      <div className="flex flex-wrap gap-2">
+        {invoiceRows.map(renderPill)}
       </div>
-      {error && <p className="text-xs text-red-500 mt-2">{error}</p>}
+      {extraRows.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-stone-100">
+          <p className="text-[10px] text-stone-400 mb-2">
+            In receipts but not on this invoice:
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {extraRows.map((row) => (
+              <div
+                key={row.skuName}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-full border border-stone-200 bg-stone-50 text-[11px] text-stone-500"
+              >
+                {row.skuName}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-// --- Receipts Panel ---
+// ── Invoice Card ──────────────────────────────────────────────────────────────
 
-function ReceiptsPanel({
-  receipts,
-  invoiceId,
-  order,
-  onRefresh,
+function InvoiceCard({ data }: { data: MatchPayload["invoice"] }) {
+  const [showAll, setShowAll] = useState(false);
+  const displayLines = showAll ? data.lines : data.lines.slice(0, 3);
+
+  const hasBreakdown = data.freight > 0 || data.tax > 0;
+
+  return (
+    <div className="flex flex-col bg-white rounded-xl border-2 border-stone-200 overflow-hidden h-full">
+      {/* Header */}
+      <div className="px-5 pt-5 pb-4 border-b border-stone-100">
+        <div className="flex items-start justify-between mb-3">
+          <span className="text-[10px] font-semibold tracking-widest text-stone-400 uppercase">Invoice</span>
+          <div className="flex items-center gap-1.5">
+            <StatusBadge status={data.matchStatus} />
+            <StatusBadge status={data.paymentStatus} type="payment" />
+          </div>
+        </div>
+        <p className="text-base font-semibold text-stone-900 mb-1">{data.invoiceNumber}</p>
+        <div className="space-y-0.5 text-xs text-stone-500">
+          <p><span className="text-stone-400">Supplier</span> {data.supplier || "—"}</p>
+          <p><span className="text-stone-400">Date</span> {fmtDate(data.invoiceDate) || "—"}</p>
+          <p><span className="text-stone-400">Type</span> {data.invoiceType}</p>
+          {data.salesOrder && <p><span className="text-stone-400">Sales Order</span> {data.salesOrder}</p>}
+          {data.poReference && <p><span className="text-stone-400">PO Reference</span> {data.poReference}</p>}
+          {data.paymentTerms && <p><span className="text-stone-400">Terms</span> {data.paymentTerms}</p>}
+          {data.trackingNumber && <p><span className="text-stone-400">Tracking</span> {data.trackingNumber}</p>}
+          {data.shipTo && <p><span className="text-stone-400">Ship To</span> {data.shipTo}</p>}
+        </div>
+        {/* Amount breakdown */}
+        <div className="mt-3 pt-3 border-t border-stone-100">
+          {hasBreakdown ? (
+            <div className="space-y-0.5 text-xs">
+              <div className="flex justify-between text-stone-500">
+                <span>Subtotal</span><span>{fmt(data.subtotal)}</span>
+              </div>
+              {data.freight > 0 && (
+                <div className="flex justify-between text-stone-500">
+                  <span>Freight</span><span>{fmt(data.freight)}</span>
+                </div>
+              )}
+              {data.tax > 0 && (
+                <div className="flex justify-between text-stone-500">
+                  <span>Tax</span><span>{fmt(data.tax)}</span>
+                </div>
+              )}
+              <div className="flex justify-between font-semibold text-stone-800 pt-1 border-t border-stone-100">
+                <span>Total</span><span>{fmt(data.invoiceAmount)}</span>
+              </div>
+            </div>
+          ) : (
+            <div className="flex justify-between text-sm font-semibold text-stone-800">
+              <span>Total</span><span>{fmt(data.invoiceAmount)}</span>
+            </div>
+          )}
+        </div>
+        {data.notes && (
+          <p className="mt-2 text-[11px] text-stone-400 italic">{data.notes}</p>
+        )}
+      </div>
+
+      {/* Lines */}
+      <div className="px-5 py-4 flex-1">
+        <p className="text-[10px] font-semibold tracking-widest text-stone-400 uppercase mb-3">Line Items</p>
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-stone-400 text-[10px] border-b border-stone-100">
+              <th className="text-left pb-1.5 font-medium">SKU</th>
+              <th className="text-right pb-1.5 pl-4 font-medium">Qty</th>
+              <th className="text-right pb-1.5 pl-4 font-medium">Rate</th>
+              <th className="text-right pb-1.5 pl-4 font-medium">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            {displayLines.map((l) => (
+              <tr key={l.id} className="border-b border-stone-50 last:border-0">
+                <td className="py-1.5 text-stone-700 font-medium">
+                  {l.skuName || l.description || l.ansItemNumber || "—"}
+                  {l.description && l.skuName && (
+                    <span className="block text-[10px] text-stone-400 font-normal">{l.description}</span>
+                  )}
+                </td>
+                <td className="py-1.5 pl-4 text-stone-500 text-right">{l.qtyBilled}</td>
+                <td className="py-1.5 pl-4 text-stone-500 text-right">{fmt(l.unitCost)}</td>
+                <td className="py-1.5 pl-4 text-stone-700 font-medium text-right">{fmt(l.amount)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {data.lines.length > 3 && (
+          <button
+            onClick={() => setShowAll(!showAll)}
+            className="text-[11px] text-stone-400 hover:text-stone-600 mt-2"
+          >
+            {showAll ? "Show matched lines ↑" : `Show all ${data.lines.length} lines ↓`}
+          </button>
+        )}
+        <p className="text-[11px] text-stone-400 mt-3">
+          {data.lines.length} line{data.lines.length !== 1 ? "s" : ""} · {fmt(data.invoiceAmount)}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ── PO / WO Card ──────────────────────────────────────────────────────────────
+
+function SourceDocCard({
+  po,
+  wo,
+  invoiceSkuNames,
+  onLinkPO,
+  onUnlinkPO,
+  onLinkWO,
+  onUnlinkWO,
+  onExclude,
 }: {
-  receipts: MatchState["receipts"];
-  invoiceId: string;
-  order: MatchState["order"] | null;
-  onRefresh: () => void;
+  po: MatchPayload["po"];
+  wo: MatchPayload["wo"];
+  invoiceSkuNames: string[];
+  onLinkPO: () => void;
+  onUnlinkPO: () => void;
+  onLinkWO: () => void;
+  onUnlinkWO: () => void;
+  onExclude: () => void;
 }) {
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [saving, setSaving] = useState(false);
-  const [removingId, setRemovingId] = useState<string | null>(null);
-  const [error, setError] = useState("");
+  const [showPOSearch, setShowPOSearch] = useState(false);
+  const [showWOSearch, setShowWOSearch] = useState(false);
+  const [poResults, setPOResults] = useState<POSearchResult[]>([]);
+  const [woResults, setWOResults] = useState<WOSearchResult[]>([]);
+  const [poLoading, setPOLoading] = useState(false);
+  const [woLoading, setWOLoading] = useState(false);
+  const [poQuery, setPOQuery] = useState("");
+  const [woQuery, setWOQuery] = useState("");
+  const [showAllLines, setShowAllLines] = useState(false);
+  const [showAllPO, setShowAllPO] = useState(false);
+  const [showAllWO, setShowAllWO] = useState(false);
 
-  const confirmedReceipts = receipts.filter(r => r.confirmed);
-  const unconfirmedReceipts = receipts.filter(r => !r.confirmed);
+  const linked = !!(po || wo);
 
-  const toggleSelect = (id: string) => {
-    setSelected(prev => {
+  const openPOSearch = () => {
+    setShowWOSearch(false);
+    setShowAllPO(false);
+    setShowPOSearch(true);
+    setPOLoading(true);
+    fetch("/api/purchase-orders")
+      .then((r) => r.json())
+      .then((data: POSearchResult[]) => { setPOResults(data); setPOLoading(false); });
+  };
+
+  const openWOSearch = () => {
+    setShowPOSearch(false);
+    setShowAllWO(false);
+    setShowWOSearch(true);
+    setWOLoading(true);
+    fetch("/api/work-orders")
+      .then((r) => r.json())
+      .then((data: WOSearchResult[]) => { setWOResults(data); setWOLoading(false); });
+  };
+
+  // Filter by query text
+  const queryFilteredPO = poResults.filter((p) => {
+    if (!poQuery) return true;
+    const q = poQuery.toLowerCase();
+    return p.poNumber?.toLowerCase().includes(q) || p.skus?.some((s) => s.toLowerCase().includes(q));
+  });
+
+  const queryFilteredWO = woResults.filter((w) => {
+    if (!woQuery) return true;
+    const q = woQuery.toLowerCase();
+    return w.woNumber?.toLowerCase().includes(q) || w.outputSkus?.some((s) => s.toLowerCase().includes(q));
+  });
+
+  // Split into SKU-matched and all others
+  const matchesPOSku = (p: POSearchResult) =>
+    invoiceSkuNames.length === 0 || p.skus?.some((s) => invoiceSkuNames.includes(s));
+  const matchesWOSku = (w: WOSearchResult) =>
+    invoiceSkuNames.length === 0 || w.outputSkus?.some((s) => invoiceSkuNames.includes(s));
+
+  const filterPO = poQuery
+    ? queryFilteredPO
+    : showAllPO
+      ? queryFilteredPO
+      : queryFilteredPO.filter(matchesPOSku);
+
+  const filterWO = woQuery
+    ? queryFilteredWO
+    : showAllWO
+      ? queryFilteredWO
+      : queryFilteredWO.filter(matchesWOSku);
+
+  const hiddenPOCount = !poQuery && !showAllPO
+    ? queryFilteredPO.filter((p) => !matchesPOSku(p)).length
+    : 0;
+  const hiddenWOCount = !woQuery && !showAllWO
+    ? queryFilteredWO.filter((w) => !matchesWOSku(w)).length
+    : 0;
+
+  const handleSelectPO = (p: POSearchResult) => {
+    setShowPOSearch(false);
+    setPOQuery("");
+    onLinkPO();
+    // Pass selected PO back via closure captured in parent
+    (window as Window & { __pendingPoId?: string }).__pendingPoId = p.id;
+  };
+
+  const handleSelectWO = (w: WOSearchResult) => {
+    setShowWOSearch(false);
+    setWOQuery("");
+    (window as Window & { __pendingWoId?: string }).__pendingWoId = w.id;
+    onLinkWO();
+  };
+
+  const lines = po ? po.lines : wo ? wo.lines.filter((l) => l.lineType === "Output") : [];
+  const displayLines = showAllLines ? lines : lines.slice(0, 3);
+
+  return (
+    <div className={`flex flex-col bg-white rounded-xl border-2 overflow-hidden h-full ${
+      linked ? "border-emerald-300" : "border-amber-300"
+    }`}>
+      {/* Header */}
+      <div className="px-5 pt-5 pb-4 border-b border-stone-100">
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-[10px] font-semibold tracking-widest text-stone-400 uppercase">
+            {wo ? "Work Order" : "Purchase Order"}
+          </span>
+          {linked && (
+            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">
+              {po?.poNumber || wo?.woNumber}
+            </span>
+          )}
+        </div>
+
+        {po && (
+          <div className="space-y-0.5 text-xs text-stone-500">
+            <p className="text-base font-semibold text-stone-900 mb-1">{po.poNumber}</p>
+            <p><span className="text-stone-400">Supplier</span> {po.supplier || "—"}</p>
+            <p><span className="text-stone-400">Status</span> {po.status}</p>
+            <button
+              onClick={onUnlinkPO}
+              className="mt-2 text-[11px] text-stone-400 hover:text-red-500 transition-colors"
+            >
+              Unlink PO
+            </button>
+          </div>
+        )}
+
+        {wo && (
+          <div className="space-y-0.5 text-xs text-stone-500">
+            <p className="text-base font-semibold text-stone-900 mb-1">{wo.woNumber}</p>
+            {wo.description && <p className="text-stone-500">{wo.description}</p>}
+            <p><span className="text-stone-400">Status</span> {wo.status}</p>
+            <button
+              onClick={onUnlinkWO}
+              className="mt-2 text-[11px] text-stone-400 hover:text-red-500 transition-colors"
+            >
+              Unlink Work Order
+            </button>
+          </div>
+        )}
+
+        {!linked && (
+          <div className="space-y-2">
+            <p className="text-sm text-stone-500">No source document linked. Find the PO or Work Order this invoice belongs to.</p>
+            <button
+              onClick={openPOSearch}
+              className="w-full py-1.5 px-3 text-xs font-medium bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-lg transition-colors"
+            >
+              Search Purchase Orders
+            </button>
+            <button
+              onClick={openWOSearch}
+              className="w-full py-1.5 px-3 text-xs font-medium bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-lg transition-colors"
+            >
+              Search Work Orders
+            </button>
+            <button
+              onClick={onExclude}
+              className="w-full py-1.5 px-3 text-xs font-medium text-stone-500 hover:text-stone-700 hover:bg-stone-50 border border-stone-200 rounded-lg transition-colors"
+            >
+              No source doc (exclude)
+            </button>
+          </div>
+        )}
+
+        {showPOSearch && (
+          <div className="mt-3 border border-stone-200 rounded-lg overflow-hidden bg-white shadow-sm">
+            <div className="p-3 border-b border-stone-200">
+              <input
+                autoFocus
+                type="text"
+                value={poQuery}
+                onChange={(e) => { setPOQuery(e.target.value); setShowAllPO(true); }}
+                placeholder="Search by PO number or SKU…"
+                className="w-full text-sm outline-none placeholder:text-stone-400"
+              />
+            </div>
+            {!poQuery && filterPO.length === 0 && !poLoading && (
+              <div className="px-3 py-2 text-[11px] text-stone-400">
+                No POs contain the invoice SKUs.
+              </div>
+            )}
+            <div className="max-h-52 overflow-y-auto">
+              {poLoading ? (
+                <div className="p-4 text-xs text-stone-400 text-center">Loading…</div>
+              ) : (
+                filterPO.slice(0, 20).map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => handleSelectPO(p)}
+                    className="w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-stone-50 border-b border-stone-100 last:border-0"
+                  >
+                    <div>
+                      <span className="text-xs font-semibold text-stone-800">{p.poNumber}</span>
+                      {p.skus?.length > 0 && (
+                        <span className="ml-2 text-[11px] text-stone-400">{p.skus.slice(0, 3).join(", ")}</span>
+                      )}
+                    </div>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-stone-100 text-stone-500">{p.status}</span>
+                  </button>
+                ))
+              )}
+            </div>
+            {hiddenPOCount > 0 && (
+              <div className="px-3 py-2 border-t border-stone-100">
+                <button
+                  onClick={() => setShowAllPO(true)}
+                  className="text-[11px] text-stone-400 hover:text-stone-600"
+                >
+                  Show {hiddenPOCount} more POs without matching SKUs
+                </button>
+              </div>
+            )}
+            <div className="p-2 border-t border-stone-100">
+              <button onClick={() => setShowPOSearch(false)} className="text-[11px] text-stone-400 hover:text-stone-600">
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {showWOSearch && (
+          <div className="mt-3 border border-stone-200 rounded-lg overflow-hidden bg-white shadow-sm">
+            <div className="p-3 border-b border-stone-200">
+              <input
+                autoFocus
+                type="text"
+                value={woQuery}
+                onChange={(e) => { setWOQuery(e.target.value); setShowAllWO(true); }}
+                placeholder="Search by WO number or SKU…"
+                className="w-full text-sm outline-none placeholder:text-stone-400"
+              />
+            </div>
+            {!woQuery && filterWO.length === 0 && !woLoading && (
+              <div className="px-3 py-2 text-[11px] text-stone-400">
+                No Work Orders contain the invoice SKUs.
+              </div>
+            )}
+            <div className="max-h-52 overflow-y-auto">
+              {woLoading ? (
+                <div className="p-4 text-xs text-stone-400 text-center">Loading…</div>
+              ) : (
+                filterWO.slice(0, 20).map((w) => (
+                  <button
+                    key={w.id}
+                    onClick={() => handleSelectWO(w)}
+                    className="w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-stone-50 border-b border-stone-100 last:border-0"
+                  >
+                    <div>
+                      <span className="text-xs font-semibold text-stone-800">{w.woNumber}</span>
+                      {w.outputSkus?.length > 0 && (
+                        <span className="ml-2 text-[11px] text-stone-400">{w.outputSkus.slice(0, 3).join(", ")}</span>
+                      )}
+                    </div>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-stone-100 text-stone-500">{w.status}</span>
+                  </button>
+                ))
+              )}
+            </div>
+            {hiddenWOCount > 0 && (
+              <div className="px-3 py-2 border-t border-stone-100">
+                <button
+                  onClick={() => setShowAllWO(true)}
+                  className="text-[11px] text-stone-400 hover:text-stone-600"
+                >
+                  Show {hiddenWOCount} more Work Orders without matching SKUs
+                </button>
+              </div>
+            )}
+            <div className="p-2 border-t border-stone-100">
+              <button onClick={() => setShowWOSearch(false)} className="text-[11px] text-stone-400 hover:text-stone-600">
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Lines */}
+      {linked && lines.length > 0 && (
+        <div className="px-5 py-4 flex-1">
+          <p className="text-[10px] font-semibold tracking-widest text-stone-400 uppercase mb-3">
+            {wo ? "Output Lines" : "Line Items"}
+          </p>
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-stone-400 text-[10px] border-b border-stone-100">
+                <th className="text-left pb-1.5 font-medium">SKU</th>
+                <th className="text-right pb-1.5 font-medium w-16">Qty</th>
+                <th className="text-right pb-1.5 font-medium w-14">Rate</th>
+              </tr>
+            </thead>
+            <tbody>
+              {displayLines.map((l) => {
+                if ("qtyOrdered" in l) {
+                  const pl = l as POLine;
+                  return (
+                    <tr key={pl.id} className="border-b border-stone-50 last:border-0">
+                      <td className="py-1.5 text-stone-700 font-medium">{pl.skuName || "—"}</td>
+                      <td className="py-1.5 text-stone-500 text-right">
+                        {pl.qtyOrdered} {pl.costBasis === "Per Carton" ? "ctn" : pl.costBasis === "Per Stick" ? "stk" : "ea"}
+                      </td>
+                      <td className="py-1.5 text-stone-500 text-right">{fmt(pl.unitCost)}</td>
+                    </tr>
+                  );
+                } else {
+                  const wl = l as WOLine;
+                  return (
+                    <tr key={wl.id} className="border-b border-stone-50 last:border-0">
+                      <td className="py-1.5 text-stone-700 font-medium">{wl.skuName || "—"}</td>
+                      <td className="py-1.5 text-stone-500 text-right">{wl.qty}</td>
+                      <td className="py-1.5 text-stone-400 text-right">—</td>
+                    </tr>
+                  );
+                }
+              })}
+            </tbody>
+          </table>
+          {lines.length > 3 && (
+            <button
+              onClick={() => setShowAllLines(!showAllLines)}
+              className="text-[11px] text-stone-400 hover:text-stone-600 mt-2"
+            >
+              {showAllLines ? "Show less ↑" : `Show all ${lines.length} lines ↓`}
+            </button>
+          )}
+          <p className="text-[11px] text-stone-400 mt-3">
+            {lines.length} line{lines.length !== 1 ? "s" : ""}
+            {po && lines.length > 0 ? ` · ${lines.length} matched` : ""}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Receipts Card ─────────────────────────────────────────────────────────────
+
+function ReceiptsCard({
+  receipts,
+  onSearchReceipts,
+}: {
+  receipts: Receipt[];
+  onSearchReceipts: () => void;
+}) {
+  const [expandedReceipts, setExpandedReceipts] = useState<Set<string>>(new Set());
+  const linked = receipts.length > 0;
+  const totalUnits = receipts.flatMap((r) => r.lines).reduce((sum, l) => sum + l.qtyReceived, 0);
+
+  const toggle = (id: string) => {
+    setExpandedReceipts((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
   };
 
-  const confirmSelected = async () => {
-    if (!selected.size) return;
-    setSaving(true);
-    setError("");
-    try {
-      const res = await fetch(`/api/match/${invoiceId}/receipts/confirm`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ receiptIds: [...selected] }),
-      });
-      if (!res.ok) {
-        const d = await res.json();
-        setError(d.error || "Failed to confirm");
-      } else {
-        setSelected(new Set());
-        onRefresh();
-      }
-    } finally {
-      setSaving(false);
-    }
-  };
+  return (
+    <div className={`flex flex-col bg-white rounded-xl border-2 overflow-hidden h-full ${
+      linked ? "border-emerald-300" : "border-amber-300"
+    }`}>
+      <div className="px-5 pt-5 pb-4 border-b border-stone-100">
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-[10px] font-semibold tracking-widest text-stone-400 uppercase">Receipts</span>
+          {linked && (
+            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">
+              {receipts.length} receipt{receipts.length !== 1 ? "s" : ""}
+            </span>
+          )}
+        </div>
+        {!linked && (
+          <div className="space-y-2">
+            <p className="text-sm text-stone-500">No receipts linked to this invoice.</p>
+            <button
+              onClick={onSearchReceipts}
+              className="w-full py-1.5 px-3 text-xs font-medium bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-lg transition-colors"
+            >
+              Search Receipts
+            </button>
+          </div>
+        )}
+      </div>
 
-  const removeReceipt = async (receiptId: string) => {
-    setRemovingId(receiptId);
-    setError("");
-    try {
-      const res = await fetch(`/api/match/${invoiceId}/receipts/confirm`, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ receiptId }),
-      });
-      if (!res.ok) {
-        const d = await res.json();
-        setError(d.error || "Failed to remove");
-      } else {
-        onRefresh();
-      }
-    } finally {
-      setRemovingId(null);
-    }
-  };
-
-  if (receipts.length === 0) {
-    return (
-      <div>
-        <h3 className="text-sm font-semibold text-gray-900 mb-4">Receipts</h3>
-        <div className="py-8 text-center">
-          <p className="text-sm text-gray-400">
-            {order ? `No receipts found for this ${order.type === "po" ? "PO" : "work order"}.` : "No open receipts."}
+      {linked && (
+        <div className="px-5 py-4 flex-1 space-y-4">
+          {receipts.map((r) => {
+            const expanded = expandedReceipts.has(r.id);
+            const displayLines = expanded ? r.lines : r.lines.slice(0, 2);
+            return (
+              <div key={r.id} className="border-b border-stone-100 pb-4 last:border-0 last:pb-0">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-semibold text-stone-700">{r.receiptNumber}</span>
+                  <span className="text-[11px] text-stone-400">{fmtDate(r.receivedDate)}</span>
+                </div>
+                <table className="w-full text-xs">
+                  <tbody>
+                    {displayLines.map((l) => (
+                      <tr key={l.id} className="border-b border-stone-50 last:border-0">
+                        <td className="py-1.5 text-stone-700">{l.skuName || "—"}</td>
+                        <td className="py-1.5 text-stone-500 text-right w-16">{l.qtyReceived}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {r.lines.length > 2 && (
+                  <button
+                    onClick={() => toggle(r.id)}
+                    className="text-[11px] text-stone-400 hover:text-stone-600 mt-1.5"
+                  >
+                    {expanded ? "Show less ↑" : `Show all ${r.lines.length} lines ↓`}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+          <p className="text-[11px] text-stone-400">
+            {receipts.length} receipt{receipts.length !== 1 ? "s" : ""} · {totalUnits.toLocaleString()} units total
           </p>
         </div>
-      </div>
-    );
-  }
-
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-semibold text-gray-900">Receipts</h3>
-        <p className="text-xs text-gray-500">
-          {confirmedReceipts.length} of {receipts.length} confirmed
-        </p>
-      </div>
-
-      {/* Unconfirmed */}
-      {unconfirmedReceipts.length > 0 && (
-        <div className="mb-5">
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 mb-2">Available</p>
-          <div className="space-y-1.5">
-            {unconfirmedReceipts.map(r => (
-              <label
-                key={r.id}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border cursor-pointer transition-colors
-                  ${selected.has(r.id) ? "border-gray-900 bg-gray-50" : "border-gray-200 hover:border-gray-300"}`}
-              >
-                <input
-                  type="checkbox"
-                  checked={selected.has(r.id)}
-                  onChange={() => toggleSelect(r.id)}
-                  className="w-4 h-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900"
-                />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-gray-900">{r.receiptNumber}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    {formatDate(r.receivedDate)}
-                    {r.warehouse ? ` · ${r.warehouse}` : ""}
-                  </p>
-                </div>
-              </label>
-            ))}
-          </div>
-          <button
-            onClick={confirmSelected}
-            disabled={saving || selected.size === 0}
-            className={`mt-3 w-full py-2.5 rounded-xl text-sm font-semibold transition-colors
-              ${selected.size > 0
-                ? "bg-gray-900 text-white hover:bg-gray-700"
-                : "bg-gray-100 text-gray-400 cursor-not-allowed"}`}
-          >
-            {saving
-              ? "Confirming…"
-              : selected.size > 0
-              ? `Confirm ${selected.size} Receipt${selected.size > 1 ? "s" : ""}`
-              : "Select receipts to confirm"}
-          </button>
-        </div>
       )}
-
-      {/* Confirmed */}
-      {confirmedReceipts.length > 0 && (
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 mb-2">Confirmed</p>
-          <div className="space-y-1.5">
-            {confirmedReceipts.map(r => (
-              <div key={r.id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-sage-200 bg-sage-50">
-                <span className="w-5 h-5 rounded-full bg-sage-100 flex items-center justify-center flex-shrink-0">
-                  <svg className="w-3 h-3 text-sage-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                  </svg>
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-gray-900">{r.receiptNumber}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    {formatDate(r.receivedDate)}
-                    {r.warehouse ? ` · ${r.warehouse}` : ""}
-                  </p>
-                </div>
-                <button
-                  onClick={() => removeReceipt(r.id)}
-                  disabled={removingId === r.id}
-                  className="text-gray-300 hover:text-red-400 transition-colors flex-shrink-0"
-                  title="Remove confirmation"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {error && <p className="text-xs text-red-500 mt-2">{error}</p>}
     </div>
   );
 }
 
-// --- Main Page ---
+// ── Receipt Search Modal ───────────────────────────────────────────────────────
 
-function MatchPageContent() {
-  const searchParams = useSearchParams();
-  const invoiceId = searchParams.get("invoiceId");
-
-  const [state, setState] = useState<MatchState | null>(null);
+function ReceiptSearchModal({
+  onSelect,
+  onCancel,
+}: {
+  onSelect: (r: ReceiptSearchResult) => void;
+  onCancel: () => void;
+}) {
+  const [results, setResults] = useState<ReceiptSearchResult[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeCard, setActiveCard] = useState<CardId>("invoice");
-  const [error, setError] = useState("");
+  const [query, setQuery] = useState("");
 
-  const loadState = useCallback(async () => {
-    if (!invoiceId) return;
+  useEffect(() => {
+    fetch("/api/receipts")
+      .then((r) => r.json())
+      .then((data: ReceiptSearchResult[]) => { setResults(data); setLoading(false); });
+  }, []);
+
+  const filtered = results.filter((r) => {
+    if (!query) return true;
+    const q = query.toLowerCase();
+    return (
+      r.receiptNumber?.toLowerCase().includes(q) ||
+      r.purchaseOrder?.toLowerCase().includes(q) ||
+      r.warehouse?.toLowerCase().includes(q)
+    );
+  });
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-6">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
+        <div className="px-5 py-4 border-b border-stone-200">
+          <p className="text-sm font-semibold text-stone-800 mb-3">Search Receipts</p>
+          <input
+            autoFocus
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search by receipt number, PO, or warehouse…"
+            className="w-full text-sm border border-stone-200 rounded-lg px-3 py-2 outline-none focus:border-stone-400 placeholder:text-stone-400"
+          />
+        </div>
+        <div className="max-h-72 overflow-y-auto">
+          {loading ? (
+            <div className="p-6 text-xs text-stone-400 text-center">Loading…</div>
+          ) : filtered.length === 0 ? (
+            <div className="p-6 text-xs text-stone-400 text-center">No receipts found</div>
+          ) : (
+            filtered.slice(0, 30).map((r) => (
+              <button
+                key={r.id}
+                onClick={() => onSelect(r)}
+                className="w-full flex items-center justify-between px-5 py-3 text-left hover:bg-stone-50 border-b border-stone-100 last:border-0"
+              >
+                <div>
+                  <span className="text-xs font-semibold text-stone-800">{r.receiptNumber}</span>
+                  {r.purchaseOrder && (
+                    <span className="ml-2 text-[11px] text-stone-400">{r.purchaseOrder}</span>
+                  )}
+                  {r.warehouse && !r.purchaseOrder && (
+                    <span className="ml-2 text-[11px] text-stone-400">{r.warehouse}</span>
+                  )}
+                </div>
+                <div className="text-right">
+                  <span className="text-[11px] text-stone-500">{fmtDate(r.receivedDate)}</span>
+                  <span className="ml-2 text-[10px] text-stone-400">{r.lines?.length ?? 0} lines</span>
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+        <div className="px-5 py-3 border-t border-stone-100 flex justify-end">
+          <button onClick={onCancel} className="text-xs text-stone-500 hover:text-stone-700">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Main Page ─────────────────────────────────────────────────────────────────
+
+export default function MatchPage() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
+  const from = searchParams.get("from") || "invoice";
+  const id = searchParams.get("id");
+
+  const [data, setData] = useState<MatchPayload | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [showReceiptSearch, setShowReceiptSearch] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    if (!id) return;
+    setLoading(true);
     try {
-      const res = await fetch(`/api/match/${invoiceId}`);
-      if (!res.ok) {
-        setError("Failed to load match state");
-        return;
-      }
-      const data: MatchState = await res.json();
-      setState(data);
-    } catch {
-      setError("Failed to load");
+      const res = await fetch(`/api/match?from=${from}&id=${id}`);
+      if (!res.ok) throw new Error(await res.text());
+      setData(await res.json());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load");
     } finally {
       setLoading(false);
     }
-  }, [invoiceId]);
+  }, [from, id]);
 
-  useEffect(() => { loadState(); }, [loadState]);
+  useEffect(() => { load(); }, [load]);
 
-  if (!invoiceId) {
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  const doAction = useCallback(async (body: Record<string, unknown>) => {
+    if (!id) return false;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/match?from=${from}&id=${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      await load();
+      return true;
+    } catch (e) {
+      showToast("Error: " + (e instanceof Error ? e.message : "unknown"));
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  }, [id, from, load]);
+
+  // PO/WO linking — the search dropdown sets a pending ID on window, then calls the action
+  const handleLinkPO = useCallback(async () => {
+    const poId = (window as Window & { __pendingPoId?: string }).__pendingPoId;
+    if (!poId) return;
+    delete (window as Window & { __pendingPoId?: string }).__pendingPoId;
+    const ok = await doAction({ action: "link-po", poId });
+    if (ok) showToast("PO linked");
+  }, [doAction]);
+
+  const handleLinkWO = useCallback(async () => {
+    const woId = (window as Window & { __pendingWoId?: string }).__pendingWoId;
+    if (!woId) return;
+    delete (window as Window & { __pendingWoId?: string }).__pendingWoId;
+    const ok = await doAction({ action: "link-wo", woId });
+    if (ok) showToast("Work Order linked");
+  }, [doAction]);
+
+  const handleSelectReceipt = async (r: ReceiptSearchResult) => {
+    setShowReceiptSearch(false);
+    // Receipt linking without PO/WO is a note for now — show toast explaining
+    showToast(`Receipt ${r.receiptNumber} selected — confirm match to link line-by-line`);
+    // TODO: stage the receipt and write line-level links on confirm
+  };
+
+  const handleConfirm = async () => {
+    const ok = await doAction({ action: "confirm" });
+    if (ok) { showToast("Match confirmed"); router.back(); }
+  };
+
+  const handleFlagDiscrepancy = async () => {
+    const ok = await doAction({ action: "flag-discrepancy" });
+    if (ok) showToast("Flagged as discrepancy");
+  };
+
+  const handleExclude = async () => {
+    if (!confirm("Mark as excluded (no source document)?")) return;
+    const ok = await doAction({ action: "exclude" });
+    if (ok) showToast("Marked as excluded");
+  };
+
+  // ── Render ──────────────────────────────────────────────────────────────────
+
+  if (!id) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <p className="text-gray-500">No invoice selected. Open Match from an invoice, PO, WO, or receipt.</p>
+      <div className="min-h-screen bg-stone-50 flex items-center justify-center">
+        <p className="text-stone-500 text-sm">No record specified. Use <code>?from=invoice&id=...</code></p>
       </div>
     );
   }
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="w-6 h-6 border-2 border-gray-200 border-t-gray-900 rounded-full animate-spin" />
+      <div className="min-h-screen bg-stone-50 flex items-center justify-center">
+        <div className="text-stone-400 text-sm animate-pulse">Loading…</div>
       </div>
     );
   }
 
-  if (error || !state) {
+  if (error || !data) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <p className="text-red-500">{error || "Something went wrong"}</p>
+      <div className="min-h-screen bg-stone-50 flex items-center justify-center">
+        <p className="text-red-500 text-sm">{error || "Something went wrong"}</p>
       </div>
     );
   }
 
-  const { invoice, order, noOrderConfirmed, receipts, summary } = state;
-
-  // Card summaries
-  const invoiceCardTitle = invoice.invoiceNumber || "Invoice";
-  const invoiceCardSub = invoice.supplier
-    ? `${invoice.supplier} · ${formatCurrency(invoice.invoiceAmount)}`
-    : formatCurrency(invoice.invoiceAmount);
-
-  const orderCardTitle = noOrderConfirmed
-    ? "No order"
-    : order
-    ? order.number
-    : "Not linked";
-  const orderCardSub = noOrderConfirmed
-    ? "Credit card / direct purchase"
-    : order
-    ? order.status
-    : "Link a PO, WO, or no order";
-
-  const receiptCardTitle = summary.totalReceipts > 0
-    ? `${summary.confirmedCount} of ${summary.totalReceipts} confirmed`
-    : "No receipts";
-  const receiptCardSub = summary.totalReceipts > 0
-    ? `${summary.totalReceipts} receipt${summary.totalReceipts !== 1 ? "s" : ""} available`
-    : order ? "No receipts for this order" : "Select to search receipts";
+  const hasSourceDoc = !!(data.po || data.wo);
+  const allGreen = hasSourceDoc && data.receipts.length > 0;
+  const hasDiscrepancy = data.checkStrip.some((r) => r.priceMatch === false || r.qtyMatch === false);
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-3xl mx-auto px-6 py-8">
-
-        {/* Back */}
-        <Link href="/invoices" className="inline-flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-600 mb-5">
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
-          </svg>
-          Invoices
-        </Link>
-
-        {/* Header */}
-        <div className="mb-6">
-          <h1 className="text-xl font-bold text-gray-900">Match Invoice</h1>
-          <p className="text-sm text-gray-500 mt-0.5">{invoice.invoiceNumber} · {invoice.supplier}</p>
+    <div className="min-h-screen bg-stone-100">
+      {/* Header */}
+      <div className="bg-white border-b border-stone-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => router.back()}
+            className="text-sm text-stone-500 hover:text-stone-800 flex items-center gap-1.5 transition-colors"
+          >
+            ← Back
+          </button>
+          <span className="text-stone-300">/</span>
+          <span className="text-sm font-semibold text-stone-800">
+            {data.invoice.invoiceNumber}
+          </span>
         </div>
-
-        {/* Progress bar */}
-        <ProgressBar linkedCount={summary.linkedCount} />
-
-        {/* 3 Selector Cards */}
-        <div className="flex gap-3 mb-4">
-          <SelectorCard
-            id="invoice"
-            active={activeCard === "invoice"}
-            linked={summary.invoiceLinked}
-            title={invoiceCardTitle}
-            subtitle={invoiceCardSub}
-            onClick={() => setActiveCard("invoice")}
-          />
-          <SelectorCard
-            id="order"
-            active={activeCard === "order"}
-            linked={summary.orderLinked}
-            title={orderCardTitle}
-            subtitle={orderCardSub}
-            onClick={() => setActiveCard("order")}
-          />
-          <SelectorCard
-            id="receipts"
-            active={activeCard === "receipts"}
-            linked={summary.receiptsConfirmed}
-            partial={summary.confirmedCount > 0 && !summary.receiptsConfirmed}
-            title={receiptCardTitle}
-            subtitle={receiptCardSub}
-            onClick={() => setActiveCard("receipts")}
-          />
+        <div className="flex items-center gap-4 text-xs text-stone-400">
+          <div className="flex items-center gap-1.5">
+            <span className={`w-2 h-2 rounded-full ${hasSourceDoc ? "bg-emerald-400" : "bg-amber-400"}`} />
+            {data.po ? "PO" : data.wo ? "WO" : "Source Doc"}
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className={`w-2 h-2 rounded-full ${data.receipts.length > 0 ? "bg-emerald-400" : "bg-amber-400"}`} />
+            Receipts
+          </div>
         </div>
-
-        {/* Detail Panel */}
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-          {activeCard === "invoice" && (
-            <InvoicePanel invoice={invoice} />
-          )}
-          {activeCard === "order" && (
-            <OrderPanel
-              order={order}
-              noOrderConfirmed={noOrderConfirmed}
-              invoiceId={invoiceId}
-              onRefresh={loadState}
-            />
-          )}
-          {activeCard === "receipts" && (
-            <ReceiptsPanel
-              receipts={receipts}
-              invoiceId={invoiceId}
-              order={order}
-              onRefresh={loadState}
-            />
-          )}
-        </div>
-
       </div>
+
+      {/* Cards */}
+      <div className="max-w-6xl mx-auto px-6 py-8">
+        <div className="grid grid-cols-3 gap-5 items-start">
+          <InvoiceCard data={data.invoice} />
+
+          <SourceDocCard
+            po={data.po}
+            wo={data.wo}
+            invoiceSkuNames={data.invoice.lines.map((l) => l.skuName).filter(Boolean) as string[]}
+            onLinkPO={handleLinkPO}
+            onUnlinkPO={() => doAction({ action: "unlink-po" }).then((ok) => ok && showToast("PO unlinked"))}
+            onLinkWO={handleLinkWO}
+            onUnlinkWO={() => doAction({ action: "unlink-wo" }).then((ok) => ok && showToast("WO unlinked"))}
+            onExclude={handleExclude}
+          />
+
+          <ReceiptsCard
+            receipts={data.receipts}
+            onSearchReceipts={() => setShowReceiptSearch(true)}
+          />
+        </div>
+
+        {/* Check Strip */}
+        {data.checkStrip.length > 0 && (
+          <div className="mt-5 bg-white rounded-xl border border-stone-200 overflow-hidden">
+            <CheckStrip rows={data.checkStrip} hasReceipts={data.receipts.length > 0} />
+          </div>
+        )}
+
+        {/* Action Bar */}
+        <div className="mt-4 flex items-center justify-between">
+          <div>
+            {hasDiscrepancy && (
+              <p className="text-xs text-amber-600 flex items-center gap-1.5">
+                ⚠ Discrepancy detected — review before confirming
+              </p>
+            )}
+          </div>
+          <div className="flex items-center gap-3">
+            {hasDiscrepancy && (
+              <button
+                onClick={handleFlagDiscrepancy}
+                disabled={saving}
+                className="px-4 py-2 text-xs font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg transition-colors disabled:opacity-50"
+              >
+                Flag Discrepancy
+              </button>
+            )}
+            <button
+              onClick={handleConfirm}
+              disabled={saving || !allGreen}
+              className="px-5 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              title={!allGreen ? "Link a source document and receipts before confirming" : undefined}
+            >
+              {saving ? "Saving…" : "Confirm Match"}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Receipt Search Modal */}
+      {showReceiptSearch && (
+        <ReceiptSearchModal
+          onSelect={handleSelectReceipt}
+          onCancel={() => setShowReceiptSearch(false)}
+        />
+      )}
+
+      {/* Toast */}
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-stone-800 text-white text-xs px-4 py-2.5 rounded-full shadow-lg z-50 pointer-events-none">
+          {toast}
+        </div>
+      )}
     </div>
-  );
-}
-
-export default function MatchPage() {
-  return (
-    <Suspense fallback={
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="w-6 h-6 border-2 border-gray-200 border-t-gray-900 rounded-full animate-spin" />
-      </div>
-    }>
-      <MatchPageContent />
-    </Suspense>
   );
 }

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireOperator } from "@/lib/auth";
 import {
   getRecord,
   getRecords,
@@ -149,8 +150,11 @@ export async function GET(
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  {
+ params }: { params: Promise<{ id: string }> }
 ) {
+  const authError = await requireOperator();
+  if (authError) return authError;
   const { id } = await params;
   const body = await request.json();
 
@@ -243,8 +247,11 @@ export async function PUT(
 
 export async function DELETE(
   _request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  {
+ params }: { params: Promise<{ id: string }> }
 ) {
+  const authError = await requireOperator();
+  if (authError) return authError;
   const { id } = await params;
 
   try {

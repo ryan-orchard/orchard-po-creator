@@ -25,6 +25,7 @@ export const TABLES = {
   INVENTORY_SNAPSHOTS: "tblXFUhjdVW7uGtK1",
   WORK_ORDERS: "tblEVzkLvd7Vfb5LB",
   WORK_ORDER_LINES: "tblFOVJ9GA479tcJZ",
+  EVENTS: "tblEu4yk9KnUXwIz6",
 };
 
 export interface AirtableRecord {

@@ -229,6 +229,9 @@ export async function PATCH(
     if ("workOrderId" in body) {
       updates["Work Orders"] = body.workOrderId ? [body.workOrderId] : [];
     }
+    if ("status" in body) {
+      updates["Status"] = body.status;
+    }
 
     if (Object.keys(updates).length === 0) {
       return NextResponse.json({ error: "No fields to update" }, { status: 400 });

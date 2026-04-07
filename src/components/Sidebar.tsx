@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
+import { useClerk } from "@clerk/nextjs";
 import { useEffect, useState } from "react";
 
 const NAV_SECTIONS = [
@@ -135,7 +136,7 @@ function DocumentIcon({ className }: { className?: string }) {
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const router = useRouter();
+  const { signOut } = useClerk();
   const [unmatchedReceiptCount, setUnmatchedReceiptCount] = useState<number | null>(null);
   const [unmatchedInvoiceCount, setUnmatchedInvoiceCount] = useState<number | null>(null);
 
@@ -236,10 +237,7 @@ export default function Sidebar() {
           Powered by <span className="font-semibold text-sidebar-text">Orchard</span>
         </p>
         <button
-          onClick={async () => {
-            await fetch("/api/auth/logout", { method: "POST" });
-            router.push("/login");
-          }}
+          onClick={() => signOut({ redirectUrl: "/login" })}
           className="text-[10px] text-sidebar-text-muted hover:text-sidebar-text-active transition-colors px-2"
           title="Sign out"
         >

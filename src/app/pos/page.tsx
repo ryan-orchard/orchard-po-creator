@@ -7,6 +7,7 @@ interface PO {
   id: string;
   poNumber: string;
   date: string;
+  deliveryDate: string;
   status: string;
   supplier: string[];
   grandTotal: number;
@@ -29,7 +30,7 @@ const statusColors: Record<string, string> = {
 
 type CardFilter = "open" | "Draft" | "Issued" | "Accepted" | null;
 
-type SortField = "poNumber" | "supplier" | "status" | "grandTotal" | "date";
+type SortField = "poNumber" | "supplier" | "status" | "grandTotal" | "date" | "deliveryDate";
 type SortDir = "asc" | "desc";
 
 export default function POListPage() {
@@ -111,9 +112,34 @@ export default function POListPage() {
       case "date":
         cmp = (a.date || "").localeCompare(b.date || "");
         break;
+      case "deliveryDate":
+        cmp = (a.deliveryDate || "").localeCompare(b.deliveryDate || "");
+        break;
     }
     return sortDir === "asc" ? cmp : -cmp;
   });
+
+  const exportCSV = () => {
+    const rows = [
+      ["PO #", "Supplier", "Status", "Total", "Date", "Delivery Date"],
+      ...sortedPOs.map((po) => [
+        po.poNumber,
+        po.supplier?.[0] ? suppliers[po.supplier[0]] || "" : "",
+        po.status,
+        po.grandTotal != null ? po.grandTotal.toFixed(2) : "",
+        po.date ? new Date(po.date + "T00:00:00").toLocaleDateString("en-US") : "",
+        po.deliveryDate ? new Date(po.deliveryDate + "T00:00:00").toLocaleDateString("en-US") : "",
+      ]),
+    ];
+    const csv = rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "purchase-orders.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const tabCounts = STATUS_TABS.reduce((acc, tab) => {
     acc[tab] = tab === "All" ? pos.length : pos.filter((p) => p.status === tab).length;
@@ -134,6 +160,14 @@ export default function POListPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            {!loading && sortedPOs.length > 0 && (
+              <button
+                onClick={exportCSV}
+                className="border border-gray-300 text-gray-700 px-4 py-2 text-sm rounded-md hover:bg-gray-50"
+              >
+                Export CSV
+              </button>
+            )}
             <button
               onClick={() => {}}
               className="border border-gray-300 text-gray-700 px-4 py-2 text-sm rounded-md hover:bg-gray-50"
@@ -244,6 +278,7 @@ export default function POListPage() {
                     { field: "status" as SortField, label: "Status", align: "text-left" },
                     { field: "grandTotal" as SortField, label: "Total", align: "text-right" },
                     { field: "date" as SortField, label: "Date", align: "text-left" },
+                    { field: "deliveryDate" as SortField, label: "Delivery Date", align: "text-left" },
                   ]).map((col) => (
                     <th
                       key={col.field}
@@ -287,6 +322,11 @@ export default function POListPage() {
                     <td className="px-4 py-3 text-gray-600">
                       {po.date
                         ? new Date(po.date + "T00:00:00").toLocaleDateString("en-US")
+                        : "—"}
+                    </td>
+                    <td className="px-4 py-3 text-gray-600">
+                      {po.deliveryDate
+                        ? new Date(po.deliveryDate + "T00:00:00").toLocaleDateString("en-US")
                         : "—"}
                     </td>
                     <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>

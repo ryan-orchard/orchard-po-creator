@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireOperator } from "@/lib/auth";
 import { getRecord, getRecords, updateRecord, TABLES } from "@/lib/airtable";
 import { logActivity } from "@/lib/activity-log";
 
@@ -23,8 +24,11 @@ import { logActivity } from "@/lib/activity-log";
  */
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  {
+ params }: { params: Promise<{ id: string }> }
 ) {
+  const authError = await requireOperator();
+  if (authError) return authError;
   try {
     const { id: invoiceId } = await params;
     const body = await request.json();

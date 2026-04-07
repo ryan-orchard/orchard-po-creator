@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireOperator } from "@/lib/auth";
 import {
   getRecords,
   createRecord,
@@ -49,6 +50,9 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const authError = await requireOperator();
+  if (authError) return authError;
+
   const body = await request.json();
 
   const woNumber = await generateNextNumber(TABLES.WORK_ORDERS, "WO Number", "WO");

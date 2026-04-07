@@ -1,6 +1,7 @@
 export const runtime = "nodejs";
 
 import { NextRequest, NextResponse } from "next/server";
+import { requireOperator } from "@/lib/auth";
 import { getRecords, TABLES } from "@/lib/airtable";
 import ansSkuMappingData from "@/../clients/magna/config/ans-sku-mapping.json";
 
@@ -328,6 +329,9 @@ function parseInvoiceText(allLines: string[]): ParsedInvoice {
 }
 
 export async function POST(request: NextRequest) {
+  const authError = await requireOperator();
+  if (authError) return authError;
+
   try {
     const formData = await request.formData();
     const file = formData.get("file") as File | null;

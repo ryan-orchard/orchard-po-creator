@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireOperator } from "@/lib/auth";
 import { getRecord, getRecords, updateRecord, TABLES } from "@/lib/airtable";
 
 /**
@@ -17,8 +18,11 @@ import { getRecord, getRecords, updateRecord, TABLES } from "@/lib/airtable";
  */
 export async function POST(
   _request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  {
+ params }: { params: Promise<{ id: string }> }
 ) {
+  const authError = await requireOperator();
+  if (authError) return authError;
   try {
     const { id } = await params;
     const invoice = await getRecord(TABLES.INVOICES, id);
@@ -48,8 +52,8 @@ export async function POST(
       let updatedCount = 0;
 
       for (const lr of lineRecords) {
-        // "Receipt Lines" is the linked record field on Invoice Lines → Receipt Lines
-        const receiptLineIds = lr.fields["Receipt Lines"] as string[] | undefined;
+        // "Receipt Line" is the linked record field on Invoice Lines → Receipt Lines
+        const receiptLineIds = lr.fields["Receipt Line"] as string[] | undefined;
         if (!receiptLineIds?.length) continue;
 
         const unitCost = (lr.fields["Unit Cost"] as number) || 0;

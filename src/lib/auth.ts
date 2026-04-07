@@ -1,12 +1,20 @@
-const AUTH_SALT = "orchard-auth-v1";
+import { auth } from "@clerk/nextjs/server";
+import { NextResponse } from "next/server";
 
-export async function computeAuthToken(password: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password + AUTH_SALT);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+export type UserRole = "operator" | "viewer";
+
+export async function getUserRole(): Promise<UserRole> {
+  const { sessionClaims } = await auth();
+  const role = (sessionClaims?.publicMetadata as { role?: string })?.role;
+  return role === "viewer" ? "viewer" : "operator";
 }
 
-export const AUTH_COOKIE_NAME = "auth_token";
-export const AUTH_COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
+// Returns a 403 response if the user is not an operator, null if OK.
+// Usage in API routes: const authError = await requireOperator(); if (authError) return authError;
+export async function requireOperator(): Promise<NextResponse | null> {
+  const role = await getUserRole();
+  if (role !== "operator") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  return null;
+}

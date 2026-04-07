@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireOperator } from "@/lib/auth";
 import * as XLSX from "xlsx";
 import { getRecords, TABLES } from "@/lib/airtable";
 import { SKU_MAPPING } from "@/lib/client-config";
@@ -48,6 +49,9 @@ interface ClassificationSummary {
 }
 
 export async function POST(request: NextRequest) {
+  const authError = await requireOperator();
+  if (authError) return authError;
+
   try {
     const formData = await request.formData();
     const file = formData.get("file") as File;

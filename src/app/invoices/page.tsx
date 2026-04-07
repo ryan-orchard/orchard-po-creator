@@ -675,7 +675,7 @@ function InvoiceRow({
         <td className="px-4 py-3 text-right">
           {activeTab === "needs-action" && (
             <Link
-              href={`/match?invoiceId=${invoice.id}`}
+              href={`/match?from=invoice&id=${invoice.id}`}
               onClick={(e) => e.stopPropagation()}
               className="text-xs text-gold-600 font-medium hover:text-gold-700"
             >
@@ -684,7 +684,7 @@ function InvoiceRow({
           )}
           {activeTab === "discrepancy" && (
             <Link
-              href={`/match?invoiceId=${invoice.id}`}
+              href={`/match?from=invoice&id=${invoice.id}`}
               onClick={(e) => e.stopPropagation()}
               className="text-xs text-warm-600 font-medium hover:text-warm-700"
             >

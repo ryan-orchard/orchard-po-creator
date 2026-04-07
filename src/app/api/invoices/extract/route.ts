@@ -1,6 +1,7 @@
 export const runtime = "nodejs";
 
 import { NextRequest, NextResponse } from "next/server";
+import { requireOperator } from "@/lib/auth";
 import Anthropic from "@anthropic-ai/sdk";
 import { getRecords, TABLES } from "@/lib/airtable";
 
@@ -43,6 +44,9 @@ For suggestedType:
 Use null for numeric fields not present on the invoice. All amounts should be numbers (no $ signs or commas).`;
 
 export async function POST(request: NextRequest) {
+  const authError = await requireOperator();
+  if (authError) return authError;
+
   try {
     const formData = await request.formData();
     const file = formData.get("file") as File | null;

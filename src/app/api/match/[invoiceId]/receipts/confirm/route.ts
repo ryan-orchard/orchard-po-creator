@@ -60,7 +60,18 @@ export async function POST(
       return receiptLink?.[0] && receiptIds.includes(receiptLink[0]);
     });
 
-    // Match receipt lines to invoice lines by SKU and write the link
+    // Build SKU → invoice line unit cost map for write-backs
+    const skuToUnitCost: Record<string, number> = {};
+    for (const il of invoiceLines) {
+      if (!il) continue;
+      const skuIds = il.fields["SKU"] as string[] | undefined;
+      const skuId = skuIds?.[0];
+      if (skuId) {
+        skuToUnitCost[skuId] = (il.fields["Unit Cost"] as number) || 0;
+      }
+    }
+
+    // Match receipt lines to invoice lines by SKU and write the link + cost fields
     let linesMatched = 0;
     const updates: Promise<unknown>[] = [];
 
@@ -77,12 +88,14 @@ export async function POST(
             "Receipt Line": [rl.id],
           })
         );
-        // Set Receipt Line Match Status = Matched
-        updates.push(
-          updateRecord(TABLES.RECEIPT_LINES, rl.id, {
-            "Status": "Matched",
-          })
-        );
+        // Set Receipt Line status + write confirmed cost
+        const unitCost = skuToUnitCost[skuId];
+        const receiptLineUpdate: Record<string, unknown> = { "Status": "Matched" };
+        if (unitCost && unitCost > 0) {
+          receiptLineUpdate["Supplier Unit Cost"] = unitCost;
+          receiptLineUpdate["Cost Source"] = "Invoiced";
+        }
+        updates.push(updateRecord(TABLES.RECEIPT_LINES, rl.id, receiptLineUpdate));
         linesMatched++;
       }
     }

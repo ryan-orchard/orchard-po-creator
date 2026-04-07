@@ -99,7 +99,7 @@ interface ValidationState {
 }
 
 function getValidationState(invoice: InvoiceDetail): ValidationState {
-  const matchHref = `/match?invoiceId=${invoice.id}`;
+  const matchHref = `/match?from=invoice&id=${invoice.id}`;
   const { invoiceType, matchStatus, purchaseOrder, receipts, linkedShipment, linkedWorkOrder } = invoice;
 
   if (invoiceType === "Supplier" || invoiceType === "Packaging") {
@@ -455,7 +455,7 @@ export default function InvoiceDetailPage() {
       sub: receiptCount > 0
         ? `${totalReceiptCartons.toLocaleString()} cartons received`
         : "Not linked",
-      href: receiptCount > 0 ? `/match?invoiceId=${invoice.id}` : null,
+      href: receiptCount > 0 ? `/match?from=invoice&id=${invoice.id}` : null,
       empty: receiptCount === 0,
     });
   } else if (invoice.invoiceType === "Freight" || invoice.invoiceType === "Customs") {
