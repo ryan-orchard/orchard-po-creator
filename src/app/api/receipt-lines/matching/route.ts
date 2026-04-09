@@ -326,7 +326,7 @@ export async function GET() {
       skuId: string | null;
       threePlSku: string | null;
       receiptQty: number;
-      status: "open" | "review" | "matched" | "excluded";
+      status: "open" | "linked" | "matched" | "excluded";
       reviewNote: string | null;
       suggestedMatch: SuggestedMatch | null;
       matchedPO: {
@@ -356,6 +356,8 @@ export async function GET() {
       const woLineItemLinks = rl.fields["Work Order Lines"] as string[] | undefined;
       const skuIds = rl.fields["SKU"] as string[] | undefined;
       const matchStatus = (rl.fields["Status"] as string) || "Open";
+      const sourceMatch = (rl.fields["Source Match"] as string) || null;
+      const invoiceMatch = (rl.fields["Invoice Match"] as string) || null;
 
       // Resolve SKU
       let skuId = skuIds?.[0] || null;
@@ -368,15 +370,16 @@ export async function GET() {
       const item = skuId ? itemMap[skuId] : null;
       const isPOMatched = !!(poLineItemLinks && poLineItemLinks.length > 0);
       const isWOMatched = !!(woLineItemLinks && woLineItemLinks.length > 0);
-      const isMatched = isPOMatched || isWOMatched;
+      const isSourceLinked = isPOMatched || isWOMatched || sourceMatch === "Linked";
+      const isInvoiceLinked = invoiceMatch === "Linked";
 
-      let status: "open" | "review" | "matched" | "excluded";
-      if (isMatched || matchStatus === "Matched") {
-        status = "matched";
-      } else if (matchStatus === "Excluded") {
+      let status: "open" | "linked" | "matched" | "excluded";
+      if (matchStatus === "Excluded") {
         status = "excluded";
-      } else if (matchStatus === "Review") {
-        status = "review";
+      } else if (isSourceLinked && isInvoiceLinked) {
+        status = "matched";
+      } else if (isSourceLinked) {
+        status = "linked";
       } else {
         status = "open";
       }
@@ -387,7 +390,7 @@ export async function GET() {
       let woOptions: WOOption[] = [];
       const reviewNote = (rl.fields["Review Notes"] as string) || null;
 
-      if ((status === "open" || status === "review") && skuId) {
+      if (status === "open" && skuId) {
         // --- PO options ---
         const relevantPOIds = new Set<string>();
         for (const poId of matchablePOIds) {
@@ -611,9 +614,9 @@ export async function GET() {
       });
     }
 
-    // Sort: open first, then review, then matched, then excluded
+    // Sort: open first, then linked, then matched, then excluded
     lines.sort((a, b) => {
-      const statusOrder = { open: 0, review: 1, matched: 2, excluded: 3 };
+      const statusOrder = { open: 0, linked: 1, matched: 2, excluded: 3 };
       if (statusOrder[a.status] !== statusOrder[b.status]) {
         return statusOrder[a.status] - statusOrder[b.status];
       }
@@ -622,7 +625,7 @@ export async function GET() {
 
     const counts = {
       open: lines.filter((l) => l.status === "open").length,
-      review: lines.filter((l) => l.status === "review").length,
+      linked: lines.filter((l) => l.status === "linked").length,
       matched: lines.filter((l) => l.status === "matched").length,
       excluded: lines.filter((l) => l.status === "excluded").length,
     };
