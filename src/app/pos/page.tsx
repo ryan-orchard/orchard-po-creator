@@ -40,7 +40,7 @@ export default function POListPage() {
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string>("All");
-  const [cardFilter, setCardFilter] = useState<CardFilter>(null);
+  const [cardFilter, setCardFilter] = useState<CardFilter>("open");
   const [sortField, setSortField] = useState<SortField>("date");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 

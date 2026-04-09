@@ -9,10 +9,15 @@ export async function GET() {
     getRecords(TABLES.PURCHASE_ORDERS),
   ]);
 
-  // Receipt lines not yet matched to a PO
+  // Receipt lines not yet linked to a PO or WO
   const unmatchedReceiptLines = allReceiptLines.filter((rl) => {
-    const status = rl.fields["Status"] as string | undefined;
-    return !status || status === "Open";
+    const status = (rl.fields["Status"] as string | undefined) || "";
+    if (status === "Excluded" || status === "Matched") return false;
+    const poLinks = rl.fields["PO Line Items"] as string[] | undefined;
+    const woLinks = rl.fields["Work Order Lines"] as string[] | undefined;
+    const sourceMatch = rl.fields["Source Match"] as string | undefined;
+    const hasLink = (poLinks && poLinks.length > 0) || (woLinks && woLinks.length > 0) || sourceMatch === "Linked";
+    return !hasLink;
   }).length;
 
   // Invoices not yet matched to a receipt (open or pending receipt, not paid)

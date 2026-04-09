@@ -139,7 +139,6 @@ export default function Sidebar() {
   const { signOut } = useClerk();
   const { user } = useUser();
   const [unmatchedReceiptCount, setUnmatchedReceiptCount] = useState<number | null>(null);
-  const [unmatchedInvoiceCount, setUnmatchedInvoiceCount] = useState<number | null>(null);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -147,10 +146,6 @@ export default function Sidebar() {
       fetch("/api/receipts/count")
         .then((r) => r.json())
         .then((d) => setUnmatchedReceiptCount(d.unmatched ?? null))
-        .catch(() => {});
-      fetch("/api/invoices/count")
-        .then((r) => r.json())
-        .then((d) => setUnmatchedInvoiceCount(d.unmatched ?? null))
         .catch(() => {});
     };
     fetchCounts();
@@ -186,8 +181,6 @@ export default function Sidebar() {
                 const staticBadge = "badge" in item ? (item.badge as number) : undefined;
                 const rawBadge = item.href === "/receipts"
                   ? (unmatchedReceiptCount ?? staticBadge)
-                  : item.href === "/invoices"
-                  ? (unmatchedInvoiceCount ?? staticBadge)
                   : staticBadge;
                 const badge = rawBadge && rawBadge > 0 ? rawBadge : undefined;
 
