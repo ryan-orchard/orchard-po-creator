@@ -13,7 +13,7 @@ export async function GET() {
   const unmatchedReceiptLines = allReceiptLines.filter((rl) => {
     const status = (rl.fields["Status"] as string | undefined) || "";
     if (status === "Excluded" || status === "Matched") return false;
-    const poLinks = rl.fields["PO Line Items"] as string[] | undefined;
+    const poLinks = rl.fields["PO Line Item"] as string[] | undefined;
     const woLinks = rl.fields["Work Order Lines"] as string[] | undefined;
     const sourceMatch = rl.fields["Source Match"] as string | undefined;
     const hasLink = (poLinks && poLinks.length > 0) || (woLinks && woLinks.length > 0) || sourceMatch === "Linked";
