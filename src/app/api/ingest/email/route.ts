@@ -18,7 +18,7 @@ export const maxDuration = 60; // Allow up to 60s for AI parsing
 
 interface PostmarkAttachment {
   Name: string;
-  Content: string; // base64
+  Content?: string; // base64 — may be absent for inline attachments or in test mode
   ContentType: string;
   ContentLength: number;
   ContentID?: string;
@@ -117,6 +117,33 @@ export async function POST(request: NextRequest) {
 
   for (const att of attachments) {
     try {
+      // Postmark may omit Content for inline attachments (those with ContentID)
+      // or in test mode. Log and create a placeholder document record.
+      if (!att.Content) {
+        console.warn(`Attachment ${att.Name} has no Content (ContentID: ${att.ContentID || "none"})`);
+
+        await db
+          .schema("orchard")
+          .from("ingested_documents")
+          .insert({
+            email_id: emailId,
+            filename: att.Name,
+            content_type: att.ContentType,
+            file_size_bytes: att.ContentLength,
+            document_type: "unknown",
+            confidence: 0,
+            parsed_data: { error: "No attachment content received from email provider" },
+            status: "pending",
+          });
+
+        results.push({
+          filename: att.Name,
+          documentType: "unknown",
+          status: "no_content",
+        });
+        continue;
+      }
+
       const attachment: IngestAttachment = {
         filename: att.Name,
         contentType: att.ContentType,
