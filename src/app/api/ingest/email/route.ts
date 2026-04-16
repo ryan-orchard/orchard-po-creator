@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/supabase";
+import { simpleParser } from "mailparser";
 import {
   classifyDocument,
   parseInvoicePdf,
@@ -18,7 +19,7 @@ export const maxDuration = 60; // Allow up to 60s for AI parsing
 
 interface PostmarkAttachment {
   Name: string;
-  Content?: string; // base64 — may be absent for inline attachments or in test mode
+  Content?: string; // base64 — may be absent for inline/ContentID attachments
   ContentType: string;
   ContentLength: number;
   ContentID?: string;
@@ -36,6 +37,25 @@ interface PostmarkInboundPayload {
   TextBody: string;
   HtmlBody: string;
   Attachments: PostmarkAttachment[];
+  RawEmail?: string; // Present when "Include raw email content" is checked
+}
+
+// ── Extract attachments from RawEmail MIME source ──────────────────
+
+async function extractAttachmentsFromRaw(
+  rawEmail: string
+): Promise<Map<string, string>> {
+  const result = new Map<string, string>(); // filename → base64 content
+  try {
+    const parsed = await simpleParser(rawEmail);
+    for (const att of parsed.attachments || []) {
+      const filename = att.filename || "unknown";
+      result.set(filename, att.content.toString("base64"));
+    }
+  } catch (err) {
+    console.error("Failed to parse RawEmail:", err);
+  }
+  return result;
 }
 
 // ── Webhook handler ────────────────────────────────────────────────
@@ -63,7 +83,7 @@ export async function POST(request: NextRequest) {
 
   // Determine client from recipient address
   const toAddress = payload.To?.toLowerCase() || "";
-  const clientId = toAddress.split("@")[0] || "unknown"; // magna@orchardinventory.com → magna
+  const clientId = toAddress.split("@")[0] || "unknown";
 
   // Idempotency: check MessageID
   const { data: existingEmail } = await db
@@ -85,7 +105,10 @@ export async function POST(request: NextRequest) {
     hasContent: !!a.Content,
     contentID: a.ContentID || null,
   }));
-  console.log(`Ingest email: ${payload.Subject} | Attachments: ${JSON.stringify(attachmentSummary)}`);
+  const hasRawEmail = !!payload.RawEmail;
+  console.log(
+    `Ingest email: "${payload.Subject}" | ${attachmentSummary.length} attachments | hasRawEmail: ${hasRawEmail} | details: ${JSON.stringify(attachmentSummary)}`
+  );
 
   // Store email record
   const { data: emailRecord, error: emailError } = await db
@@ -100,7 +123,7 @@ export async function POST(request: NextRequest) {
       subject: payload.Subject || null,
       received_at: payload.Date || new Date().toISOString(),
       status: "processing",
-      error_message: `attachments: ${JSON.stringify(attachmentSummary)}`,
+      error_message: `hasRawEmail: ${hasRawEmail} | attachments: ${JSON.stringify(attachmentSummary)}`,
     })
     .select("id")
     .single();
@@ -116,7 +139,6 @@ export async function POST(request: NextRequest) {
   // Process each attachment
   const attachments = payload.Attachments || [];
   if (attachments.length === 0) {
-    // No attachments — mark email as processed, nothing to do
     await db
       .schema("orchard")
       .from("ingested_emails")
@@ -126,12 +148,28 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ received: true, emailId, documents: [], note: "No attachments" });
   }
 
+  // If any attachment is missing Content, try extracting from RawEmail
+  const needsRawParse = attachments.some((a) => !a.Content);
+  let rawAttachments: Map<string, string> | null = null;
+  if (needsRawParse && payload.RawEmail) {
+    console.log("Extracting attachments from RawEmail MIME source...");
+    rawAttachments = await extractAttachmentsFromRaw(payload.RawEmail);
+    console.log(`Extracted ${rawAttachments.size} attachments from RawEmail: ${[...rawAttachments.keys()].join(", ")}`);
+  }
+
   for (const att of attachments) {
     try {
-      // Postmark may omit Content for inline attachments (those with ContentID)
-      // or in test mode. Log and create a placeholder document record.
-      if (!att.Content) {
-        console.warn(`Attachment ${att.Name} has no Content (ContentID: ${att.ContentID || "none"})`);
+      // Resolve content: prefer Postmark Content, fall back to RawEmail extraction
+      let content = att.Content;
+      if (!content && rawAttachments) {
+        content = rawAttachments.get(att.Name) || undefined;
+        if (content) {
+          console.log(`Recovered attachment ${att.Name} from RawEmail`);
+        }
+      }
+
+      if (!content) {
+        console.warn(`Attachment ${att.Name} has no content (ContentID: ${att.ContentID || "none"}, RawEmail: ${hasRawEmail})`);
 
         await db
           .schema("orchard")
@@ -143,7 +181,9 @@ export async function POST(request: NextRequest) {
             file_size_bytes: att.ContentLength,
             document_type: "unknown",
             confidence: 0,
-            parsed_data: { error: "No attachment content received from email provider" },
+            parsed_data: {
+              error: "No attachment content — enable 'Include raw email content' in Postmark or get account approved",
+            },
             status: "pending",
           });
 
@@ -158,7 +198,7 @@ export async function POST(request: NextRequest) {
       const attachment: IngestAttachment = {
         filename: att.Name,
         contentType: att.ContentType,
-        content: att.Content,
+        content,
         contentLength: att.ContentLength,
       };
 
@@ -258,7 +298,7 @@ export async function POST(request: NextRequest) {
   await db
     .schema("orchard")
     .from("ingested_emails")
-    .update({ status: "processed" })
+    .update({ status: "processed", error_message: null })
     .eq("id", emailId);
 
   console.log(`Processed email ${payload.MessageID}: ${results.length} documents`);
