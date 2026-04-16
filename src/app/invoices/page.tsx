@@ -480,15 +480,16 @@ export default function InvoicesPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200">
-                    <SortableHeader label="Invoice #" sortKey="invoiceNumber" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[13%]" />
-                    <SortableHeader label="Payment" sortKey="paymentStatus" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[9%]" />
-                    <SortableHeader label="Vendor" sortKey="supplier" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[16%]" />
+                    <SortableHeader label="Invoice #" sortKey="invoiceNumber" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[11%]" />
+                    <SortableHeader label="Payment" sortKey="paymentStatus" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[8%]" />
+                    <SortableHeader label="Vendor" sortKey="supplier" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[13%]" />
+                    <SortableHeader label="PO Ref" sortKey="poReference" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[9%]" />
                     <SortableHeader label="Date" sortKey="invoiceDate" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[8%]" />
-                    <SortableHeader label="Due" sortKey="dueDate" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[8%]" />
+                    <SortableHeader label="Due" sortKey="dueDate" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[7%]" />
                     <SortableHeader label="Amount" sortKey="invoiceAmount" currentKey={sortKey} dir={sortDir} onSort={handleSort} align="right" className="w-[10%]" />
-                    <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-[8%]">Price</th>
-                    <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-[8%]">Receipt</th>
-                    <th className="px-4 py-3 w-[8%]"></th>
+                    <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-[7%]">Price</th>
+                    <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-[7%]">Receipt</th>
+                    <th className="px-4 py-3 w-[7%]"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -613,7 +614,7 @@ function InvoiceRow({
           </div>
         </td>
 
-        {/* Payment Status — moved next to Invoice # */}
+        {/* Payment Status */}
         <td className="px-4 py-3">
           {invoice.paymentStatus ? (
             <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${paymentStatusColors[invoice.paymentStatus] || "bg-gray-100 text-gray-600"}`}>
@@ -627,6 +628,11 @@ function InvoiceRow({
         {/* Vendor */}
         <td className="px-4 py-3 text-sm text-gray-600">
           {invoice.supplier || <span className="text-gray-300">&mdash;</span>}
+        </td>
+
+        {/* PO Ref */}
+        <td className="px-4 py-3 text-sm text-gray-600">
+          {invoice.poReference || <span className="text-gray-300">&mdash;</span>}
         </td>
 
         {/* Date */}
@@ -675,16 +681,16 @@ function InvoiceRow({
         <td className="px-4 py-3 text-right">
           {activeTab === "needs-action" && (
             <Link
-              href={`/match?from=invoice&id=${invoice.id}`}
+              href={`/invoices/${invoice.id}`}
               onClick={(e) => e.stopPropagation()}
               className="text-xs text-gold-600 font-medium hover:text-gold-700"
             >
-              Match &rarr;
+              Review &rarr;
             </Link>
           )}
           {activeTab === "discrepancy" && (
             <Link
-              href={`/match?from=invoice&id=${invoice.id}`}
+              href={`/invoices/${invoice.id}`}
               onClick={(e) => e.stopPropagation()}
               className="text-xs text-warm-600 font-medium hover:text-warm-700"
             >

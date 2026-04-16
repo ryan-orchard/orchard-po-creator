@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, Fragment } from "react";
+import { useEffect, useState, Fragment, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 
@@ -94,12 +94,12 @@ interface CheckRow {
 interface ValidationState {
   priceCheck: CheckRow;
   linkedCheck: CheckRow;
-  cta: { label: string; href: string } | null;
+  showLinkPO: boolean;
+  showMarkMatched: boolean;
   showMarkReviewed: boolean;
 }
 
 function getValidationState(invoice: InvoiceDetail): ValidationState {
-  const matchHref = `/match?from=invoice&id=${invoice.id}`;
   const { invoiceType, matchStatus, purchaseOrder, receipts, linkedShipment, linkedWorkOrder } = invoice;
 
   if (invoiceType === "Supplier" || invoiceType === "Packaging") {
@@ -107,10 +107,6 @@ function getValidationState(invoice: InvoiceDetail): ValidationState {
     const priceOk = hasPO && matchStatus === "Matched";
     const priceFlag = hasPO && matchStatus === "Discrepancy";
     const linkedOk = receipts.length > 0;
-    let cta: { label: string; href: string } | null = null;
-    if (!hasPO) cta = { label: "Link to PO →", href: matchHref };
-    else if (priceFlag) cta = { label: "Resolve Discrepancy →", href: matchHref };
-    else if (!linkedOk) cta = { label: "Link to Receipt →", href: matchHref };
     return {
       priceCheck: {
         ok: priceOk,
@@ -128,9 +124,12 @@ function getValidationState(invoice: InvoiceDetail): ValidationState {
         flag: false,
         label: linkedOk
           ? `${receipts.length} receipt${receipts.length > 1 ? "s" : ""} linked`
-          : "No receipt linked",
+          : hasPO
+          ? "No receipts yet for this PO"
+          : "Link a PO to see receipts",
       },
-      cta,
+      showLinkPO: !hasPO,
+      showMarkMatched: hasPO && priceFlag,
       showMarkReviewed: false,
     };
   }
@@ -141,11 +140,8 @@ function getValidationState(invoice: InvoiceDetail): ValidationState {
     return {
       priceCheck: { ok: isReviewed, flag: false, label: isReviewed ? "Reviewed & approved" : "Awaiting user review" },
       linkedCheck: { ok: hasShipment, flag: false, label: hasShipment ? linkedShipment!.shipmentNumber : "No shipment linked" },
-      cta: !hasShipment
-        ? { label: "Link to Shipment →", href: matchHref }
-        : !isReviewed
-        ? { label: "Review & Approve →", href: matchHref }
-        : null,
+      showLinkPO: false,
+      showMarkMatched: false,
       showMarkReviewed: hasShipment && !isReviewed,
     };
   }
@@ -156,11 +152,8 @@ function getValidationState(invoice: InvoiceDetail): ValidationState {
     return {
       priceCheck: { ok: isReviewed, flag: false, label: isReviewed ? "Reviewed & approved" : "Awaiting user review" },
       linkedCheck: { ok: hasWO, flag: false, label: hasWO ? linkedWorkOrder!.woNumber : "No work order linked" },
-      cta: !hasWO
-        ? { label: "Link to Work Order →", href: matchHref }
-        : !isReviewed
-        ? { label: "Review & Approve →", href: matchHref }
-        : null,
+      showLinkPO: false,
+      showMarkMatched: false,
       showMarkReviewed: hasWO && !isReviewed,
     };
   }
@@ -168,7 +161,8 @@ function getValidationState(invoice: InvoiceDetail): ValidationState {
   return {
     priceCheck: { ok: false, flag: false, label: "N/A" },
     linkedCheck: { ok: false, flag: false, label: "N/A" },
-    cta: null,
+    showLinkPO: false,
+    showMarkMatched: false,
     showMarkReviewed: false,
   };
 }
@@ -380,20 +374,28 @@ export default function InvoiceDetailPage() {
   const [invoice, setInvoice] = useState<InvoiceDetail | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const fetchInvoice = async () => {
-      try {
-        const res = await fetch(`/api/invoices/${params.id}`);
-        if (!res.ok) throw new Error("Not found");
-        setInvoice(await res.json());
-      } catch {
-        router.push("/invoices");
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchInvoice();
+  // PO link form state
+  const [linkingPO, setLinkingPO] = useState(false);
+  const [poQuery, setPoQuery] = useState("");
+  const [poSearchResult, setPoSearchResult] = useState<{ id: string; poNumber: string } | null>(null);
+  const [poSearchError, setPoSearchError] = useState("");
+  const [poLinking, setPoLinking] = useState(false);
+
+  const fetchInvoice = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/invoices/${params.id}`);
+      if (!res.ok) throw new Error("Not found");
+      setInvoice(await res.json());
+    } catch {
+      router.push("/invoices");
+    } finally {
+      setLoading(false);
+    }
   }, [params.id, router]);
+
+  useEffect(() => {
+    fetchInvoice();
+  }, [fetchInvoice]);
 
   const patchStatus = async (body: Record<string, string>, optimistic: Partial<InvoiceDetail>) => {
     if (!invoice) return;
@@ -410,6 +412,46 @@ export default function InvoiceDetailPage() {
       setInvoice(prev);
     }
   };
+
+  const searchPO = useCallback(async () => {
+    const q = poQuery.trim();
+    if (!q) return;
+    setPoSearchError("");
+    setPoSearchResult(null);
+    const res = await fetch("/api/purchase-orders");
+    if (!res.ok) { setPoSearchError("Could not load POs."); return; }
+    const pos: { id: string; poNumber: string }[] = await res.json();
+    const found = pos.find((p) =>
+      p.poNumber.toLowerCase() === q.toLowerCase() ||
+      p.poNumber.toLowerCase() === `po-${q.toLowerCase()}`
+    );
+    if (found) {
+      setPoSearchResult(found);
+    } else {
+      setPoSearchError(`No PO found matching "${q}"`);
+    }
+  }, [poQuery]);
+
+  const confirmLinkPO = useCallback(async (poId: string) => {
+    if (!invoice) return;
+    setPoLinking(true);
+    try {
+      const res = await fetch(`/api/invoices/${invoice.id}/match`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pendingReceipt: true, poId }),
+      });
+      if (!res.ok) throw new Error();
+      await fetchInvoice();
+      setLinkingPO(false);
+      setPoQuery("");
+      setPoSearchResult(null);
+    } catch {
+      setPoSearchError("Failed to link PO. Please try again.");
+    } finally {
+      setPoLinking(false);
+    }
+  }, [invoice, fetchInvoice]);
 
   if (loading) {
     return (
@@ -451,11 +493,15 @@ export default function InvoiceDetailPage() {
       icon: "receipt",
       label: receiptCount > 0
         ? `${receiptCount} receipt${receiptCount > 1 ? "s" : ""}`
-        : "Receipt Match",
+        : "Receipts",
       sub: receiptCount > 0
         ? `${totalReceiptCartons.toLocaleString()} cartons received`
-        : "Not linked",
-      href: receiptCount > 0 ? `/match?from=invoice&id=${invoice.id}` : null,
+        : "Linked via PO",
+      href: receiptCount > 0 && invoice.purchaseOrder
+        ? `/pos/${invoice.purchaseOrder.id}`
+        : receiptCount > 0
+        ? `/receipts/${invoice.receipts[0].id}`
+        : null,
       empty: receiptCount === 0,
     });
   } else if (invoice.invoiceType === "Freight" || invoice.invoiceType === "Customs") {
@@ -510,11 +556,40 @@ export default function InvoiceDetailPage() {
           <div className="text-right">
             <p className="text-[11px] text-gray-400 uppercase tracking-wider mb-0.5">Invoice #</p>
             <h1 className="text-xl font-bold text-gray-900">{invoice.invoiceNumber}</h1>
-            {invoice.paymentStatus && (
-              <span className={`inline-block mt-1.5 text-xs font-semibold px-2.5 py-0.5 rounded-full ${paymentStatusColors[invoice.paymentStatus] || "bg-gray-100 text-gray-700"}`}>
-                {invoice.paymentStatus}
-              </span>
-            )}
+            <div className="flex items-center justify-end gap-2 mt-2">
+              {/* Status (match state) — editable pill */}
+              <div className="relative">
+                <select
+                  value={invoice.matchStatus}
+                  onChange={(e) => patchStatus({ matchStatus: e.target.value }, { matchStatus: e.target.value })}
+                  className={`appearance-none cursor-pointer text-xs font-semibold pl-2.5 pr-6 py-1 rounded-full border-0 focus:ring-0 focus:outline-none ${
+                    invoice.matchStatus === "Matched" ? "bg-sage-100 text-sage-700" :
+                    invoice.matchStatus === "Discrepancy" ? "bg-warm-100 text-warm-700" :
+                    "bg-gray-100 text-gray-600"
+                  }`}
+                >
+                  <option value="Open">Open</option>
+                  <option value="Matched">Matched</option>
+                  <option value="Discrepancy">Discrepancy</option>
+                </select>
+                <svg className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 text-current opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              </div>
+              {/* Payment Status — editable pill */}
+              <div className="relative">
+                <select
+                  value={invoice.paymentStatus}
+                  onChange={(e) => patchStatus({ paymentStatus: e.target.value }, { paymentStatus: e.target.value })}
+                  className={`appearance-none cursor-pointer text-xs font-semibold pl-2.5 pr-6 py-1 rounded-full border-0 focus:ring-0 focus:outline-none ${paymentStatusColors[invoice.paymentStatus] || "bg-gray-100 text-gray-600"}`}
+                >
+                  {PAYMENT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+                <svg className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 text-current opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -554,18 +629,75 @@ export default function InvoiceDetailPage() {
               </tbody>
             </table>
 
-            {(validation.cta || validation.showMarkReviewed) && (
+            {(validation.showLinkPO || validation.showMarkMatched || validation.showMarkReviewed) && (
               <div className="border-t border-gray-100 pt-4 space-y-3">
-                {validation.cta && (
+
+                {/* Inline PO link form */}
+                {validation.showLinkPO && (
                   <div>
-                    <Link
-                      href={validation.cta.href}
-                      className="inline-flex items-center gap-1.5 bg-gold-500 hover:bg-gold-600 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
-                    >
-                      {validation.cta.label}
-                    </Link>
+                    {!linkingPO ? (
+                      <button
+                        onClick={() => setLinkingPO(true)}
+                        className="inline-flex items-center gap-1.5 bg-gold-500 hover:bg-gold-600 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
+                      >
+                        Link to PO →
+                      </button>
+                    ) : (
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            placeholder="PO number (e.g. PO-26 or 26)"
+                            value={poQuery}
+                            onChange={(e) => { setPoQuery(e.target.value); setPoSearchResult(null); setPoSearchError(""); }}
+                            onKeyDown={(e) => { if (e.key === "Enter") searchPO(); }}
+                            className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 w-52 focus:outline-none focus:ring-2 focus:ring-gold-400"
+                            autoFocus
+                          />
+                          <button
+                            onClick={searchPO}
+                            className="text-sm font-semibold text-white bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded-lg transition-colors"
+                          >
+                            Find
+                          </button>
+                          <button
+                            onClick={() => { setLinkingPO(false); setPoQuery(""); setPoSearchResult(null); setPoSearchError(""); }}
+                            className="text-sm text-gray-500 hover:text-gray-700 px-2 py-1.5"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                        {poSearchError && (
+                          <p className="text-xs text-warm-600">{poSearchError}</p>
+                        )}
+                        {poSearchResult && (
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-gray-700">Found: <span className="font-semibold">{poSearchResult.poNumber}</span></span>
+                            <button
+                              onClick={() => confirmLinkPO(poSearchResult.id)}
+                              disabled={poLinking}
+                              className="text-sm font-semibold text-white bg-sage-600 hover:bg-sage-700 px-3 py-1 rounded-lg transition-colors disabled:opacity-50"
+                            >
+                              {poLinking ? "Linking…" : "Confirm"}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
+
+                {/* Mark as Matched (resolve discrepancy) */}
+                {validation.showMarkMatched && (
+                  <button
+                    onClick={() => patchStatus({ matchStatus: "Matched" }, { matchStatus: "Matched" })}
+                    className="inline-flex items-center gap-1.5 bg-gold-500 hover:bg-gold-600 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
+                  >
+                    Mark as Matched
+                  </button>
+                )}
+
+                {/* Mark as reviewed (freight/WO/customs) */}
                 {validation.showMarkReviewed && (
                   <button
                     onClick={() => patchStatus({ matchStatus: "Matched" }, { matchStatus: "Matched" })}
@@ -675,16 +807,6 @@ export default function InvoiceDetailPage() {
         <div className="bg-white border border-gray-200 rounded-xl p-5 mt-4">
           <p className="text-[10px] font-bold tracking-widest text-gray-400 uppercase mb-4">Accounting</p>
           <div className="flex gap-10">
-            <div>
-              <p className="text-[11px] text-gray-400 mb-1">Payment Status</p>
-              <select
-                value={invoice.paymentStatus}
-                onChange={(e) => patchStatus({ paymentStatus: e.target.value }, { paymentStatus: e.target.value })}
-                className="text-sm font-semibold text-gray-800 bg-transparent border-0 cursor-pointer p-0 pr-6 focus:outline-none focus:ring-0 appearance-none"
-              >
-                {PAYMENT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </div>
             <div>
               <p className="text-[11px] text-gray-400 mb-1">Classification</p>
               <select
