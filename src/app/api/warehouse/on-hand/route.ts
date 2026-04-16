@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { getRecords, TABLES } from "@/lib/airtable";
+import { db } from "@/lib/supabase";
 import { SKU_MAPPING } from "@/lib/client-config";
 
 import unitCostData from "@/../clients/magna/config/unit-costs-2026-02.json";
 
 const UNIT_COSTS: Record<string, number> = unitCostData as Record<string, number>;
 
-// Reverse mapping: standardSku → stordSku (for unit cost lookup)
+// Reverse mapping: standardSku → stordSku (for unit cost lookup by standard SKU)
 const STANDARD_TO_STORD: Record<string, string> = {};
 for (const [stordSku, mapping] of Object.entries(SKU_MAPPING)) {
   if (mapping?.standardSku) {
@@ -15,10 +15,6 @@ for (const [stordSku, mapping] of Object.entries(SKU_MAPPING)) {
 }
 
 const STORD_BASE_URL = "https://api-next.stord.com/v1";
-
-// Warehouse codes
-const WAREHOUSE_CODES = ["STORD", "ANS", "BMC"] as const;
-type WarehouseCode = (typeof WAREHOUSE_CODES)[number];
 
 interface StordFacilityBalance {
   sku: string;
@@ -75,7 +71,7 @@ export interface OnHandResponse {
   fetchedAt: string;
 }
 
-// --- Stord API fetch ---
+// --- Stord API fetch (unchanged) ---
 
 async function fetchStordInventory(
   apiKey: string,
@@ -114,10 +110,11 @@ async function fetchStordInventory(
 
 function mapStordToOnHand(
   balances: StordFacilityBalance[],
-  categoryByRecordId: Map<string, string>
+  categoryByStandardSku: Map<string, string>
 ): OnHandItem[] {
   return balances.map((b) => {
     const mapping = SKU_MAPPING[b.sku];
+    const standardSku = mapping?.standardSku || b.sku;
     const totalOnHand = parseInt(b.total_on_hand) || 0;
     const incoming = parseInt(b.incoming) || 0;
     const unitCost = UNIT_COSTS[b.sku] ?? null;
@@ -125,13 +122,10 @@ function mapStordToOnHand(
       unitCost !== null && totalOnHand > 0
         ? Math.round(unitCost * totalOnHand * 100) / 100
         : null;
-
-    const category = mapping?.airtableId
-      ? categoryByRecordId.get(mapping.airtableId) || null
-      : null;
+    const category = categoryByStandardSku.get(standardSku) ?? null;
 
     return {
-      standardSku: mapping?.standardSku || b.sku,
+      standardSku,
       stordSku: b.sku,
       category,
       productName: b.name,
@@ -144,102 +138,90 @@ function mapStordToOnHand(
   });
 }
 
-// --- ANS calculated from receipts + work orders ---
+// --- ANS calculated from Supabase receipts + work orders ---
 
 async function fetchANSInventory(
-  skuMap: Map<string, { standardSku: string; category: string }>
+  itemMap: Map<string, { sku: string; uom: string }>
 ): Promise<OnHandItem[]> {
-  // Find the ANS warehouse record ID
-  const warehouses = await getRecords(TABLES.WAREHOUSES, {
-    filterByFormula: '{Code} = "ANS"',
-  });
-  if (warehouses.length === 0) return [];
-  const ansWarehouseId = warehouses[0].id;
+  // Find ANS warehouse id
+  const { data: warehouse } = await db
+    .schema("org_config")
+    .from("warehouses")
+    .select("id")
+    .eq("code", "ANS")
+    .maybeSingle();
 
-  // Fetch receipts and work orders in parallel
-  const [receipts, allReceiptLines, allWOs, allWOLines] = await Promise.all([
-    getRecords(TABLES.RECEIPTS),
-    getRecords(TABLES.RECEIPT_LINES),
-    getRecords(TABLES.WORK_ORDERS),
-    getRecords(TABLES.WORK_ORDER_LINES),
+  if (!warehouse) return [];
+  const ansWarehouseId = warehouse.id as string;
+
+  // Fetch ANS receipts and work orders in parallel
+  const [receiptsResult, wosResult] = await Promise.all([
+    db.schema("orchard").from("receipts").select("id").eq("location_id", ansWarehouseId),
+    db
+      .schema("orchard")
+      .from("work_orders")
+      .select("id")
+      .eq("location_id", ansWarehouseId)
+      .eq("status", "Completed"),
   ]);
 
-  // --- Receipts: add received quantities ---
-  const ansReceiptIds = new Set(
-    receipts
-      .filter((r) => {
-        const whLinks = r.fields["Warehouses"] as string[] | undefined;
-        return whLinks?.includes(ansWarehouseId);
-      })
-      .map((r) => r.id)
-  );
+  const ansReceiptIds = (receiptsResult.data ?? []).map((r) => r.id as string);
+  const ansWOIds = (wosResult.data ?? []).map((wo) => wo.id as string);
 
-  const qtyBySkuId = new Map<string, number>();
+  const qtyByItemId = new Map<string, number>();
 
-  const ansLines = allReceiptLines.filter((rl) => {
-    const receiptLinks = rl.fields["Receipt"] as string[] | undefined;
-    return receiptLinks?.some((id) => ansReceiptIds.has(id));
-  });
+  // Add received quantities from ANS receipts
+  if (ansReceiptIds.length > 0) {
+    const { data: receiptLines } = await db
+      .schema("orchard")
+      .from("receipt_lines")
+      .select("item_id, qty_received")
+      .in("receipt_id", ansReceiptIds);
 
-  for (const line of ansLines) {
-    const skuLinks = line.fields["SKU"] as string[] | undefined;
-    const skuId = skuLinks?.[0];
-    if (!skuId) continue;
-    const qty = (line.fields["Qty Received"] as number) || 0;
-    qtyBySkuId.set(skuId, (qtyBySkuId.get(skuId) || 0) + qty);
+    for (const line of receiptLines ?? []) {
+      const itemId = line.item_id as string;
+      if (!itemId) continue;
+      const qty = Number(line.qty_received) || 0;
+      qtyByItemId.set(itemId, (qtyByItemId.get(itemId) || 0) + qty);
+    }
   }
 
-  // --- Work Orders: subtract inputs, add outputs for completed WOs at ANS ---
-  const completedANSWOIds = new Set(
-    allWOs
-      .filter((wo) => {
-        const locLinks = wo.fields["Location"] as string[] | undefined;
-        const status = wo.fields["Status"] as string;
-        return locLinks?.includes(ansWarehouseId) && status === "Completed";
-      })
-      .map((wo) => wo.id)
-  );
+  // Adjust for completed WOs at ANS: subtract inputs, add outputs
+  if (ansWOIds.length > 0) {
+    const { data: woLines } = await db
+      .schema("orchard")
+      .from("work_order_lines")
+      .select("item_id, qty, line_type")
+      .in("wo_id", ansWOIds);
 
-  if (completedANSWOIds.size > 0) {
-    const woLines = allWOLines.filter((wl) => {
-      const woLinks = wl.fields["Work Order"] as string[] | undefined;
-      return woLinks?.some((id) => completedANSWOIds.has(id));
-    });
-
-    for (const line of woLines) {
-      const skuLinks = line.fields["SKU"] as string[] | undefined;
-      const skuId = skuLinks?.[0];
-      if (!skuId) continue;
-      const qty = (line.fields["Quantity"] as number) || 0;
-      const lineType = line.fields["Line Type"] as string;
-
+    for (const line of woLines ?? []) {
+      const itemId = line.item_id as string;
+      if (!itemId) continue;
+      const qty = Number(line.qty) || 0;
+      const lineType = line.line_type as string;
       if (lineType === "Input") {
-        // Inputs consumed — subtract from inventory
-        qtyBySkuId.set(skuId, (qtyBySkuId.get(skuId) || 0) - qty);
+        qtyByItemId.set(itemId, (qtyByItemId.get(itemId) || 0) - qty);
       } else if (lineType === "Output") {
-        // Outputs produced — add to inventory
-        qtyBySkuId.set(skuId, (qtyBySkuId.get(skuId) || 0) + qty);
+        qtyByItemId.set(itemId, (qtyByItemId.get(itemId) || 0) + qty);
       }
     }
   }
 
-  // Convert to OnHandItem[] (skip SKUs with zero or negative qty)
+  // Convert to OnHandItem[]
   const items: OnHandItem[] = [];
-  for (const [skuId, qty] of qtyBySkuId) {
+  for (const [itemId, qty] of qtyByItemId) {
     if (qty <= 0) continue;
-    const skuInfo = skuMap.get(skuId);
-    const standardSku = skuInfo?.standardSku || skuId;
+    const itemInfo = itemMap.get(itemId);
+    const standardSku = itemInfo?.sku || itemId;
     const stordSku = STANDARD_TO_STORD[standardSku] || null;
     const unitCost = stordSku ? (UNIT_COSTS[stordSku] ?? null) : null;
     const extendedValue =
-      unitCost !== null && qty > 0
-        ? Math.round(unitCost * qty * 100) / 100
-        : null;
+      unitCost !== null && qty > 0 ? Math.round(unitCost * qty * 100) / 100 : null;
 
     items.push({
       standardSku,
       stordSku,
-      category: skuInfo?.category || null,
+      category: null,
       productName: standardSku,
       warehouse: "ANS",
       totalOnHand: qty,
@@ -252,68 +234,7 @@ async function fetchANSInventory(
   return items;
 }
 
-// --- BMC from inventory snapshots ---
-
-async function fetchBMCInventory(
-  skuMap: Map<string, { standardSku: string; category: string }>
-): Promise<{ items: OnHandItem[]; snapshotDate: string | null }> {
-  // Find the BMC warehouse record ID
-  const warehouses = await getRecords(TABLES.WAREHOUSES, {
-    filterByFormula: '{Code} = "BMC"',
-  });
-  if (warehouses.length === 0) return { items: [], snapshotDate: null };
-  const bmcWarehouseId = warehouses[0].id;
-
-  // Get all snapshot records for BMC
-  const snapshots = await getRecords(TABLES.INVENTORY_SNAPSHOTS);
-  const bmcSnapshots = snapshots.filter((s) => {
-    const whLinks = s.fields["Warehouse"] as string[] | undefined;
-    return whLinks?.includes(bmcWarehouseId);
-  });
-
-  if (bmcSnapshots.length === 0) return { items: [], snapshotDate: null };
-
-  // Find the latest snapshot date
-  const snapshotDate = bmcSnapshots.reduce((latest, s) => {
-    const d = s.fields["Snapshot Date"] as string | undefined;
-    return d && d > (latest || "") ? d : latest;
-  }, null as string | null);
-
-  // Filter to only records from the latest date
-  const latestSnapshots = snapshotDate
-    ? bmcSnapshots.filter((s) => s.fields["Snapshot Date"] === snapshotDate)
-    : bmcSnapshots;
-
-  const items: OnHandItem[] = latestSnapshots.map((s) => {
-    const skuLinks = s.fields["SKU"] as string[] | undefined;
-    const skuId = skuLinks?.[0];
-    const qty = (s.fields["Qty On Hand"] as number) || 0;
-    const skuInfo = skuId ? skuMap.get(skuId) : undefined;
-    const standardSku = skuInfo?.standardSku || "Unknown";
-    const stordSku = STANDARD_TO_STORD[standardSku] || null;
-    const unitCost = stordSku ? (UNIT_COSTS[stordSku] ?? null) : null;
-    const extendedValue =
-      unitCost !== null && qty > 0
-        ? Math.round(unitCost * qty * 100) / 100
-        : null;
-
-    return {
-      standardSku,
-      stordSku,
-      category: skuInfo?.category || null,
-      productName: standardSku,
-      warehouse: "BMC",
-      totalOnHand: qty,
-      incoming: 0,
-      unitCost,
-      extendedValue,
-    };
-  });
-
-  return { items, snapshotDate };
-}
-
-// Server-side cache: 24 hours (Stord only — ANS/BMC always fresh from Airtable)
+// Server-side cache: 24 hours (Stord API only — ANS always fresh from Supabase)
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 let stordCachedItems: OnHandItem[] | null = null;
 let stordCachedAt = 0;
@@ -324,29 +245,26 @@ export async function GET(request: Request) {
   const warehouseFilter = (searchParams.get("warehouse") || "all").toUpperCase();
 
   try {
-    // Always fetch items master data (needed for all warehouses)
-    const allItems = await getRecords(TABLES.SKUS);
+    // Fetch all items from org_config
+    const { data: allItemsRaw } = await db
+      .schema("org_config")
+      .from("items")
+      .select("id, sku, uom");
 
-    // Build lookups
-    const categoryByRecordId = new Map<string, string>();
-    const skuMap = new Map<string, { standardSku: string; category: string }>();
-    for (const item of allItems) {
-      const category = (item.fields["Category"] as string) || "";
-      const standardSku = (item.fields["Standard SKU"] as string) || "";
-      categoryByRecordId.set(item.id, category);
-      skuMap.set(item.id, { standardSku, category });
-    }
+    const itemMap = new Map(
+      (allItemsRaw ?? []).map((i) => [i.id as string, { sku: i.sku as string, uom: i.uom as string }])
+    );
+    const categoryByStandardSku = new Map<string, string>(); // category not yet in Supabase items table
 
-    // Fetch data for requested warehouses
     const includeStord = warehouseFilter === "ALL" || warehouseFilter === "STORD";
     const includeANS = warehouseFilter === "ALL" || warehouseFilter === "ANS";
     const includeBMC = warehouseFilter === "ALL" || warehouseFilter === "BMC";
 
     let stordItems: OnHandItem[] = [];
     let ansItems: OnHandItem[] = [];
-    let bmcResult: { items: OnHandItem[]; snapshotDate: string | null } = { items: [], snapshotDate: null };
+    const bmcItems: OnHandItem[] = []; // BMC snapshot not yet migrated to Supabase
+    let bmcSnapshotDate: string | null = null;
 
-    // Parallel fetch for all requested warehouses
     const fetches: Promise<void>[] = [];
 
     if (includeStord) {
@@ -360,7 +278,7 @@ export async function GET(request: Request) {
         if (apiKey && orgId && networkId) {
           fetches.push(
             fetchStordInventory(apiKey, orgId, networkId).then((balances) => {
-              stordItems = mapStordToOnHand(balances, categoryByRecordId);
+              stordItems = mapStordToOnHand(balances, categoryByStandardSku);
               stordCachedItems = stordItems;
               stordCachedAt = Date.now();
             })
@@ -371,25 +289,16 @@ export async function GET(request: Request) {
 
     if (includeANS) {
       fetches.push(
-        fetchANSInventory(skuMap).then((items) => {
+        fetchANSInventory(itemMap).then((items) => {
           ansItems = items;
-        })
-      );
-    }
-
-    if (includeBMC) {
-      fetches.push(
-        fetchBMCInventory(skuMap).then((result) => {
-          bmcResult = result;
         })
       );
     }
 
     await Promise.all(fetches);
 
-    // Combine all items
-    const allOnHand = [...stordItems, ...ansItems, ...bmcResult.items].sort(
-      (a, b) => a.standardSku.localeCompare(b.standardSku)
+    const allOnHand = [...stordItems, ...ansItems, ...bmcItems].sort((a, b) =>
+      a.standardSku.localeCompare(b.standardSku)
     );
 
     const summary = {
@@ -399,7 +308,6 @@ export async function GET(request: Request) {
       totalIncoming: allOnHand.reduce((sum, i) => sum + i.incoming, 0),
     };
 
-    // Build warehouse info
     const warehouses: WarehouseInfo[] = [];
     if (includeStord) {
       warehouses.push({
@@ -424,10 +332,8 @@ export async function GET(request: Request) {
         code: "BMC",
         name: "BMC",
         sourceType: "snapshot",
-        sourceLabel: bmcResult.snapshotDate
-          ? `Snapshot from ${bmcResult.snapshotDate}`
-          : "No snapshot loaded",
-        asOf: bmcResult.snapshotDate,
+        sourceLabel: bmcSnapshotDate ? `Snapshot from ${bmcSnapshotDate}` : "No snapshot loaded",
+        asOf: bmcSnapshotDate,
       });
     }
 
@@ -443,12 +349,7 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("On-hand inventory fetch error:", error);
     return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to fetch inventory",
-      },
+      { error: error instanceof Error ? error.message : "Failed to fetch inventory" },
       { status: 500 }
     );
   }

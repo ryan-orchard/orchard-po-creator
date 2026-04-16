@@ -1,4 +1,4 @@
-import { createRecord, TABLES } from "./airtable";
+import { db } from "./supabase";
 
 interface LogActivityParams {
   poId?: string;
@@ -11,33 +11,32 @@ interface LogActivityParams {
 }
 
 /**
- * Log an activity entry for a PO or WO. Fire-and-forget — errors are logged
+ * Log an event for a PO or WO. Fire-and-forget — errors are logged
  * but never block the calling API route.
  */
 export function logActivity(params: LogActivityParams): void {
-  const fields: Record<string, unknown> = {
-    Description: params.description,
-    Action: params.action,
-    Actor: params.actor,
-  };
+  const recordType = params.woId ? "wo" : "po";
+  const recordId = params.woId ?? params.poId;
 
-  if (params.poId) {
-    fields["Purchase Order"] = [params.poId];
-    fields["PO Record ID"] = params.poId;
+  if (!recordId) {
+    console.error("[activity-log] No poId or woId provided");
+    return;
   }
 
-  if (params.woId) {
-    fields["Work Orders"] = [params.woId];
-  }
-
-  if (params.relatedRecordType) {
-    fields["Related Record Type"] = params.relatedRecordType;
-  }
-  if (params.relatedRecordId) {
-    fields["Related Record ID"] = params.relatedRecordId;
-  }
-
-  createRecord(TABLES.ACTIVITY_LOG, fields).catch((err) => {
-    console.error("[activity-log] Failed to log activity:", err);
-  });
+  db.schema("orchard_calcs")
+    .from("events")
+    .insert({
+      record_type: recordType,
+      record_id: recordId,
+      event_type: params.action,
+      payload: {
+        description: params.description,
+        relatedRecordType: params.relatedRecordType ?? null,
+        relatedRecordId: params.relatedRecordId ?? null,
+      },
+      created_by: params.actor,
+    })
+    .then(({ error }) => {
+      if (error) console.error("[activity-log] Failed to log event:", error);
+    });
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getRecord, updateRecord, TABLES } from "@/lib/airtable";
+import { db } from "@/lib/supabase";
 import { logActivity } from "@/lib/activity-log";
 
 const VALID_STATUSES = ["Draft", "Issued", "In Progress", "Completed", "Cancelled"];
@@ -9,8 +9,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const body = await request.json();
-  const { status } = body;
+  const { status } = await request.json();
 
   if (!VALID_STATUSES.includes(status)) {
     return NextResponse.json(
@@ -20,18 +19,23 @@ export async function PATCH(
   }
 
   try {
-    const existing = await getRecord(TABLES.WORK_ORDERS, id);
-    const woNumber = existing.fields["WO Number"] as string;
-    const oldStatus = existing.fields["Status"] as string;
+    const { data: existing } = await db
+      .schema("orchard")
+      .from("work_orders")
+      .select("wo_number, status, completed_date")
+      .eq("id", id)
+      .single();
 
-    const fields: Record<string, unknown> = { Status: status };
+    const oldStatus = existing?.status ?? "";
+    const woNumber = existing?.wo_number ?? id;
 
-    // Auto-set Completed Date when marking complete
-    if (status === "Completed" && !existing.fields["Completion Date"]) {
-      fields["Completion Date"] = new Date().toISOString().split("T")[0];
+    const updates: Record<string, unknown> = { status };
+    if (status === "Completed" && !existing?.completed_date) {
+      updates.completed_date = new Date().toISOString().split("T")[0];
     }
 
-    await updateRecord(TABLES.WORK_ORDERS, id, fields);
+    const { error } = await db.schema("orchard").from("work_orders").update(updates).eq("id", id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
     logActivity({
       woId: id,
@@ -44,9 +48,6 @@ export async function PATCH(
 
     return NextResponse.json({ id, status });
   } catch {
-    return NextResponse.json(
-      { error: "Failed to update status" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to update status" }, { status: 500 });
   }
 }

@@ -1,15 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireOperator } from "@/lib/auth";
-import {
-  getRecord,
-  getRecords,
-  updateRecord,
-  deleteRecord,
-  deleteRecords,
-  createRecords,
-  fetchInBatches,
-  TABLES,
-} from "@/lib/airtable";
+import { db } from "@/lib/supabase";
 import { logActivity } from "@/lib/activity-log";
 
 export async function GET(
@@ -19,114 +10,113 @@ export async function GET(
   const { id } = await params;
 
   try {
-    const record = await getRecord(TABLES.WORK_ORDERS, id);
+    const [woResult, linesResult] = await Promise.all([
+      db.schema("orchard").from("work_orders").select("*").eq("id", id).single(),
+      db.schema("orchard").from("work_order_lines").select("*").eq("wo_id", id),
+    ]);
 
-    if (!record || !record.id) {
+    if (woResult.error || !woResult.data) {
       return NextResponse.json({ error: "Work Order not found" }, { status: 404 });
     }
 
-    // Fetch warehouse and all SKUs in parallel
-    const warehouseIds = (record.fields["Location"] as string[]) || [];
+    const wo = woResult.data as Record<string, unknown>;
+    const lines = linesResult.data ?? [];
 
-    const [warehouse, allSkus] = await Promise.all([
-      warehouseIds[0] ? getRecord(TABLES.WAREHOUSES, warehouseIds[0]) : null,
-      getRecords(TABLES.SKUS),
+    // Fetch item details and warehouse
+    const itemIds = [...new Set(lines.map((l) => l.item_id as string))];
+    const [itemsResult, warehouseResult] = await Promise.all([
+      itemIds.length
+        ? db.schema("org_config").from("items").select("id, sku, unit_of_measure, sticks_per_carton, metadata").in("id", itemIds)
+        : { data: [] },
+      db.schema("org_config").from("locations").select("id, name, code").eq("id", wo.location_id as string).single(),
     ]);
 
-    // Build SKU lookup map
-    const skuMap = new Map(allSkus.map((s) => [s.id, s]));
+    const itemMap = new Map((itemsResult.data ?? []).map((i) => [i.id, i]));
+    type Item = { id: string; sku: string; unit_of_measure: string; sticks_per_carton: number | null; metadata: Record<string, unknown> | null };
 
-    // Fetch line items in batches
-    const lineItemIds = (record.fields["Work Order Lines"] as string[]) || [];
-    const lineItems = await fetchInBatches(lineItemIds, (liId) =>
-      getRecord(TABLES.WORK_ORDER_LINES, liId)
-    );
-
-    // Map line items with SKU data
-    const lineItemsWithSkus = lineItems.map((li) => {
-      const skuIds = (li.fields["SKU"] as string[]) || [];
-      const sku = skuIds[0] ? skuMap.get(skuIds[0]) : null;
+    const lineItemsWithSkus = lines.map((l) => {
+      const item = itemMap.get(l.item_id as string) as Item | undefined;
       return {
-        id: li.id,
-        skuId: skuIds[0] || null,
-        sku: sku
+        id: l.id,
+        skuId: l.item_id,
+        sku: item
           ? {
-              standardSku: sku.fields["Standard SKU"] as string,
-              flavor: sku.fields["Flavor"] as string,
-              count: sku.fields["Sticks per Carton"] as number | null,
-              uom: sku.fields["UOM"] as string,
-              category: sku.fields["Category"] as string,
+              standardSku: item.sku,
+              flavor: item.metadata?.flavor ?? null,
+              count: item.sticks_per_carton,
+              uom: item.unit_of_measure,
+              category: item.metadata?.category ?? null,
             }
           : null,
-        lineType: li.fields["Line Type"] as string,
-        qty: li.fields["Quantity"] as number,
+        lineType: l.line_type,
+        qty: Number(l.qty),
       };
     });
 
-    // Separate into inputs and outputs
-    const inputs = lineItemsWithSkus.filter((li) => li.lineType === "Input");
-    const outputs = lineItemsWithSkus.filter((li) => li.lineType === "Output");
+    const inputs = lineItemsWithSkus.filter((l) => l.lineType === "Input");
+    const outputs = lineItemsWithSkus.filter((l) => l.lineType === "Output");
 
-    // Fetch linked shipments, receipts, invoices
-    const shipmentIds = (record.fields["Shipments"] as string[]) || [];
-    const receiptIds = (record.fields["Receipts"] as string[]) || [];
-    const invoiceIds = (record.fields["Invoices"] as string[]) || [];
+    // Fetch linked receipts via wo_receipt_links
+    const { data: woReceiptLinks } = await db
+      .schema("orchard_calcs")
+      .from("wo_receipt_links")
+      .select("receipt_id")
+      .eq("wo_id", id);
 
-    const [shipments, receipts, invoices] = await Promise.all([
-      fetchInBatches(shipmentIds, async (sId) => {
-        const s = await getRecord(TABLES.SHIPMENTS, sId);
-        return {
-          id: s.id,
-          shipmentNumber: s.fields["Shipment Number"] as string,
-          shipDate: (s.fields["Ship Date"] as string) || null,
-          status: (s.fields["Status"] as string) || null,
-        };
-      }),
-      fetchInBatches(receiptIds, async (rId) => {
-        const r = await getRecord(TABLES.RECEIPTS, rId);
-        return {
-          id: r.id,
-          receiptNumber: r.fields["Receipt Number"] as string,
-          receivedDate: (r.fields["Received Date"] as string) || null,
-          warehouse: ((r.fields["Code (from Warehouses)"] as string[]) || [])[0] || null,
-        };
-      }),
-      fetchInBatches(invoiceIds, async (iId) => {
-        const inv = await getRecord(TABLES.INVOICES, iId);
-        return {
-          id: inv.id,
-          invoiceNumber: inv.fields["Invoice Number"] as string,
-          invoiceDate: (inv.fields["Invoice Date"] as string) || null,
-          matchStatus: (inv.fields["Status"] as string) || null,
-          totalAmount: (inv.fields["Total Amount"] as number) || null,
-        };
-      }),
-    ]);
+    const receiptIds = (woReceiptLinks ?? []).map((l) => l.receipt_id as string);
+    let receipts: { id: string; receiptNumber: string; receivedDate: string | null; warehouse: string | null }[] = [];
+    if (receiptIds.length > 0) {
+      const { data: receiptData } = await db
+        .schema("orchard")
+        .from("receipts")
+        .select("id, receipt_number, received_date, location_id")
+        .in("id", receiptIds);
+      const locIds = [...new Set((receiptData ?? []).map((r) => r.location_id as string))];
+      const { data: locsData } = locIds.length
+        ? await db.schema("org_config").from("locations").select("id, code").in("id", locIds)
+        : { data: [] };
+      const locCodeMap = new Map((locsData ?? []).map((l) => [l.id, l.code]));
+      receipts = (receiptData ?? []).map((r) => ({
+        id: r.id,
+        receiptNumber: r.receipt_number,
+        receivedDate: r.received_date ?? null,
+        warehouse: locCodeMap.get(r.location_id) ?? null,
+      }));
+    }
+
+    // Fetch linked shipments (via wo_id FK)
+    const { data: shipmentsData } = await db
+      .schema("orchard")
+      .from("shipments")
+      .select("id, shipment_number, shipped_date, status")
+      .eq("wo_id", id);
+
+    const shipments = (shipmentsData ?? []).map((s) => ({
+      id: s.id,
+      shipmentNumber: s.shipment_number,
+      shipDate: s.shipped_date ?? null,
+      status: s.status ?? null,
+    }));
+
+    const warehouse = warehouseResult.data;
 
     return NextResponse.json({
-      id: record.id,
-      woNumber: record.fields["WO Number"] as string,
-      description: record.fields["Notes"] as string,
-      status: record.fields["Status"] as string,
-      issuedDate: record.fields["Issue Date"] as string,
-      completedDate: record.fields["Completion Date"] as string,
-      warehouseId: warehouseIds[0] || null,
-      warehouse: warehouse
-        ? {
-            id: warehouse.id,
-            name: warehouse.fields["Name"] as string,
-            code: warehouse.fields["Code"] as string,
-          }
-        : null,
+      id: wo.id,
+      woNumber: wo.wo_number,
+      description: wo.notes,
+      status: wo.status,
+      issuedDate: wo.issued_date,
+      completedDate: wo.completed_date,
+      warehouseId: wo.location_id,
+      warehouse: warehouse ? { id: warehouse.id, name: warehouse.name, code: warehouse.code } : null,
       inputs,
       outputs,
       lineItems: lineItemsWithSkus,
       shipments,
       receipts,
-      invoices,
+      invoices: [], // WO → invoice linking not yet in Silver layer
     });
   } catch (error) {
-    console.error("WO detail fetch error:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to load Work Order" },
       { status: 500 }
@@ -136,8 +126,7 @@ export async function GET(
 
 export async function PUT(
   request: NextRequest,
-  {
- params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const authError = await requireOperator();
   if (authError) return authError;
@@ -145,40 +134,31 @@ export async function PUT(
   const body = await request.json();
 
   try {
-    const existing = await getRecord(TABLES.WORK_ORDERS, id);
-    const woNumber = existing.fields["WO Number"] as string;
+    const { data: existing } = await db
+      .schema("orchard")
+      .from("work_orders")
+      .select("wo_number")
+      .eq("id", id)
+      .single();
+    const woNumber = existing?.wo_number ?? id;
 
-    // Update WO header
-    await updateRecord(TABLES.WORK_ORDERS, id, {
-      Notes: body.description || "",
-      Location: [body.warehouseId],
-      "Issue Date": body.issuedDate || null,
-    });
+    await db.schema("orchard").from("work_orders").update({
+      notes: body.description || null,
+      location_id: body.warehouseId,
+      issued_date: body.issuedDate || null,
+    }).eq("id", id);
 
-    // Delete existing line items
-    const existingLineItemIds =
-      (existing.fields["Work Order Lines"] as string[]) || [];
-    if (existingLineItemIds.length > 0) {
-      await deleteRecords(TABLES.WORK_ORDER_LINES, existingLineItemIds);
-    }
+    // Delete and recreate line items
+    await db.schema("orchard").from("work_order_lines").delete().eq("wo_id", id);
 
-    // Recreate line items
     if (body.lineItems && body.lineItems.length > 0) {
-      const lineItemRecords = body.lineItems.map(
-        (item: {
-          skuId: string;
-          lineType: "Input" | "Output";
-          qty: number;
-        }) => ({
-          fields: {
-            "Work Order": [id],
-            SKU: [item.skuId],
-            "Line Type": item.lineType,
-            Quantity: item.qty,
-          },
-        })
-      );
-      await createRecords(TABLES.WORK_ORDER_LINES, lineItemRecords);
+      const lineRows = (body.lineItems as { skuId: string; lineType: "Input" | "Output"; qty: number }[]).map((item) => ({
+        wo_id: id,
+        item_id: item.skuId,
+        line_type: item.lineType,
+        qty: item.qty,
+      }));
+      await db.schema("orchard").from("work_order_lines").insert(lineRows);
     }
 
     logActivity({
@@ -192,34 +172,22 @@ export async function PUT(
 
     return NextResponse.json({ id, woNumber });
   } catch {
-    return NextResponse.json(
-      { error: "Failed to update Work Order" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to update Work Order" }, { status: 500 });
   }
 }
 
 export async function DELETE(
   _request: NextRequest,
-  {
- params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const authError = await requireOperator();
   if (authError) return authError;
   const { id } = await params;
 
   try {
-    const record = await getRecord(TABLES.WORK_ORDERS, id);
-    const lineItemIds = (record.fields["Work Order Lines"] as string[]) || [];
-
-    // Delete line items first
-    if (lineItemIds.length > 0) {
-      await deleteRecords(TABLES.WORK_ORDER_LINES, lineItemIds);
-    }
-
-    // Delete the WO
-    await deleteRecord(TABLES.WORK_ORDERS, id);
-
+    // work_order_lines cascade via FK ON DELETE CASCADE
+    const { error } = await db.schema("orchard").from("work_orders").delete().eq("id", id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ success: true });
   } catch {
     return NextResponse.json({ error: "Failed to delete Work Order" }, { status: 500 });

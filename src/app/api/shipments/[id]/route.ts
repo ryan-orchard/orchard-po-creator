@@ -1,12 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireOperator } from "@/lib/auth";
-import {
-  getRecord,
-  getRecords,
-  updateRecord,
-  deleteRecord,
-  TABLES,
-} from "@/lib/airtable";
+import { db } from "@/lib/supabase";
 
 export async function GET(
   _request: NextRequest,
@@ -15,148 +9,111 @@ export async function GET(
   const { id } = await params;
 
   try {
-    const record = await getRecord(TABLES.SHIPMENTS, id);
+    const { data: shipment, error } = await db
+      .schema("orchard")
+      .from("shipments")
+      .select("*")
+      .eq("id", id)
+      .single();
 
-    if (!record || !record.id) {
+    if (error || !shipment) {
       return NextResponse.json({ error: "Shipment not found" }, { status: 404 });
     }
 
-    // Fetch PO details
-    const poIds = (record.fields["Purchase Order"] as string[]) || [];
-    const po = poIds[0]
-      ? await getRecord(TABLES.PURCHASE_ORDERS, poIds[0])
-      : null;
+    type Shipment = {
+      id: string; shipment_number: string; po_id: string | null; wo_id: string | null;
+      shipped_date: string | null; estimated_delivery: string | null; carrier: string | null;
+      carrier_reference: string | null; tracking_number: string | null; notes: string | null;
+      location_id: string | null; status: string;
+    };
+    const s = shipment as Shipment;
 
-    // Fetch ship-to from shipment (or fall back to PO)
-    const shipToIds = (record.fields["Ship To"] as string[]) || [];
-    let shipToId = shipToIds[0] || null;
-    // Fall back to PO's Ship To if shipment doesn't have one
-    if (!shipToId && po) {
-      const poShipToIds = (po.fields["Ship To"] as string[]) || [];
-      shipToId = poShipToIds[0] || null;
-    }
-    let shipTo = null;
-    if (shipToId) {
-      const shipToRecord = await getRecord(TABLES.SHIP_TO, shipToId);
-      shipTo = {
-        id: shipToRecord.id,
-        name: shipToRecord.fields["Name"] as string,
-        address: shipToRecord.fields["Address"] as string,
-        city: shipToRecord.fields["City"] as string,
-        state: shipToRecord.fields["State"] as string,
-        zip: shipToRecord.fields["Zip"] as string,
-      };
-    }
-
-    // Fetch shipment lines
-    const lineItemIds = (record.fields["Shipment Lines"] as string[]) || [];
-    const lineItems = await Promise.all(
-      lineItemIds.map((liId: string) =>
-        getRecord(TABLES.SHIPMENT_LINES, liId)
-      )
-    );
-
-    // Fetch SKU details for each line item
-    const lineItemsWithSkus = await Promise.all(
-      lineItems.map(async (li) => {
-        const skuIds = (li.fields["SKU"] as string[]) || [];
-        const sku = skuIds[0]
-          ? await getRecord(TABLES.SKUS, skuIds[0])
-          : null;
-        return {
-          id: li.id,
-          skuId: skuIds[0] || null,
-          sku: sku
-            ? {
-                standardSku: sku.fields["Standard SKU"] as string,
-                flavor: sku.fields["Flavor"] as string,
-                sticksPerCarton: sku.fields["Sticks per Carton"] as number | null,
-                category: sku.fields["Category"] as string,
-              }
-            : null,
-          qtyShipped: li.fields["Qty Shipped"] as number,
-        };
-      })
-    );
-
-    // Fetch supplier name from PO
-    let supplierName = null;
-    if (po) {
-      const supplierIds = (po.fields["Supplier"] as string[]) || [];
-      if (supplierIds[0]) {
-        const supplier = await getRecord(TABLES.SUPPLIERS, supplierIds[0]);
-        supplierName = supplier.fields["Supplier Name"] as string;
+    // Fetch PO details if linked
+    let poNumber: string | null = null;
+    let supplierName: string | null = null;
+    if (s.po_id) {
+      const { data: po } = await db
+        .schema("orchard")
+        .from("purchase_orders")
+        .select("po_number, supplier_id")
+        .eq("id", s.po_id)
+        .single();
+      if (po) {
+        poNumber = po.po_number;
+        if (po.supplier_id) {
+          const { data: supplier } = await db
+            .schema("org_config")
+            .from("suppliers")
+            .select("name")
+            .eq("id", po.supplier_id)
+            .single();
+          supplierName = supplier?.name ?? null;
+        }
       }
     }
 
+    // Fetch ship-to location — from shipment, or fall back to PO's location
+    let shipToId = s.location_id;
+    if (!shipToId && s.po_id) {
+      const { data: po } = await db
+        .schema("orchard")
+        .from("purchase_orders")
+        .select("location_id")
+        .eq("id", s.po_id)
+        .single();
+      shipToId = po?.location_id ?? null;
+    }
+
+    let shipTo = null;
+    if (shipToId) {
+      const { data: loc } = await db
+        .schema("org_config")
+        .from("locations")
+        .select("id, name")
+        .eq("id", shipToId)
+        .single();
+      if (loc) shipTo = { id: loc.id, name: loc.name, address: null, city: null, state: null, zip: null };
+    }
+
     // Fetch receipts linked to this shipment
-    const allReceipts = await getRecords(TABLES.RECEIPTS);
-    const linkedReceipts = allReceipts
-      .filter((r) => {
-        const ids = (r.fields["Shipment"] as string[] | undefined) || [];
-        return ids[0] === id;
-      })
-      .map((r) => ({
-        id: r.id,
-        receiptNumber: (r.fields["Receipt Number"] as string) || "",
-        receivedDate: (r.fields["Received Date"] as string) || "",
-      }));
+    const { data: receiptData } = await db
+      .schema("orchard")
+      .from("receipts")
+      .select("id, receipt_number, received_date")
+      .eq("shipment_id", id);
+
+    const receipts = (receiptData ?? []).map((r) => ({
+      id: r.id,
+      receiptNumber: r.receipt_number,
+      receivedDate: r.received_date ?? "",
+    }));
 
     return NextResponse.json({
-      id: record.id,
-      shipmentNumber: record.fields["Shipment Number"] as string,
-      purchaseOrderId: poIds[0] || null,
-      poNumber: po ? (po.fields["PO Number"] as string) : null,
+      id: s.id,
+      shipmentNumber: s.shipment_number,
+      purchaseOrderId: s.po_id,
+      poNumber,
       supplierName,
-      shipDate: record.fields["Ship Date"] as string,
-      expectedDeliveryDate: record.fields["Estimated Delivery"] as string,
-      carrier: record.fields["Carrier"] as string,
-      carrierReference: record.fields["Carrier Reference"] as string,
-      trackingNumber: record.fields["Tracking Number"] as string,
-      notes: record.fields["Notes"] as string,
+      shipDate: s.shipped_date,
+      expectedDeliveryDate: s.estimated_delivery,
+      carrier: s.carrier,
+      carrierReference: s.carrier_reference,
+      trackingNumber: s.tracking_number,
+      notes: s.notes,
       shipToId,
       shipTo,
-      status: record.fields["Status"] as string,
-      lineItems: lineItemsWithSkus,
-      receipts: linkedReceipts,
+      status: s.status,
+      lineItems: [], // shipment lines not in v1 schema
+      receipts,
     });
   } catch {
     return NextResponse.json({ error: "Shipment not found" }, { status: 404 });
   }
 }
 
-export async function DELETE(
-  _request: NextRequest,
-  {
- params }: { params: Promise<{ id: string }> }
-) {
-  const authError = await requireOperator();
-  if (authError) return authError;
-  const { id } = await params;
-
-  try {
-    // Get shipment to find its line items
-    const record = await getRecord(TABLES.SHIPMENTS, id);
-    const lineItemIds = (record.fields["Shipment Lines"] as string[]) || [];
-
-    // Delete line items first
-    for (const liId of lineItemIds) {
-      await deleteRecord(TABLES.SHIPMENT_LINES, liId);
-    }
-
-    // Delete the shipment
-    await deleteRecord(TABLES.SHIPMENTS, id);
-
-    return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ error: "Failed to delete shipment" }, { status: 500 });
-  }
-}
-
 export async function PUT(
   request: NextRequest,
-  {
- params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const authError = await requireOperator();
   if (authError) return authError;
@@ -164,20 +121,37 @@ export async function PUT(
   const body = await request.json();
 
   try {
-    await updateRecord(TABLES.SHIPMENTS, id, {
-      "Ship Date": body.shipDate,
-      "Estimated Delivery": body.expectedDeliveryDate || null,
-      Carrier: body.carrier || "",
-      "Carrier Reference": body.carrierReference || "",
-      "Tracking Number": body.trackingNumber || "",
-      ...(body.shipToId ? { "Ship To": [body.shipToId] } : {}),
-    });
+    const updates: Record<string, unknown> = {
+      shipped_date: body.shipDate || null,
+      estimated_delivery: body.expectedDeliveryDate || null,
+      carrier: body.carrier || null,
+      carrier_reference: body.carrierReference || null,
+      tracking_number: body.trackingNumber || null,
+    };
+    if (body.shipToId !== undefined) updates.location_id = body.shipToId || null;
+
+    const { error } = await db.schema("orchard").from("shipments").update(updates).eq("id", id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
     return NextResponse.json({ success: true });
   } catch {
-    return NextResponse.json(
-      { error: "Failed to update shipment" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to update shipment" }, { status: 500 });
+  }
+}
+
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const authError = await requireOperator();
+  if (authError) return authError;
+  const { id } = await params;
+
+  try {
+    const { error } = await db.schema("orchard").from("shipments").delete().eq("id", id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ success: true });
+  } catch {
+    return NextResponse.json({ error: "Failed to delete shipment" }, { status: 500 });
   }
 }

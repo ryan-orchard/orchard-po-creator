@@ -1,21 +1,14 @@
 import { NextResponse } from "next/server";
-import { getRecords, TABLES } from "@/lib/airtable";
+import { db } from "@/lib/supabase";
 
 export async function GET() {
-  const [openLines, blankLines, reviewLines] = await Promise.all([
-    getRecords(TABLES.RECEIPT_LINES, {
-      filterByFormula: `{Status} = "Open"`,
-    }),
-    getRecords(TABLES.RECEIPT_LINES, {
-      filterByFormula: `{Status} = BLANK()`,
-    }),
-    getRecords(TABLES.RECEIPT_LINES, {
-      filterByFormula: `{Status} = "Review"`,
-    }),
+  const [openResult, reviewResult] = await Promise.all([
+    db.schema("orchard").from("receipt_lines").select("id", { count: "exact", head: true }).eq("status", "Open"),
+    db.schema("orchard").from("receipt_lines").select("id", { count: "exact", head: true }).eq("status", "Review"),
   ]);
 
   return NextResponse.json({
-    unmatched: openLines.length + blankLines.length,
-    review: reviewLines.length,
+    unmatched: openResult.count ?? 0,
+    review: reviewResult.count ?? 0,
   });
 }

@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getRecord, getRecords, TABLES } from "@/lib/airtable";
+import { db } from "@/lib/supabase";
 import { SKU_MAPPING } from "@/lib/client-config";
 import { attemptPOMatch } from "@/lib/po-matching";
 
 /**
  * GET /api/receipts/[id]/suggest-po
  *
- * Returns the receipt details, a suggested PO match, and comparison data
- * for the matching UI. Also accepts ?poId=xxx to get comparison for a specific PO.
+ * Returns receipt details, a suggested PO match, and comparison data
+ * for the matching UI. Accepts ?poId=xxx to compare a specific PO.
  */
 export async function GET(
   request: NextRequest,
@@ -18,149 +18,174 @@ export async function GET(
     const { searchParams } = new URL(request.url);
     const specificPoId = searchParams.get("poId");
 
-    // 1. Fetch the receipt
-    const receipt = await getRecord(TABLES.RECEIPTS, receiptId);
-    if (!receipt) {
-      return NextResponse.json({ error: "Receipt not found" }, { status: 404 });
+    // Fetch receipt
+    const { data: receipt } = await db
+      .schema("orchard")
+      .from("receipts")
+      .select("id, receipt_number, received_date, external_id, location_id, po_id")
+      .eq("id", receiptId)
+      .maybeSingle();
+
+    if (!receipt) return NextResponse.json({ error: "Receipt not found" }, { status: 404 });
+
+    // Fetch receipt lines
+    const { data: receiptLinesRaw } = await db
+      .schema("orchard")
+      .from("receipt_lines")
+      .select("id, item_id, qty_received, three_pl_sku, lot_number, status")
+      .eq("receipt_id", receiptId);
+
+    // Fetch matchable POs (Issued, Accepted, Partially Received)
+    const { data: poStatusRows } = await db
+      .schema("orchard_calcs")
+      .from("po_statuses")
+      .select("po_id, status")
+      .in("status", ["Issued", "Accepted", "Partially Received"]);
+
+    const matchablePoIds = (poStatusRows ?? []).map((r) => r.po_id as string);
+
+    const { data: posRaw } = matchablePoIds.length > 0
+      ? await db.schema("orchard").from("purchase_orders").select("id, po_number").in("id", matchablePoIds)
+      : { data: [] };
+
+    // Fetch all po_lines for matchable POs
+    const { data: poLinesRaw } = matchablePoIds.length > 0
+      ? await db.schema("orchard").from("po_lines").select("id, po_id, item_id, qty").in("po_id", matchablePoIds)
+      : { data: [] };
+
+    // Fetch all items referenced
+    const allItemIds = [
+      ...new Set([
+        ...(receiptLinesRaw ?? []).map((rl) => rl.item_id as string).filter(Boolean),
+        ...(poLinesRaw ?? []).map((pl) => pl.item_id as string).filter(Boolean),
+      ]),
+    ];
+    const { data: itemsData } = allItemIds.length > 0
+      ? await db.schema("org_config").from("items").select("id, sku, uom").in("id", allItemIds)
+      : { data: [] };
+
+    const itemMap = new Map(
+      (itemsData ?? []).map((i) => [i.id as string, { sku: i.sku as string, uom: i.uom as string }])
+    );
+
+    // Build standardSku → item lookup (for 3PL SKU resolution)
+    const skuNameToItemId = new Map((itemsData ?? []).map((i) => [i.sku as string, i.id as string]));
+
+    // Get all PO line IDs to check existing receipt coverage
+    const allPoLineIds = (poLinesRaw ?? []).map((pl) => pl.id as string);
+    const { data: existingLinks } = allPoLineIds.length > 0
+      ? await db
+          .schema("orchard_calcs")
+          .from("po_line_receipt_line_links")
+          .select("po_line_id, receipt_line_id")
+          .in("po_line_id", allPoLineIds)
+      : { data: [] };
+
+    // Get receipt_lines for those links (to sum qty by po_line)
+    const linkedReceiptLineIds = (existingLinks ?? []).map((l) => l.receipt_line_id as string);
+    const { data: linkedReceiptLines } = linkedReceiptLineIds.length > 0
+      ? await db
+          .schema("orchard")
+          .from("receipt_lines")
+          .select("id, receipt_id, qty_received")
+          .in("id", linkedReceiptLineIds)
+      : { data: [] };
+
+    // Get which receipt_lines belong to THIS receipt (to exclude from "already received")
+    const thisReceiptLineIds = new Set(
+      (receiptLinesRaw ?? []).map((rl) => rl.id as string)
+    );
+
+    // Sum already-received qty per po_line (from OTHER receipts, not the current one)
+    const alreadyReceivedByPoLine = new Map<string, number>();
+    for (const link of existingLinks ?? []) {
+      const rl = (linkedReceiptLines ?? []).find((r) => r.id === link.receipt_line_id);
+      if (!rl || thisReceiptLineIds.has(rl.id as string)) continue;
+      const qty = Number(rl.qty_received) || 0;
+      alreadyReceivedByPoLine.set(
+        link.po_line_id as string,
+        (alreadyReceivedByPoLine.get(link.po_line_id as string) || 0) + qty
+      );
     }
 
-    // 2. Fetch all data in parallel (receipt lines, POs, PO line items, items, all receipts)
-    const [allReceiptLinesRaw, allPOs, allPOLineItems, allItems, allReceipts] = await Promise.all([
-      getRecords(TABLES.RECEIPT_LINES),
-      getRecords(TABLES.PURCHASE_ORDERS, {
-        sort: [{ field: "PO Number", direction: "desc" }],
-      }),
-      getRecords(TABLES.PO_LINE_ITEMS),
-      getRecords(TABLES.SKUS),
-      getRecords(TABLES.RECEIPTS),
-    ]);
+    // Which of THIS receipt's lines are already matched to a PO?
+    const matchedReceiptLineIds = new Set(
+      (existingLinks ?? [])
+        .map((l) => l.receipt_line_id as string)
+        .filter((id) => thisReceiptLineIds.has(id))
+    );
 
-    // Filter receipt lines for THIS receipt (linked record fields return record IDs in JS)
-    const thisReceiptLines = allReceiptLinesRaw.filter((rl) => {
-      const receiptIds = rl.fields["Receipt"] as string[] | undefined;
-      return receiptIds?.[0] === receiptId;
+    // Build receipt lines with resolved SKU
+    const receiptLines = (receiptLinesRaw ?? []).map((rl) => {
+      let itemId = rl.item_id as string | null;
+      const threePlSku = (rl.three_pl_sku as string) || null;
+
+      if (!itemId && threePlSku) {
+        const mapping = SKU_MAPPING[threePlSku];
+        if (mapping?.standardSku) itemId = skuNameToItemId.get(mapping.standardSku) ?? null;
+      }
+
+      const item = itemId ? itemMap.get(itemId) : null;
+      return {
+        id: rl.id as string,
+        skuId: itemId,
+        skuName: item?.sku ?? null,
+        uom: item?.uom ?? null,
+        qtyReceived: Number(rl.qty_received) || 0,
+        threePlSku,
+        lotNumber: (rl.lot_number as string) || null,
+        matched: matchedReceiptLineIds.has(rl.id as string),
+      };
     });
 
-    // Build item lookups
-    const itemMap: Record<string, { name: string; uom: string; sticksPerCarton: number | null }> = {};
-    for (const item of allItems) {
-      itemMap[item.id] = {
-        name: (item.fields["Standard SKU"] as string) || (item.fields["Name"] as string) || item.id,
-        uom: (item.fields["UOM"] as string) || "Each",
-        sticksPerCarton: (item.fields["Sticks per Carton"] as number) || null,
-      };
+    const unmatchedReceiptLines = receiptLines.filter((rl) => !rl.matched);
+
+    // PO candidates list
+    const poMap = new Map((posRaw ?? []).map((po) => [po.id as string, po.po_number as string]));
+    const poStatusMap = new Map((poStatusRows ?? []).map((r) => [r.po_id as string, r.status as string]));
+    type POLineRow = { id: unknown; po_id: unknown; item_id: unknown; qty: unknown };
+    const poLinesByPO = new Map<string, POLineRow[]>();
+    for (const pl of poLinesRaw ?? []) {
+      const key = pl.po_id as string;
+      if (!poLinesByPO.has(key)) poLinesByPO.set(key, []);
+      poLinesByPO.get(key)!.push(pl as POLineRow);
     }
 
-    // Build PO line items grouped by PO record ID (include record ID for line-level matching)
-    const poLinesByPO: Record<string, { id: string; skuId: string; qtySticks: number; qtyCartons: number | null }[]> = {};
-    for (const li of allPOLineItems) {
-      const poLinks = li.fields["Purchase Order"] as string[] | undefined;
-      const skuLinks = li.fields["SKU"] as string[] | undefined;
-      if (!poLinks?.[0] || !skuLinks?.[0]) continue;
-      const poId = poLinks[0];
-      if (!poLinesByPO[poId]) poLinesByPO[poId] = [];
-      poLinesByPO[poId].push({
-        id: li.id,
-        skuId: skuLinks[0],
-        qtySticks: (li.fields["Qty Sticks"] as number) || 0,
-        qtyCartons: (li.fields["Qty Cartons"] as number) || null,
-      });
-    }
+    const matchablePOs = (posRaw ?? []).map((po) => ({
+      id: po.id as string,
+      poNumber: po.po_number as string,
+      status: poStatusMap.get(po.id as string) ?? "",
+      lineItems: (poLinesByPO.get(po.id as string) ?? []).map((pl) => ({
+        id: pl.id as string,
+        skuId: pl.item_id as string,
+        qty: Number(pl.qty) || 0,
+      })),
+    }));
 
-    // Matchable POs (Issued or Partially Received)
-    const matchablePOs = allPOs
-      .filter((r) => {
-        const status = r.fields["Status"] as string;
-        return status === "Issued" || status === "Partially Received";
-      })
-      .map((r) => ({
-        id: r.id,
-        poNumber: r.fields["PO Number"] as string,
-        status: r.fields["Status"] as string,
-        lineItems: poLinesByPO[r.id] || [],
-      }));
-
-    // 4. Attempt auto-match using External Receipt ID
-    const externalReceiptId = (receipt.fields["External Receipt ID"] as string) || "";
+    // Auto-suggest from receipt external_id
+    const externalReceiptId = (receipt.external_id as string) || "";
     const suggestedMatch = attemptPOMatch(
       externalReceiptId,
       matchablePOs.map((po) => ({ id: po.id, poNumber: po.poNumber }))
     );
 
-    // 5. Build receipt line details (resolve SKU from 3PL SKU mapping if no direct link)
-    // Include "matched" flag for lines already linked to a PO Line Item
-    const receiptLines = thisReceiptLines.map((rl) => {
-      const skuIds = rl.fields["SKU"] as string[] | undefined;
-      let skuId = skuIds?.[0] || null;
-      const threePlSku = (rl.fields["3PL SKU"] as string) || null;
-      const poLineItemLink = rl.fields["PO Line Item"] as string[] | undefined;
-      const alreadyMatched = !!(poLineItemLink && poLineItemLink.length > 0);
-
-      // Fallback: resolve from 3PL SKU mapping if no direct SKU link
-      if (!skuId && threePlSku) {
-        const mapping = SKU_MAPPING[threePlSku];
-        if (mapping) skuId = mapping.airtableId;
-      }
-
-      const item = skuId ? itemMap[skuId] : null;
-      return {
-        id: rl.id,
-        skuId,
-        skuName: item?.name || null,
-        uom: item?.uom || null,
-        qtyReceived: (rl.fields["Qty Received"] as number) || 0,
-        threePlSku,
-        lotNumber: (rl.fields["Lot Number"] as string) || null,
-        matched: alreadyMatched,
-      };
-    });
-
-    // Only use unmatched lines for comparison and PO scoring
-    const unmatchedReceiptLines = receiptLines.filter((rl) => !rl.matched);
-
-    // 6. Build comparison data for the suggested PO (or specific PO if requested)
+    // Build comparison for the suggested or specified PO
     const comparisonPoId = specificPoId || suggestedMatch?.id;
     let comparison = null;
 
     if (comparisonPoId) {
       const po = matchablePOs.find((p) => p.id === comparisonPoId);
       if (po) {
-        // Get all OTHER receipts already matched to this PO (not including current one)
-        const otherReceiptIds = allReceipts
-          .filter((r) => {
-            const poIds = r.fields["Purchase Order"] as string[] | undefined;
-            return poIds?.[0] === comparisonPoId && r.id !== receiptId;
-          })
-          .map((r) => r.id);
-
-        // Get receipt lines for those other receipts
-        const otherReceiptLines = allReceiptLinesRaw.filter((rl) => {
-          const rlReceiptIds = rl.fields["Receipt"] as string[] | undefined;
-          return rlReceiptIds?.[0] && otherReceiptIds.includes(rlReceiptIds[0]);
-        });
-
-        // Aggregate already-received qty by SKU from other receipts
-        const alreadyReceivedBySku: Record<string, number> = {};
-        for (const rl of otherReceiptLines) {
-          const skuIds = rl.fields["SKU"] as string[] | undefined;
-          const skuId = skuIds?.[0];
-          if (skuId) {
-            alreadyReceivedBySku[skuId] = (alreadyReceivedBySku[skuId] || 0) + ((rl.fields["Qty Received"] as number) || 0);
-          }
-        }
-
-        // Build receipt qty lookup using UNMATCHED lines only
-        const receiptQtyBySku: Record<string, number> = {};
-        const receiptLineIdBySku: Record<string, string[]> = {};
+        const receiptQtyBySku = new Map<string, number>();
+        const receiptLineIdBySku = new Map<string, string[]>();
         for (const rl of unmatchedReceiptLines) {
           if (rl.skuId) {
-            receiptQtyBySku[rl.skuId] = (receiptQtyBySku[rl.skuId] || 0) + rl.qtyReceived;
-            if (!receiptLineIdBySku[rl.skuId]) receiptLineIdBySku[rl.skuId] = [];
-            receiptLineIdBySku[rl.skuId].push(rl.id);
+            receiptQtyBySku.set(rl.skuId, (receiptQtyBySku.get(rl.skuId) || 0) + rl.qtyReceived);
+            const existing = receiptLineIdBySku.get(rl.skuId) || [];
+            receiptLineIdBySku.set(rl.skuId, [...existing, rl.id]);
           }
         }
 
-        // Split PO lines into matched (SKU overlap with receipt) and other (no overlap)
         type ComparisonLine = {
           poLineItemId: string;
           skuId: string | null;
@@ -172,34 +197,30 @@ export async function GET(
           variance: number;
           receiptLineIds: string[];
         };
+
         const matchedLines: ComparisonLine[] = [];
         const otherLines: ComparisonLine[] = [];
         const processedSkuIds = new Set<string>();
 
         for (const poLine of po.lineItems) {
-          const item = itemMap[poLine.skuId];
+          const item = itemMap.get(poLine.skuId);
           const uom = item?.uom || "Each";
-          // Use Qty Cartons for Carton items, Qty Sticks for Stick items,
-          // and fall back to Qty Cartons for Each items (PO Creator stores qty there)
-          const qtyOrdered = uom === "Carton"
-            ? (poLine.qtyCartons || 0)
-            : (poLine.qtySticks || poLine.qtyCartons || 0);
-          const qtyAlreadyReceived = alreadyReceivedBySku[poLine.skuId] || 0;
-          const qtyThisReceipt = receiptQtyBySku[poLine.skuId] || 0;
+          const qtyOrdered = poLine.qty;
+          const qtyAlreadyReceived = alreadyReceivedByPoLine.get(poLine.id) || 0;
+          const qtyThisReceipt = receiptQtyBySku.get(poLine.skuId) || 0;
           const remaining = qtyOrdered - qtyAlreadyReceived;
           const variance = qtyThisReceipt - remaining;
-          const lineReceiptIds = receiptLineIdBySku[poLine.skuId] || [];
 
           const line: ComparisonLine = {
             poLineItemId: poLine.id,
             skuId: poLine.skuId,
-            skuName: item?.name || poLine.skuId,
+            skuName: item?.sku || poLine.skuId,
             uom,
             qtyOrdered,
             qtyAlreadyReceived,
             qtyThisReceipt,
             variance,
-            receiptLineIds: lineReceiptIds,
+            receiptLineIds: receiptLineIdBySku.get(poLine.skuId) || [],
           };
 
           if (qtyThisReceipt > 0) {
@@ -210,14 +231,14 @@ export async function GET(
           processedSkuIds.add(poLine.skuId);
         }
 
-        // Unmatched receipt lines for SKUs NOT on the PO
+        // Receipt lines for SKUs NOT on this PO
         for (const rl of unmatchedReceiptLines) {
           if (rl.skuId && !processedSkuIds.has(rl.skuId)) {
-            const item = itemMap[rl.skuId];
+            const item = itemMap.get(rl.skuId);
             matchedLines.push({
-              poLineItemId: "", // No PO line for this SKU
+              poLineItemId: "",
               skuId: rl.skuId,
-              skuName: item?.name || rl.skuId,
+              skuName: item?.sku || rl.skuId,
               uom: item?.uom || "Each",
               qtyOrdered: 0,
               qtyAlreadyReceived: 0,
@@ -238,33 +259,31 @@ export async function GET(
       }
     }
 
-    // 7. Score and rank POs by SKU overlap with UNMATCHED receipt lines
-    const receiptSkuIds = new Set(unmatchedReceiptLines.map((rl) => rl.skuId).filter(Boolean));
+    // Score and rank POs by SKU overlap with unmatched receipt lines
+    const receiptSkuIds = new Set(unmatchedReceiptLines.map((rl) => rl.skuId).filter(Boolean) as string[]);
 
-    const scoredPOs = matchablePOs.map((po) => {
-      const poSkuIds = new Set(po.lineItems.map((li) => li.skuId));
-      const overlapping = [...receiptSkuIds].filter((skuId) => poSkuIds.has(skuId!));
-      const overlapCount = overlapping.length;
-      const overlapSkuNames = overlapping.map((skuId) => itemMap[skuId!]?.name || skuId).filter(Boolean) as string[];
-      // Score: PO number match from External Receipt ID = 100, then SKU overlap count
-      const isExternalMatch = suggestedMatch?.id === po.id;
-      const score = (isExternalMatch ? 100 : 0) + overlapCount;
+    const scoredPOs = matchablePOs
+      .map((po) => {
+        const poSkuIds = new Set(po.lineItems.map((li) => li.skuId));
+        const overlapping = [...receiptSkuIds].filter((skuId) => poSkuIds.has(skuId));
+        const overlapSkuNames = overlapping.map((skuId) => itemMap.get(skuId)?.sku || skuId);
+        const isExternalMatch = suggestedMatch?.id === po.id;
+        const score = (isExternalMatch ? 100 : 0) + overlapping.length;
 
-      return {
-        id: po.id,
-        poNumber: po.poNumber,
-        status: po.status,
-        skuCount: po.lineItems.length,
-        overlapCount,
-        overlapSkuNames,
-        score,
-        skuNames: po.lineItems.map((li) => itemMap[li.skuId]?.name || li.skuId),
-      };
-    })
-      .filter((po) => po.score > 0) // Only show POs with some relevance
+        return {
+          id: po.id,
+          poNumber: po.poNumber,
+          status: po.status,
+          skuCount: po.lineItems.length,
+          overlapCount: overlapping.length,
+          overlapSkuNames,
+          score,
+          skuNames: po.lineItems.map((li) => itemMap.get(li.skuId)?.sku || li.skuId),
+        };
+      })
+      .filter((po) => po.score > 0)
       .sort((a, b) => b.score - a.score);
 
-    // Also include all POs (unscored) in case user needs to pick one without overlap
     const otherPOs = matchablePOs
       .filter((po) => !scoredPOs.some((sp) => sp.id === po.id))
       .map((po) => ({
@@ -275,28 +294,31 @@ export async function GET(
         overlapCount: 0,
         overlapSkuNames: [] as string[],
         score: 0,
-        skuNames: po.lineItems.map((li) => itemMap[li.skuId]?.name || li.skuId),
+        skuNames: po.lineItems.map((li) => itemMap.get(li.skuId)?.sku || li.skuId),
       }));
 
-    // Best match = highest scored PO (or external match)
     const bestMatch = scoredPOs.length > 0 ? scoredPOs[0] : null;
 
-    // Available items for SKU editing dropdown
-    const availableItems = allItems
-      .filter((item) => (item.fields["Status"] as string) !== "Inactive")
-      .map((item) => ({
-        id: item.id,
-        standardSku: (item.fields["Standard SKU"] as string) || (item.fields["Name"] as string) || item.id,
-      }))
-      .sort((a, b) => a.standardSku.localeCompare(b.standardSku));
+    // Available items for SKU editing
+    const { data: allItems } = await db
+      .schema("org_config")
+      .from("items")
+      .select("id, sku")
+      .eq("is_active", true)
+      .order("sku");
+
+    const availableItems = (allItems ?? []).map((i) => ({
+      id: i.id as string,
+      standardSku: i.sku as string,
+    }));
 
     return NextResponse.json({
       receipt: {
         id: receipt.id,
-        receiptNumber: receipt.fields["Receipt Number"] as string,
-        receivedDate: receipt.fields["Received Date"] as string,
+        receiptNumber: receipt.receipt_number,
+        receivedDate: receipt.received_date,
         externalReceiptId,
-        warehouse: receipt.fields["Warehouses"],
+        warehouse: receipt.location_id,
       },
       receiptLines,
       suggestedPO: bestMatch ? { id: bestMatch.id, poNumber: bestMatch.poNumber } : null,

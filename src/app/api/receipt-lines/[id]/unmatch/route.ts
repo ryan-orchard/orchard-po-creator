@@ -1,163 +1,104 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireOperator } from "@/lib/auth";
-import { getRecords, updateRecord, TABLES } from "@/lib/airtable";
+import { db } from "@/lib/supabase";
+import { recalcPoStatus } from "@/lib/po-status";
 
 /**
  * POST /api/receipt-lines/[id]/unmatch
  *
- * Clears the PO Line Item link on a receipt line, sets Match Status to Open,
- * and removes the receipt header PO link if it was set.
- * Recalculates PO status after unlinking.
+ * Clears the PO or WO link on a receipt line:
+ * - PO match: delete from po_line_receipt_line_links, reset status to Open, recalc PO status
+ * - WO match: delete from wo_receipt_links (header-level), reset status to Open
  */
 export async function POST(
-  request: NextRequest,
-  {
- params }: { params: Promise<{ id: string }> }
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const authError = await requireOperator();
   if (authError) return authError;
   try {
     const { id: receiptLineId } = await params;
 
-    // Fetch the receipt line to get its receipt ID and current PO Line Item link
-    const allReceiptLines = await getRecords(TABLES.RECEIPT_LINES);
-    const receiptLine = allReceiptLines.find((rl) => rl.id === receiptLineId);
+    // Fetch the receipt line
+    const { data: receiptLine } = await db
+      .schema("orchard")
+      .from("receipt_lines")
+      .select("id, receipt_id, status")
+      .eq("id", receiptLineId)
+      .maybeSingle();
+
     if (!receiptLine) {
-      return NextResponse.json(
-        { error: "Receipt line not found" },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "Receipt line not found" }, { status: 404 });
     }
 
-    const poLineItemLinks = receiptLine.fields["PO Line Item"] as string[] | undefined;
-    const woLineItemLinks = receiptLine.fields["Work Order Lines"] as string[] | undefined;
-    const receiptIds = receiptLine.fields["Receipt"] as string[] | undefined;
-    const receiptId = receiptIds?.[0];
+    const receiptId = receiptLine.receipt_id as string;
 
-    const isWOMatch = !!woLineItemLinks?.[0];
-    const isPOMatch = !!poLineItemLinks?.[0];
+    // Check for PO link (line-level)
+    const { data: poLink } = await db
+      .schema("orchard_calcs")
+      .from("po_line_receipt_line_links")
+      .select("id, po_line_id")
+      .eq("receipt_line_id", receiptLineId)
+      .maybeSingle();
 
-    if (!isPOMatch && !isWOMatch) {
-      return NextResponse.json(
-        { error: "Receipt line is not matched" },
-        { status: 400 }
-      );
+    // Check for WO link (header-level — linked to the receipt)
+    const { data: woLink } = await db
+      .schema("orchard_calcs")
+      .from("wo_receipt_links")
+      .select("id, wo_id")
+      .eq("receipt_id", receiptId)
+      .maybeSingle();
+
+    if (!poLink && !woLink) {
+      return NextResponse.json({ error: "Receipt line is not matched" }, { status: 400 });
     }
 
-    // Find which PO this PO Line Item belongs to (if PO match)
-    let poId: string | undefined;
-    if (isPOMatch) {
-      const allPOLineItems = await getRecords(TABLES.PO_LINE_ITEMS);
-      const poLineItem = allPOLineItems.find((li) => li.id === poLineItemLinks![0]);
-      const poLinks = poLineItem?.fields["Purchase Order"] as string[] | undefined;
-      poId = poLinks?.[0];
+    let poId: string | null = null;
+
+    if (poLink) {
+      // Find which PO owns this po_line
+      const { data: poLine } = await db
+        .schema("orchard")
+        .from("po_lines")
+        .select("po_id")
+        .eq("id", poLink.po_line_id as string)
+        .maybeSingle();
+      poId = (poLine?.po_id as string) ?? null;
+
+      // Delete the line-level link
+      await db
+        .schema("orchard_calcs")
+        .from("po_line_receipt_line_links")
+        .delete()
+        .eq("receipt_line_id", receiptLineId);
     }
 
-    // 1. Clear the match link and set Match Status to Open
-    const clearFields: Record<string, unknown> = { "Status": "Open" };
-    if (isPOMatch) clearFields["PO Line Item"] = [];
-    if (isWOMatch) clearFields["Work Order Lines"] = [];
-    await updateRecord(TABLES.RECEIPT_LINES, receiptLineId, clearFields);
-
-    // 2. Clear the receipt header link (since at least one line is now unmatched)
-    if (receiptId) {
-      const allReceipts = await getRecords(TABLES.RECEIPTS);
-      const receipt = allReceipts.find((r) => r.id === receiptId);
-      const receiptPOLink = receipt?.fields["Purchase Order"] as string[] | undefined;
-      const receiptWOLink = receipt?.fields["Work Order"] as string[] | undefined;
-      if (receiptPOLink?.length) {
-        await updateRecord(TABLES.RECEIPTS, receiptId, { "Purchase Order": [] });
-      }
-      if (receiptWOLink?.length) {
-        await updateRecord(TABLES.RECEIPTS, receiptId, { "Work Order": [] });
-      }
+    if (woLink) {
+      // Delete the header-level WO-receipt link
+      await db
+        .schema("orchard_calcs")
+        .from("wo_receipt_links")
+        .delete()
+        .eq("receipt_id", receiptId);
     }
 
-    // 3. Recalculate PO status if we know which PO was linked
+    // Reset receipt line status to Open
+    await db
+      .schema("orchard")
+      .from("receipt_lines")
+      .update({ status: "Open" })
+      .eq("id", receiptLineId);
+
+    // Recalculate PO status if we had a PO link
     if (poId) {
-      const allItems = await getRecords(TABLES.SKUS);
-      const itemUOM: Record<string, string> = {};
-      for (const item of allItems) {
-        itemUOM[item.id] = (item.fields["UOM"] as string) || "Each";
-      }
-
-      // Get all receipts still linked to this PO
-      const allReceipts = await getRecords(TABLES.RECEIPTS);
-      const poReceiptIds = allReceipts
-        .filter((r) => {
-          const rPoIds = r.fields["Purchase Order"] as string[] | undefined;
-          return rPoIds?.[0] === poId;
-        })
-        .map((r) => r.id);
-
-      // Re-fetch receipt lines to get updated state
-      const freshReceiptLines = await getRecords(TABLES.RECEIPT_LINES);
-      const relevantReceiptLines = freshReceiptLines.filter((rl) => {
-        const rlReceiptIds = rl.fields["Receipt"] as string[] | undefined;
-        return rlReceiptIds?.[0] && poReceiptIds.includes(rlReceiptIds[0]);
-      });
-
-      // Aggregate received qty by SKU
-      const receivedBySku: Record<string, number> = {};
-      for (const rl of relevantReceiptLines) {
-        const skuIds = rl.fields["SKU"] as string[] | undefined;
-        const skuId = skuIds?.[0];
-        if (skuId) {
-          receivedBySku[skuId] =
-            (receivedBySku[skuId] || 0) +
-            ((rl.fields["Qty Received"] as number) || 0);
-        }
-      }
-
-      // Check PO line items
-      const allPOLineItems = await getRecords(TABLES.PO_LINE_ITEMS);
-      const poLineItems = allPOLineItems.filter((li) => {
-        const plPoLinks = li.fields["Purchase Order"] as string[] | undefined;
-        return plPoLinks?.[0] === poId;
-      });
-
-      let allFullyReceived = true;
-      let anyReceived = false;
-
-      for (const poLine of poLineItems) {
-        const skuIds = poLine.fields["SKU"] as string[] | undefined;
-        const skuId = skuIds?.[0];
-        if (!skuId) continue;
-
-        const uom = itemUOM[skuId] || "Each";
-        const orderedQty =
-          uom === "Carton"
-            ? (poLine.fields["Qty Cartons"] as number) || 0
-            : (poLine.fields["Qty Sticks"] as number) ||
-              (poLine.fields["Qty Cartons"] as number) ||
-              0;
-        const receivedQty = receivedBySku[skuId] || 0;
-
-        if (receivedQty > 0) anyReceived = true;
-        if (receivedQty < orderedQty) allFullyReceived = false;
-      }
-
-      let newStatus: string;
-      if (allFullyReceived && anyReceived && poLineItems.length > 0) {
-        newStatus = "Received";
-      } else if (anyReceived) {
-        newStatus = "Partially Received";
-      } else {
-        newStatus = "Issued";
-      }
-
-      await updateRecord(TABLES.PURCHASE_ORDERS, poId, {
-        Status: newStatus,
-      });
+      await recalcPoStatus(poId);
     }
 
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Unmatch error:", error);
     return NextResponse.json(
-      {
-        error: `Failed to unmatch: ${error instanceof Error ? error.message : "Unknown error"}`,
-      },
+      { error: `Failed to unmatch: ${error instanceof Error ? error.message : "Unknown error"}` },
       { status: 500 }
     );
   }

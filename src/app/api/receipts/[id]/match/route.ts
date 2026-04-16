@@ -1,22 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getRecord, getRecords, updateRecord, TABLES } from "@/lib/airtable";
+import { db } from "@/lib/supabase";
 import { logActivity } from "@/lib/activity-log";
+import { recalcPoStatus } from "@/lib/po-status";
 
 /**
  * PATCH /api/receipts/[id]/match
  *
- * Links a receipt to a PO or WO at header level AND links individual receipt
- * lines to their corresponding source line items. Updates source status.
+ * Links a receipt to a PO or WO:
  *
- * PO match body: {
- *   purchaseOrderId: string,
- *   lineMatches: { receiptLineId: string, poLineItemId: string }[]
- * }
+ * PO match: insert into po_line_receipt_line_links per line, update receipt.po_id, recalc PO status
+ * Body: { purchaseOrderId, lineMatches: [{ receiptLineId, poLineItemId }] }
  *
- * WO match body: {
- *   workOrderId: string,
- *   lineMatches: { receiptLineId: string, woLineItemId: string }[]
- * }
+ * WO match: insert into wo_receipt_links (header-level), update receipt line statuses
+ * Body: { workOrderId, lineMatches: [{ receiptLineId, woLineItemId }] }
  */
 export async function PATCH(
   request: NextRequest,
@@ -25,7 +21,6 @@ export async function PATCH(
   try {
     const { id: receiptId } = await params;
     const body = await request.json();
-
     const { purchaseOrderId, workOrderId } = body as {
       purchaseOrderId?: string;
       workOrderId?: string;
@@ -38,7 +33,6 @@ export async function PATCH(
       );
     }
 
-    // Route to the appropriate handler
     if (workOrderId) {
       return handleWOMatch(receiptId, workOrderId, body.lineMatches || []);
     } else {
@@ -53,144 +47,55 @@ export async function PATCH(
   }
 }
 
-// --- PO matching (existing logic) ---
-
 async function handlePOMatch(
   receiptId: string,
   purchaseOrderId: string,
   lineMatches: { receiptLineId: string; poLineItemId: string }[]
 ) {
-  const po = await getRecord(TABLES.PURCHASE_ORDERS, purchaseOrderId);
-  if (!po || po.id !== purchaseOrderId) {
-    return NextResponse.json(
-      { error: "Purchase Order not found" },
-      { status: 404 }
-    );
-  }
+  const { data: po } = await db
+    .schema("orchard")
+    .from("purchase_orders")
+    .select("id, po_number")
+    .eq("id", purchaseOrderId)
+    .maybeSingle();
 
-  // 1. Link receipt lines to PO line items and set Match Status
-  // Cost fields (Supplier Unit Cost, Cost Source) are left blank until invoice is confirmed
-  if (lineMatches.length > 0) {
+  if (!po) return NextResponse.json({ error: "Purchase Order not found" }, { status: 404 });
+
+  const validMatches = lineMatches.filter((m) => m.receiptLineId && m.poLineItemId);
+
+  if (validMatches.length > 0) {
+    // Insert link table entries — ignore conflicts (idempotent)
+    await db.schema("orchard_calcs").from("po_line_receipt_line_links").upsert(
+      validMatches.map((m) => ({ po_line_id: m.poLineItemId, receipt_line_id: m.receiptLineId })),
+      { onConflict: "po_line_id,receipt_line_id" }
+    );
+
+    // Update receipt_lines status to Matched
     await Promise.all(
-      lineMatches
-        .filter((m) => m.receiptLineId && m.poLineItemId)
-        .map((m) =>
-          updateRecord(TABLES.RECEIPT_LINES, m.receiptLineId, {
-            "PO Line Item": [m.poLineItemId],
-            "Status": "Matched",
-          })
-        )
+      validMatches.map((m) =>
+        db.schema("orchard").from("receipt_lines").update({ status: "Matched" }).eq("id", m.receiptLineId)
+      )
     );
   }
 
-  // 2. Check if ALL receipt lines are now matched — only then set header PO link
-  const [allPOLineItems, allReceipts, allReceiptLines, allItems] = await Promise.all([
-    getRecords(TABLES.PO_LINE_ITEMS),
-    getRecords(TABLES.RECEIPTS),
-    getRecords(TABLES.RECEIPT_LINES),
-    getRecords(TABLES.SKUS),
-  ]);
+  // Update receipt.po_id (denorm for display)
+  await db.schema("orchard").from("receipts").update({ po_id: purchaseOrderId }).eq("id", receiptId);
 
-  const thisReceiptLines = allReceiptLines.filter((rl) => {
-    const rlReceiptIds = rl.fields["Receipt"] as string[] | undefined;
-    return rlReceiptIds?.[0] === receiptId;
-  });
-  const allLinesMatched = thisReceiptLines.length > 0 && thisReceiptLines.every((rl) => {
-    const poLineItemLink = rl.fields["PO Line Item"] as string[] | undefined;
-    return poLineItemLink && poLineItemLink.length > 0;
-  });
-
-  if (allLinesMatched) {
-    await updateRecord(TABLES.RECEIPTS, receiptId, {
-      "Purchase Order": [purchaseOrderId],
-    });
-  }
-
-  // 3. Calculate PO status based on cumulative receipts
-  const poLineItems = allPOLineItems.filter((li) => {
-    const poLinks = li.fields["Purchase Order"] as string[] | undefined;
-    return poLinks?.[0] === purchaseOrderId;
-  });
-
-  const poReceiptIds = allReceipts
-    .filter((r) => {
-      const poIds = r.fields["Purchase Order"] as string[] | undefined;
-      return poIds?.[0] === purchaseOrderId;
-    })
-    .map((r) => r.id);
-  if (allLinesMatched && !poReceiptIds.includes(receiptId)) {
-    poReceiptIds.push(receiptId);
-  }
-
-  const relevantReceiptLines = allReceiptLines.filter((rl) => {
-    const rlReceiptIds = rl.fields["Receipt"] as string[] | undefined;
-    return rlReceiptIds?.[0] && poReceiptIds.includes(rlReceiptIds[0]);
-  });
-
-  const receivedBySku: Record<string, number> = {};
-  for (const rl of relevantReceiptLines) {
-    const skuIds = rl.fields["SKU"] as string[] | undefined;
-    const skuId = skuIds?.[0];
-    if (skuId) {
-      receivedBySku[skuId] = (receivedBySku[skuId] || 0) + ((rl.fields["Qty Received"] as number) || 0);
-    }
-  }
-
-  const itemUOM: Record<string, string> = {};
-  for (const item of allItems) {
-    itemUOM[item.id] = (item.fields["UOM"] as string) || "Each";
-  }
-
-  let allFullyReceived = true;
-  let anyReceived = false;
-
-  for (const poLine of poLineItems) {
-    const skuIds = poLine.fields["SKU"] as string[] | undefined;
-    const skuId = skuIds?.[0];
-    if (!skuId) continue;
-
-    const uom = itemUOM[skuId] || "Each";
-    const orderedQty = uom === "Carton"
-      ? ((poLine.fields["Qty Cartons"] as number) || 0)
-      : ((poLine.fields["Qty Sticks"] as number) || (poLine.fields["Qty Cartons"] as number) || 0);
-
-    const receivedQty = receivedBySku[skuId] || 0;
-    if (receivedQty > 0) anyReceived = true;
-    if (receivedQty < orderedQty) allFullyReceived = false;
-  }
-
-  let newPoStatus: string | null = null;
-  const currentStatus = po.fields["Status"] as string;
-
-  if (allFullyReceived && anyReceived && poLineItems.length > 0) {
-    newPoStatus = "Received";
-  } else if (anyReceived) {
-    newPoStatus = "Partially Received";
-  }
-
-  if (newPoStatus && currentStatus !== newPoStatus) {
-    const validTransitions: Record<string, string[]> = {
-      "Issued": ["Partially Received", "Received"],
-      "Partially Received": ["Received"],
-    };
-    if (validTransitions[currentStatus]?.includes(newPoStatus)) {
-      await updateRecord(TABLES.PURCHASE_ORDERS, purchaseOrderId, {
-        Status: newPoStatus,
-      });
-    }
-  }
+  // Recalculate PO status
+  const newPoStatus = await recalcPoStatus(purchaseOrderId);
 
   // Log activity
-  const totalQtyReceived = thisReceiptLines.reduce(
-    (sum, rl) => sum + ((rl.fields["Qty Received"] as number) || 0),
-    0
-  );
+  const { data: receiptLines } = await db
+    .schema("orchard")
+    .from("receipt_lines")
+    .select("qty_received")
+    .eq("receipt_id", receiptId);
+  const totalQty = (receiptLines ?? []).reduce((sum, rl) => sum + (Number(rl.qty_received) || 0), 0);
+
   logActivity({
     poId: purchaseOrderId,
     action: "receipt_matched",
-    description: totalQtyReceived > 0
-      ? `Matched ${totalQtyReceived.toLocaleString()} units`
-      : "Receipt matched",
+    description: totalQty > 0 ? `Matched ${totalQty.toLocaleString()} units` : "Receipt matched",
     actor: "Ryan Belanger",
     relatedRecordType: "receipt",
     relatedRecordId: receiptId,
@@ -200,72 +105,54 @@ async function handlePOMatch(
     success: true,
     receiptId,
     purchaseOrderId,
-    poStatus: newPoStatus || currentStatus,
-    linesMatched: lineMatches.length,
+    poStatus: newPoStatus,
+    linesMatched: validMatches.length,
   });
 }
-
-// --- WO matching ---
 
 async function handleWOMatch(
   receiptId: string,
   workOrderId: string,
   lineMatches: { receiptLineId: string; woLineItemId: string }[]
 ) {
-  const wo = await getRecord(TABLES.WORK_ORDERS, workOrderId);
-  if (!wo || wo.id !== workOrderId) {
-    return NextResponse.json(
-      { error: "Work Order not found" },
-      { status: 404 }
-    );
-  }
+  const { data: wo } = await db
+    .schema("orchard")
+    .from("work_orders")
+    .select("id, wo_number, status")
+    .eq("id", workOrderId)
+    .maybeSingle();
 
-  // 1. Link receipt lines to WO line items and set Match Status
-  if (lineMatches.length > 0) {
-    await Promise.all(
-      lineMatches
-        .filter((m) => m.receiptLineId && m.woLineItemId)
-        .map((m) =>
-          updateRecord(TABLES.RECEIPT_LINES, m.receiptLineId, {
-            "Work Order Lines": [m.woLineItemId],
-            "Status": "Matched",
-          })
-        )
-    );
-  }
+  if (!wo) return NextResponse.json({ error: "Work Order not found" }, { status: 404 });
 
-  // 2. Check if ALL receipt lines are now matched — then set header WO link
-  const allReceiptLines = await getRecords(TABLES.RECEIPT_LINES);
-  const thisReceiptLines = allReceiptLines.filter((rl) => {
-    const rlReceiptIds = rl.fields["Receipt"] as string[] | undefined;
-    return rlReceiptIds?.[0] === receiptId;
-  });
+  // Insert WO-receipt header link
+  await db
+    .schema("orchard_calcs")
+    .from("wo_receipt_links")
+    .upsert({ wo_id: workOrderId, receipt_id: receiptId }, { onConflict: "wo_id,receipt_id" });
 
-  const allLinesMatched = thisReceiptLines.length > 0 && thisReceiptLines.every((rl) => {
-    const woLineItemLink = rl.fields["Work Order Lines"] as string[] | undefined;
-    const poLineItemLink = rl.fields["PO Line Item"] as string[] | undefined;
-    return (woLineItemLink && woLineItemLink.length > 0) || (poLineItemLink && poLineItemLink.length > 0);
-  });
-
-  if (allLinesMatched) {
-    await updateRecord(TABLES.RECEIPTS, receiptId, {
-      "Work Order": [workOrderId],
-    });
-  }
+  // Update receipt line statuses to Matched
+  const validMatches = lineMatches.filter((m) => m.receiptLineId);
+  await Promise.all(
+    validMatches.map((m) =>
+      db.schema("orchard").from("receipt_lines").update({ status: "Matched" }).eq("id", m.receiptLineId)
+    )
+  );
 
   // Log activity
-  const woNumber = wo.fields["WO Number"] as string;
-  const totalQtyReceived = thisReceiptLines.reduce(
-    (sum, rl) => sum + ((rl.fields["Qty Received"] as number) || 0),
-    0
-  );
+  const { data: receiptLines } = await db
+    .schema("orchard")
+    .from("receipt_lines")
+    .select("qty_received")
+    .eq("receipt_id", receiptId);
+  const totalQty = (receiptLines ?? []).reduce((sum, rl) => sum + (Number(rl.qty_received) || 0), 0);
 
   logActivity({
     woId: workOrderId,
     action: "receipt_matched",
-    description: totalQtyReceived > 0
-      ? `Matched ${totalQtyReceived.toLocaleString()} units to ${woNumber}`
-      : `Receipt matched to ${woNumber}`,
+    description:
+      totalQty > 0
+        ? `Matched ${totalQty.toLocaleString()} units to ${wo.wo_number}`
+        : `Receipt matched to ${wo.wo_number}`,
     actor: "Ryan Belanger",
     relatedRecordType: "receipt",
     relatedRecordId: receiptId,
@@ -275,7 +162,7 @@ async function handleWOMatch(
     success: true,
     receiptId,
     workOrderId,
-    woStatus: wo.fields["Status"] as string,
-    linesMatched: lineMatches.length,
+    woStatus: wo.status,
+    linesMatched: validMatches.length,
   });
 }

@@ -1,52 +1,29 @@
 import { NextResponse } from "next/server";
-import { getRecords, TABLES } from "@/lib/airtable";
+import { db } from "@/lib/supabase";
 
 export async function GET() {
-  // Fetch everything in parallel
-  const [allReceiptLines, allInvoices, allPOs] = await Promise.all([
-    getRecords(TABLES.RECEIPT_LINES),
-    getRecords(TABLES.INVOICES),
-    getRecords(TABLES.PURCHASE_ORDERS),
+  const [
+    unmatchedReceiptLinesResult,
+    openInvoicesResult,
+    posInProgressResult,
+  ] = await Promise.all([
+    // Receipt lines not yet linked (status = Open)
+    db.schema("orchard").from("receipt_lines").select("id", { count: "exact", head: true }).eq("status", "Open"),
+    // Invoices that are Open and not Paid
+    db.schema("orchard").from("invoices").select("id, match_status").neq("match_status", "Matched"),
+    // POs actively in progress
+    db.schema("orchard_calcs").from("po_statuses").select("status").in("status", ["Draft", "Issued", "Accepted"]),
   ]);
 
-  // Receipt lines not yet linked to a PO or WO
-  const unmatchedReceiptLines = allReceiptLines.filter((rl) => {
-    const status = (rl.fields["Status"] as string | undefined) || "";
-    if (status === "Excluded" || status === "Matched") return false;
-    const poLinks = rl.fields["PO Line Item"] as string[] | undefined;
-    const woLinks = rl.fields["Work Order Lines"] as string[] | undefined;
-    const sourceMatch = rl.fields["Source Match"] as string | undefined;
-    const hasLink = (poLinks && poLinks.length > 0) || (woLinks && woLinks.length > 0) || sourceMatch === "Linked";
-    return !hasLink;
-  }).length;
-
-  // Invoices not yet matched to a receipt (open or pending receipt, not paid)
-  const invoicesWithoutReceipt = allInvoices.filter((inv) => {
-    const status = ((inv.fields["Status"] as string) || "").toLowerCase();
-    const payment = (inv.fields["Payment Status"] as string) || "";
-    return (
-      (status === "open" || status === "") &&
-      payment !== "Paid"
-    );
-  }).length;
-
-  // Invoices approved and not yet paid
-  const readyToPay = allInvoices.filter((inv) => {
-    const status = ((inv.fields["Status"] as string) || "").toLowerCase();
-    const payment = (inv.fields["Payment Status"] as string) || "";
-    return status === "approved" && payment !== "Paid";
-  }).length;
-
-  // POs with an active status
-  const posInProgress = allPOs.filter((po) => {
-    const status = (po.fields["Status"] as string) || "";
-    return status === "Draft" || status === "Issued" || status === "Accepted";
-  }).length;
+  // Invoices without receipt = open and not paid
+  // We don't have a direct "readyToPay" concept yet — return 0 for now
+  const openInvoices = openInvoicesResult.data ?? [];
+  const invoicesWithoutReceipt = openInvoices.filter((inv) => inv.match_status === "Open").length;
 
   return NextResponse.json({
-    unmatchedReceiptLines,
+    unmatchedReceiptLines: unmatchedReceiptLinesResult.count ?? 0,
     invoicesWithoutReceipt,
-    readyToPay,
-    posInProgress,
+    readyToPay: 0,
+    posInProgress: posInProgressResult.data?.length ?? 0,
   });
 }

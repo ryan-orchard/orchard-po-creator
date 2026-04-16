@@ -1,27 +1,36 @@
 import { NextResponse } from "next/server";
-import { updateRecord, TABLES } from "@/lib/airtable";
+import { db } from "@/lib/supabase";
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const body = await req.json();
-  const fields: Record<string, unknown> = {
-    "Standard SKU": body.standardSku,
-    "Category": body.category,
-    "Flavor": body.flavor,
-    "UOM": body.uom,
-    "Description": body.description,
-    "Status": body.status,
-    "Sticks per Carton": body.uom === "Carton" && body.count != null ? Number(body.count) : null,
-  };
-  const record = await updateRecord(TABLES.SKUS, id, fields);
+
+  const { data, error } = await db
+    .schema("org_config")
+    .from("items")
+    .update({
+      sku: body.standardSku,
+      name: body.standardSku,
+      unit_of_measure: body.uom ?? null,
+      sticks_per_carton: body.uom === "Carton" && body.count != null ? Number(body.count) : null,
+      description: body.description ?? null,
+      is_active: body.status !== "Inactive",
+      metadata: { category: body.category ?? null, flavor: body.flavor ?? null },
+    })
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
   return NextResponse.json({
-    id: record.id,
-    standardSku: record.fields["Standard SKU"],
-    category: record.fields["Category"],
-    flavor: record.fields["Flavor"],
-    uom: record.fields["UOM"],
-    count: record.fields["Sticks per Carton"],
-    description: record.fields["Description"],
-    status: record.fields["Status"],
+    id: data.id,
+    standardSku: data.sku,
+    category: (data.metadata as Record<string, unknown>)?.category ?? null,
+    flavor: (data.metadata as Record<string, unknown>)?.flavor ?? null,
+    uom: data.unit_of_measure,
+    count: data.sticks_per_carton,
+    description: data.description,
+    status: data.is_active ? "Active" : "Inactive",
   });
 }

@@ -1,32 +1,38 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireOperator } from "@/lib/auth";
-import {
-  getRecords,
-  createRecord,
-  createRecords,
-  TABLES,
-} from "@/lib/airtable";
+import { db } from "@/lib/supabase";
 import { generateNextNumber } from "@/lib/sequence";
 import { logActivity } from "@/lib/activity-log";
 
 export async function GET() {
-  const records = await getRecords(TABLES.SHIPMENTS, {
-    sort: [{ field: "Ship Date", direction: "desc" }],
-  });
+  const { data, error } = await db
+    .schema("orchard")
+    .from("shipments")
+    .select("*")
+    .order("shipped_date", { ascending: false });
 
-  const shipments = records.map((r) => ({
-    id: r.id,
-    shipmentNumber: r.fields["Shipment Number"] as string,
-    purchaseOrder: r.fields["Purchase Order"] as string[],
-    workOrder: r.fields["Work Order"] as string[],
-    shipDate: r.fields["Ship Date"] as string,
-    expectedDeliveryDate: r.fields["Estimated Delivery"] as string,
-    carrier: r.fields["Carrier"] as string,
-    carrierReference: r.fields["Carrier Reference"] as string,
-    trackingNumber: r.fields["Tracking Number"] as string,
-    shipTo: r.fields["Ship To"] as string[],
-    status: r.fields["Status"] as string,
-    shipmentLines: r.fields["Shipment Lines"] as string[],
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  type Shipment = {
+    id: string; shipment_number: string; po_id: string | null; wo_id: string | null;
+    shipped_date: string | null; estimated_delivery: string | null; carrier: string | null;
+    carrier_reference: string | null; tracking_number: string | null;
+    location_id: string | null; status: string;
+  };
+
+  const shipments = (data as Shipment[]).map((s) => ({
+    id: s.id,
+    shipmentNumber: s.shipment_number,
+    purchaseOrder: s.po_id ? [s.po_id] : [],
+    workOrder: s.wo_id ? [s.wo_id] : [],
+    shipDate: s.shipped_date,
+    expectedDeliveryDate: s.estimated_delivery,
+    carrier: s.carrier,
+    carrierReference: s.carrier_reference,
+    trackingNumber: s.tracking_number,
+    shipTo: s.location_id ? [s.location_id] : [],
+    status: s.status,
+    shipmentLines: [], // shipment lines not in v1 schema
   }));
 
   return NextResponse.json(shipments);
@@ -37,51 +43,32 @@ export async function POST(request: NextRequest) {
   if (authError) return authError;
 
   const body = await request.json();
+  const shipmentNumber = await generateNextNumber("SH");
 
-  const shipmentNumber = await generateNextNumber(TABLES.SHIPMENTS, "Shipment Number", "SH");
+  const { data: shipment, error } = await db
+    .schema("orchard")
+    .from("shipments")
+    .insert({
+      shipment_number: shipmentNumber,
+      po_id: body.purchaseOrderId || null,
+      wo_id: body.workOrderId || null,
+      shipped_date: body.shipDate || null,
+      estimated_delivery: body.expectedDeliveryDate || null,
+      carrier: body.carrier || null,
+      carrier_reference: body.carrierReference || null,
+      tracking_number: body.trackingNumber || null,
+      location_id: body.shipToId || null,
+      status: "Created",
+    })
+    .select("id")
+    .single();
 
-  // Build header fields — link to either PO or WO
-  const headerFields: Record<string, unknown> = {
-    "Shipment Number": shipmentNumber,
-    "Ship Date": body.shipDate,
-    "Estimated Delivery": body.expectedDeliveryDate || null,
-    Carrier: body.carrier || "",
-    "Carrier Reference": body.carrierReference || "",
-    "Tracking Number": body.trackingNumber || "",
-    Status: "Created",
-  };
-
-  if (body.purchaseOrderId) {
-    headerFields["Purchase Order"] = [body.purchaseOrderId];
-  }
-  if (body.workOrderId) {
-    headerFields["Work Order"] = [body.workOrderId];
-  }
-  if (body.shipToId) {
-    headerFields["Ship To"] = [body.shipToId];
-  }
-
-  const shipment = await createRecord(TABLES.SHIPMENTS, headerFields);
-
-  // Create shipment line items
-  if (body.lineItems && body.lineItems.length > 0) {
-    const lineItemRecords = body.lineItems.map(
-      (item: {
-        skuId: string;
-        qtyShipped: number;
-      }) => ({
-        fields: {
-          Shipment: [shipment.id],
-          SKU: [item.skuId],
-          "Qty Shipped": item.qtyShipped,
-        },
-      })
-    );
-
-    await createRecords(TABLES.SHIPMENT_LINES, lineItemRecords);
+  if (error || !shipment) {
+    return NextResponse.json({ error: error?.message ?? "Failed to create shipment" }, { status: 500 });
   }
 
-  // Log activity to the appropriate source document
+  // Shipment lines not stored in v1 Supabase schema
+
   logActivity({
     poId: body.purchaseOrderId || undefined,
     woId: body.workOrderId || undefined,

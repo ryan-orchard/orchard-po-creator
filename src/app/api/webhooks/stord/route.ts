@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Webhook } from "svix";
-import { getRecords, createRecord, createRecords, TABLES } from "@/lib/airtable";
-import { getMaxSequenceNumber } from "@/lib/sequence";
+import { db } from "@/lib/supabase";
+import { generateNextNumber } from "@/lib/sequence";
 import { SKU_MAPPING, resolveFacilityCode } from "@/lib/client-config";
 import { logActivity } from "@/lib/activity-log";
 import { attemptPOMatch } from "@/lib/po-matching";
@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 
-  // Only handle receipt confirmation events (Svix may or may not prefix with "v1.")
+  // Only handle receipt confirmation events
   if (!payload.type.includes("receipt_confirmation.created")) {
     return NextResponse.json({ received: true, skipped: true, type: payload.type });
   }
@@ -72,108 +72,137 @@ export async function POST(request: NextRequest) {
   const { data } = payload;
 
   try {
-    // Idempotency — skip if we've already processed this receipt
-    // Check UUID, order number, and normalized variants as External Receipt ID
+    const stordReceiptId = data.receipt_confirmation_id;
     const orderNum = data.order?.order_number || "";
-    const existingReceipts = await getRecords(TABLES.RECEIPTS);
-    const existingExternalIds = new Set(
-      existingReceipts
-        .map((r) => r.fields["External Receipt ID"] as string)
-        .filter(Boolean)
-    );
 
-    // Check UUID
-    if (existingExternalIds.has(data.receipt_confirmation_id)) {
-      console.log(`Receipt ${data.receipt_confirmation_id} already exists — skipping`);
-      return NextResponse.json({ received: true, skipped: true, reason: "duplicate", id: data.receipt_confirmation_id });
+    // Idempotency — check by stord_receipt_id first
+    const { data: existingByStordId } = await db
+      .schema("orchard")
+      .from("receipts")
+      .select("id")
+      .eq("stord_receipt_id", stordReceiptId)
+      .maybeSingle();
+
+    if (existingByStordId) {
+      console.log(`Receipt ${stordReceiptId} already exists — skipping`);
+      return NextResponse.json({ received: true, skipped: true, reason: "duplicate", id: stordReceiptId });
     }
-    // Check order number and common variants (e.g., "Order: PO-123" vs "PO-123")
+
+    // Check by external_id / order number
     if (orderNum) {
       const normalizedOrder = orderNum.replace(/^Order:\s*/i, "").trim();
-      for (const extId of existingExternalIds) {
-        const normalizedExt = extId.replace(/^Order:\s*/i, "").trim();
+      const { data: existingReceipts } = await db
+        .schema("orchard")
+        .from("receipts")
+        .select("id, external_id")
+        .not("external_id", "is", null);
+
+      for (const r of existingReceipts ?? []) {
+        const normalizedExt = ((r.external_id as string) || "").replace(/^Order:\s*/i, "").trim();
         if (normalizedExt === normalizedOrder || normalizedExt === orderNum) {
-          console.log(`Receipt with order ${orderNum} already exists (matched ${extId}) — skipping`);
+          console.log(`Receipt with order ${orderNum} already exists — skipping`);
           return NextResponse.json({ received: true, skipped: true, reason: "duplicate", orderNumber: orderNum });
         }
       }
     }
 
-    // Resolve warehouse
+    // Resolve warehouse location_id
     const facilityCode = resolveFacilityCode(data.facility_id);
-    const warehouses = await getRecords(TABLES.WAREHOUSES, {
-      filterByFormula: `{Code} = "${facilityCode}"`,
-    });
-    const warehouseId = warehouses[0]?.id ?? null;
+    const { data: warehouse } = await db
+      .schema("org_config")
+      .from("warehouses")
+      .select("id")
+      .eq("code", facilityCode)
+      .maybeSingle();
+    const locationId = warehouse?.id ?? null;
 
-    // Generate receipt number (reuse existingReceipts from dedup check above)
-    const maxNum = getMaxSequenceNumber(existingReceipts, "Receipt Number", "RCP");
-    const receiptNumber = `RCP-${maxNum + 1}`;
+    // Generate receipt number
+    const receiptNumber = await generateNextNumber("RCP");
 
-    // Create receipt header — use order number as External Receipt ID (the linkable thread),
-    // fall back to receipt_confirmation_id if no order number available
-    const externalId = data.order?.order_number || data.receipt_confirmation_id;
-    const receiptFields: Record<string, unknown> = {
-      "Receipt Number": receiptNumber,
-      "Received Date": data.received_at.split("T")[0],
-      "External Receipt ID": externalId,
-      "Stord Receipt ID": data.receipt_confirmation_id,
-      ...(data.order?.order_number ? { "PO Reference": data.order.order_number } : {}),
-      ...(warehouseId ? { Warehouses: [warehouseId] } : {}),
-      ...(data.bol ? { Notes: `BOL: ${data.bol}` } : {}),
-    };
+    // Resolve Supabase item UUIDs — batch lookup by standardSku
+    const standardSkus = data.receipt_confirmation_line_items
+      .map((item) => SKU_MAPPING[item.sku]?.standardSku)
+      .filter(Boolean) as string[];
 
-    const receipt = await createRecord(TABLES.RECEIPTS, receiptFields);
+    const { data: itemsData } = standardSkus.length > 0
+      ? await db.schema("org_config").from("items").select("id, sku").in("sku", standardSkus)
+      : { data: [] };
+    const skuToId = new Map((itemsData ?? []).map((i) => [i.sku as string, i.id as string]));
 
-    // Build line items — map Stord SKUs to our standard SKUs
-    const lineItemRecords = data.receipt_confirmation_line_items.map((item, index) => {
-      const mapping = SKU_MAPPING[item.sku];
+    // Attempt PO match from order number
+    let resolvedPoId: string | null = null;
+    if (orderNum) {
+      const { data: allPOs } = await db
+        .schema("orchard")
+        .from("purchase_orders")
+        .select("id, po_number");
+      const poList = (allPOs ?? []).map((p) => ({ id: p.id as string, poNumber: p.po_number as string }));
+      const matchedPO = attemptPOMatch(orderNum, poList);
+      if (matchedPO) resolvedPoId = matchedPO.id;
+    }
+
+    const externalId = orderNum || stordReceiptId;
+
+    // Create receipt header
+    const { data: receipt, error: receiptError } = await db
+      .schema("orchard")
+      .from("receipts")
+      .insert({
+        receipt_number: receiptNumber,
+        received_date: data.received_at.split("T")[0],
+        external_id: externalId,
+        stord_receipt_id: stordReceiptId,
+        ...(orderNum ? { po_reference: orderNum } : {}),
+        ...(locationId ? { location_id: locationId } : {}),
+        ...(resolvedPoId ? { po_id: resolvedPoId } : {}),
+        ...(data.bol ? { notes: `BOL: ${data.bol}` } : {}),
+      })
+      .select("id")
+      .single();
+
+    if (receiptError || !receipt) {
+      throw new Error(`Failed to create receipt: ${receiptError?.message}`);
+    }
+
+    // Create receipt lines
+    const lines = data.receipt_confirmation_line_items.map((item) => {
+      const standardSku = SKU_MAPPING[item.sku]?.standardSku;
+      const itemId = standardSku ? (skuToId.get(standardSku) ?? null) : null;
       return {
-        fields: {
-          "Line ID": `${receiptNumber}-${index + 1}`,
-          Receipt: [receipt.id],
-          ...(mapping?.airtableId ? { SKU: [mapping.airtableId] } : {}),
-          "Qty Received": parseFloat(item.quantity) || 0,
-          "3PL SKU": item.sku,
-          "Status": "Open",
-          ...(item.lot_number ? { "Lot Number": item.lot_number } : {}),
-        },
+        receipt_id: receipt.id,
+        item_id: itemId,
+        qty_received: parseFloat(item.quantity) || 0,
+        three_pl_sku: item.sku,
+        lot_number: item.lot_number ?? null,
+        status: "Open",
       };
     });
 
-    if (lineItemRecords.length > 0) {
-      await createRecords(TABLES.RECEIPT_LINES, lineItemRecords);
+    if (lines.length > 0) {
+      const { error: linesError } = await db.schema("orchard").from("receipt_lines").insert(lines);
+      if (linesError) console.error("Failed to insert receipt lines:", linesError);
     }
 
-    // Log activity against PO if we can resolve the order number
-    if (data.order?.order_number) {
-      const allPOs = await getRecords(TABLES.PURCHASE_ORDERS);
-      const poList = allPOs.map((p) => ({
-        id: p.id,
-        poNumber: (p.fields["PO Number"] as string) || "",
-      }));
-      const matchedPO = attemptPOMatch(data.order.order_number, poList);
-      if (matchedPO) {
-        const totalQty = data.receipt_confirmation_line_items.reduce(
-          (sum, item) => sum + (parseFloat(item.quantity) || 0),
-          0
-        );
-        logActivity({
-          poId: matchedPO.id,
-          action: "receipt_created",
-          description: `Receipt ${receiptNumber} received at ${facilityCode} — ${totalQty} units via Stord webhook`,
-          actor: "Orchard AI",
-          relatedRecordType: "receipt",
-          relatedRecordId: receipt.id,
-        });
-      }
+    // Log activity against PO if matched
+    if (resolvedPoId) {
+      const totalQty = data.receipt_confirmation_line_items.reduce(
+        (sum, item) => sum + (parseFloat(item.quantity) || 0),
+        0
+      );
+      logActivity({
+        poId: resolvedPoId,
+        action: "receipt_created",
+        description: `Receipt ${receiptNumber} received at ${facilityCode} — ${totalQty} units via Stord webhook`,
+        actor: "Orchard AI",
+        relatedRecordType: "receipt",
+        relatedRecordId: receipt.id,
+      });
     }
 
-    console.log(`Created receipt ${receiptNumber} from webhook (${data.receipt_confirmation_id})`);
+    console.log(`Created receipt ${receiptNumber} from webhook (${stordReceiptId})`);
     return NextResponse.json({ received: true, receiptNumber });
   } catch (error) {
     console.error("Webhook processing error:", error);
-    // Return 500 so Svix retries delivery
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Processing failed" },
       { status: 500 }

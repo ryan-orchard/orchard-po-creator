@@ -1,281 +1,198 @@
 import { NextResponse } from "next/server";
-import { getRecords, TABLES } from "@/lib/airtable";
+import { db } from "@/lib/supabase";
 import { SKU_MAPPING } from "@/lib/client-config";
 import { attemptPOMatch } from "@/lib/po-matching";
 
 /**
  * GET /api/receipt-lines/matching
  *
- * Returns all receipt lines flattened with:
- * - Suggested PO or WO matches
- * - Full PO/WO option cards with all line items
+ * Returns all receipt lines with their match status, PO/WO options,
+ * and auto-suggested matches.
  */
 export async function GET() {
   try {
+    // Fetch all base data in parallel
     const [
-      allReceipts,
-      allReceiptLines,
-      allPOs,
-      allPOLineItems,
-      allWOs,
-      allWOLines,
-      allItems,
-      allSuppliers,
-      allWarehouses,
+      receiptLinesResult,
+      receiptsResult,
+      poStatusesResult,
+      woResult,
+      itemsResult,
+      suppliersResult,
+      warehousesResult,
     ] = await Promise.all([
-      getRecords(TABLES.RECEIPTS, {
-        sort: [{ field: "Received Date", direction: "desc" }],
-      }),
-      getRecords(TABLES.RECEIPT_LINES),
-      getRecords(TABLES.PURCHASE_ORDERS, {
-        sort: [{ field: "PO Number", direction: "asc" }],
-      }),
-      getRecords(TABLES.PO_LINE_ITEMS),
-      getRecords(TABLES.WORK_ORDERS, {
-        sort: [{ field: "WO Number", direction: "asc" }],
-      }),
-      getRecords(TABLES.WORK_ORDER_LINES),
-      getRecords(TABLES.SKUS),
-      getRecords(TABLES.SUPPLIERS),
-      getRecords(TABLES.WAREHOUSES),
+      db.schema("orchard").from("receipt_lines").select("id, receipt_id, item_id, qty_received, three_pl_sku, lot_number, status"),
+      db.schema("orchard").from("receipts").select("id, receipt_number, received_date, external_id, po_reference, location_id, po_id"),
+      db.schema("orchard_calcs").from("po_statuses").select("po_id, status"),
+      db.schema("orchard").from("work_orders").select("id, wo_number, status, notes"),
+      db.schema("org_config").from("items").select("id, sku, uom"),
+      db.schema("org_config").from("suppliers").select("id, name"),
+      db.schema("org_config").from("warehouses").select("id, code, name"),
     ]);
 
-    const warehouseMap: Record<string, string> = {};
-    for (const wh of allWarehouses) {
-      warehouseMap[wh.id] =
-        (wh.fields["Code"] as string) || (wh.fields["Name"] as string) || wh.id;
-    }
+    const allReceiptLines = receiptLinesResult.data ?? [];
+    const allReceipts = receiptsResult.data ?? [];
+    const allWOs = woResult.data ?? [];
+    const allItems = itemsResult.data ?? [];
 
-    // --- Build lookups ---
-
-    const itemMap: Record<
-      string,
-      { name: string; uom: string; sticksPerCarton: number | null }
-    > = {};
-    for (const item of allItems) {
-      itemMap[item.id] = {
-        name:
-          (item.fields["Standard SKU"] as string) ||
-          (item.fields["Name"] as string) ||
-          item.id,
-        uom: (item.fields["UOM"] as string) || "Each",
-        sticksPerCarton: (item.fields["Sticks per Carton"] as number) || null,
-      };
-    }
-
-    const supplierMap: Record<string, string> = {};
-    for (const s of allSuppliers) {
-      supplierMap[s.id] =
-        (s.fields["Supplier Name"] as string) ||
-        (s.fields["Code"] as string) ||
-        s.id;
-    }
-
-    const receiptMap: Record<
-      string,
-      {
-        receivedDate: string;
-        externalReceiptId: string;
-        orderNumber: string;
-        poReference: string;
-        receiptNumber: string;
-        warehouse: string | null;
-        poId: string | null;
-        woId: string | null;
-      }
-    > = {};
-    for (const r of allReceipts) {
-      const poIds = r.fields["Purchase Order"] as string[] | undefined;
-      const woIds = r.fields["Work Order"] as string[] | undefined;
-      const whIds = r.fields["Warehouses"] as string[] | undefined;
-      const externalId = (r.fields["External Receipt ID"] as string) || "";
-      const poRef = (r.fields["PO Reference"] as string) || "";
-      const notes = (r.fields["Notes"] as string) || "";
-      const notesMatch = notes.match(/^Order:\s*(.+?)(?:\s*\||$)/);
-      // PO Reference wins for matching; fall back to Notes parsing, then External Receipt ID
-      const orderNumber = poRef || (notesMatch ? notesMatch[1].trim() : externalId);
-      receiptMap[r.id] = {
-        receivedDate: (r.fields["Received Date"] as string) || "",
-        externalReceiptId: externalId,
-        orderNumber,
-        poReference: poRef,
-        receiptNumber: (r.fields["Receipt Number"] as string) || "",
-        warehouse: whIds?.[0] ? warehouseMap[whIds[0]] || null : null,
-        poId: poIds?.[0] || null,
-        woId: woIds?.[0] || null,
-      };
-    }
-
-    // --- PO lookups ---
-
-    const poMap: Record<
-      string,
-      { poNumber: string; status: string; date: string; supplierId: string | null }
-    > = {};
-    for (const po of allPOs) {
-      const supplierIds = po.fields["Supplier"] as string[] | undefined;
-      poMap[po.id] = {
-        poNumber: (po.fields["PO Number"] as string) || "",
-        status: (po.fields["Status"] as string) || "",
-        date: (po.fields["Date"] as string) || "",
-        supplierId: supplierIds?.[0] || null,
-      };
-    }
-
-    interface POLineItemInfo {
-      id: string;
-      poId: string;
-      skuId: string;
-      skuName: string;
-      section: string;
-      qtyOrdered: number;
-    }
-
-    const poLineItemMap: Record<string, POLineItemInfo> = {};
-    const poLinesByPOId: Record<string, POLineItemInfo[]> = {};
-
-    for (const li of allPOLineItems) {
-      const poLinks = li.fields["Purchase Order"] as string[] | undefined;
-      const skuLinks = li.fields["SKU"] as string[] | undefined;
-      if (!poLinks?.[0] || !skuLinks?.[0]) continue;
-
-      const poId = poLinks[0];
-      const skuId = skuLinks[0];
-      const item = itemMap[skuId];
-      const uom = item?.uom || "Each";
-      const qtyOrdered =
-        uom === "Carton"
-          ? (li.fields["Qty Cartons"] as number) || 0
-          : (li.fields["Qty Sticks"] as number) ||
-            (li.fields["Qty Cartons"] as number) ||
-            0;
-
-      const info: POLineItemInfo = {
-        id: li.id,
-        poId,
-        skuId,
-        skuName: item?.name || skuId,
-        section: (li.fields["Section"] as string) || "",
-        qtyOrdered,
-      };
-
-      poLineItemMap[li.id] = info;
-      if (!poLinesByPOId[poId]) poLinesByPOId[poId] = [];
-      poLinesByPOId[poId].push(info);
-    }
-
-    const receivedByPOLineItem: Record<string, number> = {};
-    for (const rl of allReceiptLines) {
-      const poLineItemLinks = rl.fields["PO Line Item"] as string[] | undefined;
-      if (poLineItemLinks?.[0]) {
-        const qty = (rl.fields["Qty Received"] as number) || 0;
-        receivedByPOLineItem[poLineItemLinks[0]] =
-          (receivedByPOLineItem[poLineItemLinks[0]] || 0) + qty;
-      }
-    }
-
-    const matchablePOIds = new Set(
-      allPOs
-        .filter((r) => {
-          const status = r.fields["Status"] as string;
-          return status === "Issued" || status === "Partially Received" || status === "Accepted";
-        })
-        .map((r) => r.id)
+    // Build lookups
+    const itemMap = new Map(
+      allItems.map((i) => [i.id as string, { sku: i.sku as string, uom: i.uom as string }])
+    );
+    const skuNameToItemId = new Map(allItems.map((i) => [i.sku as string, i.id as string]));
+    const supplierMap = new Map((suppliersResult.data ?? []).map((s) => [s.id as string, s.name as string]));
+    const warehouseMap = new Map(
+      (warehousesResult.data ?? []).map((w) => [w.id as string, (w.code as string) || (w.name as string)])
     );
 
-    const matchablePOCandidates = allPOs
-      .filter((r) => matchablePOIds.has(r.id))
-      .map((r) => ({
-        id: r.id,
-        poNumber: r.fields["PO Number"] as string,
-      }));
-
-    // --- WO lookups ---
-
-    const woMap: Record<
-      string,
-      { woNumber: string; status: string; description: string }
-    > = {};
-    for (const wo of allWOs) {
-      woMap[wo.id] = {
-        woNumber: (wo.fields["WO Number"] as string) || "",
-        status: (wo.fields["Status"] as string) || "",
-        description: (wo.fields["Notes"] as string) || "",
-      };
-    }
-
-    interface WOLineItemInfo {
-      id: string;
-      woId: string;
-      skuId: string;
-      skuName: string;
-      lineType: string;
-      qty: number;
-    }
-
-    const woLineItemMap: Record<string, WOLineItemInfo> = {};
-    const woOutputLinesByWOId: Record<string, WOLineItemInfo[]> = {};
-
-    for (const wl of allWOLines) {
-      const woLinks = wl.fields["Work Order"] as string[] | undefined;
-      const skuLinks = wl.fields["SKU"] as string[] | undefined;
-      if (!woLinks?.[0] || !skuLinks?.[0]) continue;
-
-      const woId = woLinks[0];
-      const skuId = skuLinks[0];
-      const lineType = (wl.fields["Line Type"] as string) || "";
-      const item = itemMap[skuId];
-
-      const info: WOLineItemInfo = {
-        id: wl.id,
-        woId,
-        skuId,
-        skuName: item?.name || skuId,
-        lineType,
-        qty: (wl.fields["Quantity"] as number) || 0,
-      };
-
-      woLineItemMap[wl.id] = info;
-      // Only output lines are matchable to receipts (outputs are what gets shipped/received)
-      if (lineType === "Output") {
-        if (!woOutputLinesByWOId[woId]) woOutputLinesByWOId[woId] = [];
-        woOutputLinesByWOId[woId].push(info);
-      }
-    }
-
-    // Calculate received qty per WO output line
-    const receivedByWOLineItem: Record<string, number> = {};
-    for (const rl of allReceiptLines) {
-      const woLineItemLinks = rl.fields["Work Order Lines"] as string[] | undefined;
-      if (woLineItemLinks?.[0]) {
-        const qty = (rl.fields["Qty Received"] as number) || 0;
-        receivedByWOLineItem[woLineItemLinks[0]] =
-          (receivedByWOLineItem[woLineItemLinks[0]] || 0) + qty;
-      }
-    }
-
-    // Matchable WOs: Completed status with output lines that have remaining qty
-    const matchableWOIds = new Set(
-      allWOs
-        .filter((wo) => {
-          const status = wo.fields["Status"] as string;
-          return status === "Completed" || status === "Issued" || status === "In Progress";
-        })
-        .map((wo) => wo.id)
+    // Receipt lookup
+    const receiptMap = new Map(
+      allReceipts.map((r) => {
+        const externalId = (r.external_id as string) || "";
+        const poRef = (r.po_reference as string) || "";
+        const orderNumber = poRef || externalId;
+        return [
+          r.id as string,
+          {
+            receiptNumber: (r.receipt_number as string) || "",
+            receivedDate: (r.received_date as string) || "",
+            orderNumber,
+            poReference: poRef,
+            warehouse: r.location_id ? (warehouseMap.get(r.location_id as string) ?? null) : null,
+            poId: (r.po_id as string) || null,
+          },
+        ];
+      })
     );
+
+    // Matchable POs
+    const matchableStatuses = new Set(["Issued", "Accepted", "Partially Received"]);
+    const matchablePoIds = (poStatusesResult.data ?? [])
+      .filter((r) => matchableStatuses.has(r.status as string))
+      .map((r) => r.po_id as string);
+
+    const poStatusMap = new Map((poStatusesResult.data ?? []).map((r) => [r.po_id as string, r.status as string]));
+
+    // Fetch POs and their lines
+    const [posResult, poLinesResult] = await Promise.all([
+      matchablePoIds.length > 0
+        ? db.schema("orchard").from("purchase_orders").select("id, po_number, supplier_id, order_date").in("id", matchablePoIds)
+        : Promise.resolve({ data: [] }),
+      matchablePoIds.length > 0
+        ? db.schema("orchard").from("po_lines").select("id, po_id, item_id, qty").in("po_id", matchablePoIds)
+        : Promise.resolve({ data: [] }),
+    ]);
+
+    const allPOs = posResult.data ?? [];
+    const allPOLines = poLinesResult.data ?? [];
+
+    const poMap = new Map(
+      allPOs.map((po) => [
+        po.id as string,
+        {
+          poNumber: po.po_number as string,
+          status: poStatusMap.get(po.id as string) ?? "",
+          date: (po.order_date as string) ?? "",
+          supplierId: (po.supplier_id as string) ?? null,
+        },
+      ])
+    );
+
+    const poLinesByPO = new Map<string, typeof allPOLines>();
+    for (const pl of allPOLines) {
+      const key = pl.po_id as string;
+      if (!poLinesByPO.has(key)) poLinesByPO.set(key, []);
+      poLinesByPO.get(key)!.push(pl);
+    }
+
+    // Fetch existing po_line_receipt_line_links
+    const allPOLineIds = allPOLines.map((pl) => pl.id as string);
+    const { data: allPoRlLinks } = allPOLineIds.length > 0
+      ? await db
+          .schema("orchard_calcs")
+          .from("po_line_receipt_line_links")
+          .select("po_line_id, receipt_line_id")
+          .in("po_line_id", allPOLineIds)
+      : { data: [] };
+
+    // Which receipt_lines are PO-matched, and what po_line/PO do they link to?
+    const receiptLineToPOLink = new Map<string, { poLineId: string; poId: string }>();
+    const receivedByPoLine = new Map<string, number>();
+
+    for (const link of allPoRlLinks ?? []) {
+      const rlId = link.receipt_line_id as string;
+      const plId = link.po_line_id as string;
+      const pl = allPOLines.find((p) => p.id === plId);
+      if (pl) receiptLineToPOLink.set(rlId, { poLineId: plId, poId: pl.po_id as string });
+    }
+
+    // Sum received qty per po_line (for option cards)
+    const linkedReceiptLineIds = (allPoRlLinks ?? []).map((l) => l.receipt_line_id as string);
+    if (linkedReceiptLineIds.length > 0) {
+      const { data: linkedRLs } = await db
+        .schema("orchard")
+        .from("receipt_lines")
+        .select("id, qty_received")
+        .in("id", linkedReceiptLineIds);
+      const receiptLineQty = new Map(
+        (linkedRLs ?? []).map((rl) => [rl.id as string, Number(rl.qty_received) || 0])
+      );
+      for (const link of allPoRlLinks ?? []) {
+        const qty = receiptLineQty.get(link.receipt_line_id as string) || 0;
+        receivedByPoLine.set(
+          link.po_line_id as string,
+          (receivedByPoLine.get(link.po_line_id as string) || 0) + qty
+        );
+      }
+    }
+
+    // Fetch wo_receipt_links (to know which receipts are WO-linked)
+    const { data: woReceiptLinks } = await db
+      .schema("orchard_calcs")
+      .from("wo_receipt_links")
+      .select("wo_id, receipt_id");
+
+    const receiptToWOId = new Map(
+      (woReceiptLinks ?? []).map((l) => [l.receipt_id as string, l.wo_id as string])
+    );
+
+    // WO output lines (for WO option cards)
+    const matchableWOStatuses = new Set(["Completed", "Issued", "In Progress"]);
+    const matchableWOIds = allWOs
+      .filter((wo) => matchableWOStatuses.has(wo.status as string))
+      .map((wo) => wo.id as string);
+
+    const woMap = new Map(
+      allWOs.map((wo) => [
+        wo.id as string,
+        { woNumber: wo.wo_number as string, status: wo.status as string, description: (wo.notes as string) || "" },
+      ])
+    );
+
+    const { data: woLinesRaw } = matchableWOIds.length > 0
+      ? await db
+          .schema("orchard")
+          .from("work_order_lines")
+          .select("id, wo_id, item_id, qty, line_type")
+          .in("wo_id", matchableWOIds)
+          .eq("line_type", "Output")
+      : { data: [] };
+
+    type WOLineRow = { id: unknown; wo_id: unknown; item_id: unknown; qty: unknown; line_type: unknown };
+    const woOutputLinesByWO = new Map<string, WOLineRow[]>();
+    for (const wl of woLinesRaw ?? []) {
+      const key = wl.wo_id as string;
+      if (!woOutputLinesByWO.has(key)) woOutputLinesByWO.set(key, []);
+      woOutputLinesByWO.get(key)!.push(wl as WOLineRow);
+    }
+
+    // PO candidates for auto-suggest
+    const matchablePOCandidates = allPOs.map((po) => ({
+      id: po.id as string,
+      poNumber: po.po_number as string,
+    }));
 
     // --- Process each receipt line ---
-
-    interface POOptionLineItem {
-      poLineItemId: string;
-      sku: string;
-      skuId: string;
-      section: string;
-      qtyOrdered: number;
-      qtyReceived: number;
-      qtyRemaining: number;
-      isMatchable: boolean;
-    }
 
     interface POOption {
       poId: string;
@@ -283,17 +200,16 @@ export async function GET() {
       poStatus: string;
       poDate: string;
       supplier: string;
-      lineItems: POOptionLineItem[];
-    }
-
-    interface WOOptionLineItem {
-      woLineItemId: string;
-      sku: string;
-      skuId: string;
-      qty: number;
-      qtyReceived: number;
-      qtyRemaining: number;
-      isMatchable: boolean;
+      lineItems: {
+        poLineItemId: string;
+        sku: string;
+        skuId: string;
+        section: string;
+        qtyOrdered: number;
+        qtyReceived: number;
+        qtyRemaining: number;
+        isMatchable: boolean;
+      }[];
     }
 
     interface WOOption {
@@ -301,7 +217,15 @@ export async function GET() {
       woNumber: string;
       woStatus: string;
       description: string;
-      lineItems: WOOptionLineItem[];
+      lineItems: {
+        woLineItemId: string;
+        sku: string;
+        skuId: string;
+        qty: number;
+        qtyReceived: number;
+        qtyRemaining: number;
+        isMatchable: boolean;
+      }[];
     }
 
     interface SuggestedMatch {
@@ -329,16 +253,8 @@ export async function GET() {
       status: "open" | "linked" | "matched" | "excluded";
       reviewNote: string | null;
       suggestedMatch: SuggestedMatch | null;
-      matchedPO: {
-        poId: string;
-        poNumber: string;
-        poLineItemId: string;
-      } | null;
-      matchedWO: {
-        woId: string;
-        woNumber: string;
-        woLineItemId: string;
-      } | null;
+      matchedPO: { poId: string; poNumber: string; poLineItemId: string } | null;
+      matchedWO: { woId: string; woNumber: string; woLineItemId: string } | null;
       poOptions: POOption[];
       woOptions: WOOption[];
     }
@@ -346,142 +262,119 @@ export async function GET() {
     const lines: MatchingLine[] = [];
 
     for (const rl of allReceiptLines) {
-      const receiptIds = rl.fields["Receipt"] as string[] | undefined;
-      if (!receiptIds?.[0]) continue;
-
-      const receipt = receiptMap[receiptIds[0]];
+      const receiptId = rl.receipt_id as string;
+      const receipt = receiptMap.get(receiptId);
       if (!receipt) continue;
 
-      const poLineItemLinks = rl.fields["PO Line Item"] as string[] | undefined;
-      const woLineItemLinks = rl.fields["Work Order Lines"] as string[] | undefined;
-      const skuIds = rl.fields["SKU"] as string[] | undefined;
-      const matchStatus = (rl.fields["Status"] as string) || "Open";
-      const sourceMatch = (rl.fields["Source Match"] as string) || null;
-      const invoiceMatch = (rl.fields["Invoice Match"] as string) || null;
+      const rawItemId = rl.item_id as string | null;
+      const threePlSku = (rl.three_pl_sku as string) || null;
+      const rlStatus = (rl.status as string) || "Open";
 
-      // Resolve SKU
-      let skuId = skuIds?.[0] || null;
-      const threePlSku = (rl.fields["3PL SKU"] as string) || null;
-      if (!skuId && threePlSku) {
+      // Resolve item_id (fall back to SKU_MAPPING for 3PL SKUs)
+      let itemId = rawItemId;
+      if (!itemId && threePlSku) {
         const mapping = SKU_MAPPING[threePlSku];
-        if (mapping) skuId = mapping.airtableId;
+        if (mapping?.standardSku) itemId = skuNameToItemId.get(mapping.standardSku) ?? null;
       }
 
-      const item = skuId ? itemMap[skuId] : null;
-      const isPOMatched = !!(poLineItemLinks && poLineItemLinks.length > 0);
-      const isWOMatched = !!(woLineItemLinks && woLineItemLinks.length > 0);
-      const isSourceLinked = isPOMatched || isWOMatched || sourceMatch === "Linked";
-      const isInvoiceLinked = invoiceMatch === "Linked";
+      const item = itemId ? itemMap.get(itemId) : null;
+
+      // Determine match status
+      const isPOMatched = receiptLineToPOLink.has(rl.id as string);
+      const isWOLinked = receiptToWOId.has(receiptId);
 
       let status: "open" | "linked" | "matched" | "excluded";
-      if (matchStatus === "Excluded") {
+      if (rlStatus === "Excluded") {
         status = "excluded";
-      } else if (isSourceLinked && isInvoiceLinked) {
-        status = "matched";
-      } else if (isSourceLinked) {
+      } else if (rlStatus === "Matched" || isPOMatched || isWOLinked) {
+        // "linked" = source matched but not necessarily invoice matched
+        // Simplified: treat Matched status as "linked" (full match requires invoice too)
         status = "linked";
       } else {
         status = "open";
       }
 
-      // --- Build PO + WO options for open/review lines ---
+      // Build PO and WO options only for open lines with a known SKU
       let suggestedMatch: SuggestedMatch | null = null;
       let poOptions: POOption[] = [];
       let woOptions: WOOption[] = [];
-      const reviewNote = (rl.fields["Review Notes"] as string) || null;
 
-      if (status === "open" && skuId) {
-        // --- PO options ---
+      if (status === "open" && itemId) {
+        // PO options — POs that have a line for this SKU
         const relevantPOIds = new Set<string>();
-        for (const poId of matchablePOIds) {
-          const poLines = poLinesByPOId[poId] || [];
-          const hasThisSku = poLines.some((pl) => pl.skuId === skuId);
-          if (hasThisSku) relevantPOIds.add(poId);
+        for (const [poId, poLines] of poLinesByPO) {
+          if (poLines.some((pl) => pl.item_id === itemId)) relevantPOIds.add(poId);
         }
 
         poOptions = [...relevantPOIds]
           .map((poId) => {
-            const po = poMap[poId];
-            const poLines = poLinesByPOId[poId] || [];
-
-            const lineItems: POOptionLineItem[] = poLines.map((pl) => {
-              const received = receivedByPOLineItem[pl.id] || 0;
-              return {
-                poLineItemId: pl.id,
-                sku: pl.skuName,
-                skuId: pl.skuId,
-                section: pl.section,
-                qtyOrdered: pl.qtyOrdered,
-                qtyReceived: received,
-                qtyRemaining: pl.qtyOrdered - received,
-                isMatchable: pl.skuId === skuId && pl.qtyOrdered - received > 0,
-              };
-            });
+            const po = poMap.get(poId)!;
+            const poLines = poLinesByPO.get(poId) ?? [];
 
             return {
               poId,
               poNumber: po.poNumber,
               poStatus: po.status,
               poDate: po.date,
-              supplier: po.supplierId
-                ? supplierMap[po.supplierId] || ""
-                : "",
-              lineItems,
+              supplier: po.supplierId ? (supplierMap.get(po.supplierId) ?? "") : "",
+              lineItems: poLines.map((pl) => {
+                const plItem = itemMap.get(pl.item_id as string);
+                const received = receivedByPoLine.get(pl.id as string) || 0;
+                const ordered = Number(pl.qty) || 0;
+                return {
+                  poLineItemId: pl.id as string,
+                  sku: plItem?.sku ?? (pl.item_id as string),
+                  skuId: pl.item_id as string,
+                  section: "",
+                  qtyOrdered: ordered,
+                  qtyReceived: received,
+                  qtyRemaining: ordered - received,
+                  isMatchable: pl.item_id === itemId && ordered - received > 0,
+                };
+              }),
             };
           })
-          .sort((a, b) =>
-            a.poNumber.localeCompare(b.poNumber, undefined, { numeric: true })
-          );
+          .sort((a, b) => a.poNumber.localeCompare(b.poNumber, undefined, { numeric: true }));
 
-        // --- WO options ---
+        // WO options — WOs with output lines for this SKU
         const relevantWOIds = new Set<string>();
-        for (const woId of matchableWOIds) {
-          const woLines = woOutputLinesByWOId[woId] || [];
-          const hasThisSku = woLines.some((wl) => wl.skuId === skuId);
-          if (hasThisSku) relevantWOIds.add(woId);
+        for (const [woId, woLines] of woOutputLinesByWO) {
+          if (woLines.some((wl) => wl.item_id === itemId)) relevantWOIds.add(woId);
         }
 
         woOptions = [...relevantWOIds]
           .map((woId) => {
-            const wo = woMap[woId];
-            const woLines = woOutputLinesByWOId[woId] || [];
-
-            const lineItems: WOOptionLineItem[] = woLines.map((wl) => {
-              const received = receivedByWOLineItem[wl.id] || 0;
-              return {
-                woLineItemId: wl.id,
-                sku: wl.skuName,
-                skuId: wl.skuId,
-                qty: wl.qty,
-                qtyReceived: received,
-                qtyRemaining: wl.qty - received,
-                isMatchable: wl.skuId === skuId && wl.qty - received > 0,
-              };
-            });
+            const wo = woMap.get(woId)!;
+            const woLines = woOutputLinesByWO.get(woId) ?? [];
 
             return {
               woId,
               woNumber: wo.woNumber,
               woStatus: wo.status,
               description: wo.description,
-              lineItems,
+              lineItems: woLines.map((wl) => {
+                const wlItem = itemMap.get(wl.item_id as string);
+                const qty = Number(wl.qty) || 0;
+                return {
+                  woLineItemId: wl.id as string,
+                  sku: wlItem?.sku ?? (wl.item_id as string),
+                  skuId: wl.item_id as string,
+                  qty,
+                  qtyReceived: 0, // WO receipts tracked at header level
+                  qtyRemaining: qty,
+                  isMatchable: wl.item_id === itemId,
+                };
+              }),
             };
           })
-          .sort((a, b) =>
-            a.woNumber.localeCompare(b.woNumber, undefined, { numeric: true })
-          );
+          .sort((a, b) => a.woNumber.localeCompare(b.woNumber, undefined, { numeric: true }));
 
-        // --- Auto-suggestion: PO first, then WO ---
-
-        // PO Tier 1: PO number from order number
-        const poMatch = attemptPOMatch(
-          receipt.orderNumber,
-          matchablePOCandidates
-        );
+        // Auto-suggestion: PO Tier 1 — PO number from order number
+        const poMatch = attemptPOMatch(receipt.orderNumber, matchablePOCandidates);
         if (poMatch) {
           const matchedPOOpt = poOptions.find((o) => o.poId === poMatch.id);
           const matchableLine = matchedPOOpt?.lineItems.find(
-            (li) => li.skuId === skuId && li.qtyRemaining > 0
+            (li) => li.skuId === itemId && li.qtyRemaining > 0
           );
           if (matchableLine) {
             suggestedMatch = {
@@ -495,22 +388,13 @@ export async function GET() {
           }
         }
 
-        // PO Tier 2: Exactly one clean PO match (exact SKU + qty, no prior receipts)
+        // PO Tier 2 — exactly one clean PO match (exact SKU + qty, zero prior receipts)
         if (!suggestedMatch) {
-          type CleanMatch = {
-            sourceId: string;
-            sourceNumber: string;
-            lineItemId: string;
-            qty: number;
-          };
-          const cleanPOMatches: CleanMatch[] = [];
+          const receiptQty = Number(rl.qty_received) || 0;
+          const cleanPOMatches: { sourceId: string; sourceNumber: string; lineItemId: string; qty: number }[] = [];
           for (const poOpt of poOptions) {
             for (const li of poOpt.lineItems) {
-              if (
-                li.skuId === skuId &&
-                li.qtyOrdered === (rl.fields["Qty Received"] as number) &&
-                li.qtyReceived === 0
-              ) {
+              if (li.skuId === itemId && li.qtyOrdered === receiptQty && li.qtyReceived === 0) {
                 cleanPOMatches.push({
                   sourceId: poOpt.poId,
                   sourceNumber: poOpt.poNumber,
@@ -525,22 +409,13 @@ export async function GET() {
           }
         }
 
-        // WO Tier: Exactly one clean WO match (exact SKU + qty, no prior receipts)
+        // WO Tier — exactly one clean WO match
         if (!suggestedMatch) {
-          type CleanWOMatch = {
-            sourceId: string;
-            sourceNumber: string;
-            lineItemId: string;
-            qty: number;
-          };
-          const cleanWOMatches: CleanWOMatch[] = [];
+          const receiptQty = Number(rl.qty_received) || 0;
+          const cleanWOMatches: { sourceId: string; sourceNumber: string; lineItemId: string; qty: number }[] = [];
           for (const woOpt of woOptions) {
             for (const li of woOpt.lineItems) {
-              if (
-                li.skuId === skuId &&
-                li.qty === (rl.fields["Qty Received"] as number) &&
-                li.qtyReceived === 0
-              ) {
+              if (li.skuId === itemId && li.qty === receiptQty) {
                 cleanWOMatches.push({
                   sourceId: woOpt.woId,
                   sourceNumber: woOpt.woNumber,
@@ -556,56 +431,44 @@ export async function GET() {
         }
       }
 
-      // --- For matched lines, resolve PO or WO info ---
-      let matchedPO: {
-        poId: string;
-        poNumber: string;
-        poLineItemId: string;
-      } | null = null;
-      if (isPOMatched && poLineItemLinks?.[0]) {
-        const plInfo = poLineItemMap[poLineItemLinks[0]];
-        if (plInfo) {
-          const po = poMap[plInfo.poId];
-          matchedPO = {
-            poId: plInfo.poId,
-            poNumber: po?.poNumber || plInfo.poId,
-            poLineItemId: poLineItemLinks[0],
-          };
-        }
+      // Resolve matchedPO and matchedWO for display
+      let matchedPO: { poId: string; poNumber: string; poLineItemId: string } | null = null;
+      if (isPOMatched) {
+        const link = receiptLineToPOLink.get(rl.id as string)!;
+        const po = poMap.get(link.poId);
+        matchedPO = {
+          poId: link.poId,
+          poNumber: po?.poNumber ?? link.poId,
+          poLineItemId: link.poLineId,
+        };
       }
 
-      let matchedWO: {
-        woId: string;
-        woNumber: string;
-        woLineItemId: string;
-      } | null = null;
-      if (isWOMatched && woLineItemLinks?.[0]) {
-        const wlInfo = woLineItemMap[woLineItemLinks[0]];
-        if (wlInfo) {
-          const wo = woMap[wlInfo.woId];
-          matchedWO = {
-            woId: wlInfo.woId,
-            woNumber: wo?.woNumber || wlInfo.woId,
-            woLineItemId: woLineItemLinks[0],
-          };
-        }
+      let matchedWO: { woId: string; woNumber: string; woLineItemId: string } | null = null;
+      if (isWOLinked) {
+        const woId = receiptToWOId.get(receiptId)!;
+        const wo = woMap.get(woId);
+        matchedWO = {
+          woId,
+          woNumber: wo?.woNumber ?? woId,
+          woLineItemId: "", // WO matching is header-level in Supabase
+        };
       }
 
       lines.push({
-        id: rl.id,
-        receiptId: receiptIds[0],
+        id: rl.id as string,
+        receiptId,
         receiptDate: receipt.receivedDate,
         orderNumber: receipt.orderNumber,
         poReference: receipt.poReference,
         receiptNumber: receipt.receiptNumber,
-        sourceLineId: (rl.fields["Source Line ID"] as string) || null,
+        sourceLineId: null,
         warehouse: receipt.warehouse,
-        sku: item?.name || threePlSku || "Unknown",
-        skuId,
+        sku: item?.sku ?? threePlSku ?? "Unknown",
+        skuId: itemId,
         threePlSku,
-        receiptQty: (rl.fields["Qty Received"] as number) || 0,
+        receiptQty: Number(rl.qty_received) || 0,
         status,
-        reviewNote,
+        reviewNote: null,
         suggestedMatch,
         matchedPO,
         matchedWO,
@@ -614,7 +477,7 @@ export async function GET() {
       });
     }
 
-    // Sort: open first, then linked, then matched, then excluded
+    // Sort: open first, then linked, then matched, then excluded; within each, newest date first
     lines.sort((a, b) => {
       const statusOrder = { open: 0, linked: 1, matched: 2, excluded: 3 };
       if (statusOrder[a.status] !== statusOrder[b.status]) {
@@ -634,9 +497,7 @@ export async function GET() {
   } catch (error) {
     console.error("Receipt lines matching error:", error);
     return NextResponse.json(
-      {
-        error: `Failed to load matching data: ${error instanceof Error ? error.message : "Unknown error"}`,
-      },
+      { error: `Failed to load matching data: ${error instanceof Error ? error.message : "Unknown error"}` },
       { status: 500 }
     );
   }

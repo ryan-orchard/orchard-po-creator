@@ -1,66 +1,73 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireOperator } from "@/lib/auth";
-import { getRecords, updateRecord, TABLES } from "@/lib/airtable";
+import { db } from "@/lib/supabase";
 
 /**
  * POST /api/invoices/[id]/unmatch
  *
- * Clears the invoice match at line level:
- * - Removes Receipt Line + PO Line Item links on all invoice lines
- * - Clears Purchase Order header link
- * - Resets Match Status to Open
+ * Clears the invoice match:
+ * - Deletes po_line_invoice_line_links for all invoice lines
+ * - Deletes receipt_line_invoice_line_links for all invoice lines
+ * - Resets invoice.match_status to Open
+ * - Syncs invoice_statuses.match_status
  */
 export async function POST(
   _request: NextRequest,
-  {
- params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const authError = await requireOperator();
   if (authError) return authError;
   try {
     const { id: invoiceId } = await params;
 
-    // 1. Clear Receipt Line + PO Line Item links on all invoice lines
-    const allInvoiceLines = await getRecords(TABLES.INVOICE_LINES);
-    const thisInvoiceLines = allInvoiceLines.filter((il) => {
-      const invoiceIds = il.fields["Invoice"] as string[] | undefined;
-      return invoiceIds?.[0] === invoiceId;
-    });
+    // Get all invoice lines for this invoice
+    const { data: invoiceLines } = await db
+      .schema("orchard")
+      .from("invoice_lines")
+      .select("id")
+      .eq("invoice_id", invoiceId);
 
-    const linkedLines = thisInvoiceLines.filter((il) => {
-      const poLink = il.fields["PO Line Item"] as string[] | undefined;
-      const receiptLink = il.fields["Receipt Line"] as string[] | undefined;
-      return (poLink && poLink.length > 0) || (receiptLink && receiptLink.length > 0);
-    });
+    const invoiceLineIds = (invoiceLines ?? []).map((il) => il.id as string);
 
-    if (linkedLines.length > 0) {
-      await Promise.all(
-        linkedLines.map((il) =>
-          updateRecord(TABLES.INVOICE_LINES, il.id, {
-            "PO Line Item": [],
-            "Receipt Line": [],
-          })
-        )
-      );
+    let linesCleared = 0;
+    if (invoiceLineIds.length > 0) {
+      // Delete po_line_invoice_line_links
+      const { data: poLinks } = await db
+        .schema("orchard_calcs")
+        .from("po_line_invoice_line_links")
+        .delete()
+        .in("invoice_line_id", invoiceLineIds)
+        .select("id");
+      linesCleared += (poLinks ?? []).length;
+
+      // Delete receipt_line_invoice_line_links
+      const { data: receiptLinks } = await db
+        .schema("orchard_calcs")
+        .from("receipt_line_invoice_line_links")
+        .delete()
+        .in("invoice_line_id", invoiceLineIds)
+        .select("id");
+      linesCleared += (receiptLinks ?? []).length;
     }
 
-    // 2. Clear header PO link and reset status
-    await updateRecord(TABLES.INVOICES, invoiceId, {
-      "Purchase Order": [],
-      "Status": "Open",
-    });
+    // Reset invoice match_status
+    await db
+      .schema("orchard")
+      .from("invoices")
+      .update({ match_status: "Open" })
+      .eq("id", invoiceId);
 
-    return NextResponse.json({
-      success: true,
-      invoiceId,
-      linesCleared: linkedLines.length,
-    });
+    // Sync invoice_statuses
+    await db
+      .schema("orchard_calcs")
+      .from("invoice_statuses")
+      .upsert({ invoice_id: invoiceId, match_status: "Open", updated_by: "Ryan Belanger" }, { onConflict: "invoice_id" });
+
+    return NextResponse.json({ success: true, invoiceId, linesCleared });
   } catch (error) {
     console.error("Invoice unmatch error:", error);
     return NextResponse.json(
-      {
-        error: `Failed to unmatch invoice: ${error instanceof Error ? error.message : "Unknown error"}`,
-      },
+      { error: `Failed to unmatch invoice: ${error instanceof Error ? error.message : "Unknown error"}` },
       { status: 500 }
     );
   }

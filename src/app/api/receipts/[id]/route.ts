@@ -1,112 +1,84 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getRecord, getRecords, updateRecord, deleteRecord, deleteRecords, TABLES } from "@/lib/airtable";
-import { SKU_MAPPING } from "@/lib/client-config";
+import { db } from "@/lib/supabase";
 
-/**
- * GET /api/receipts/[id]
- *
- * Returns a single receipt with full line item details.
- */
 export async function GET(
-  request: NextRequest,
+  _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
-    const { id } = await params;
+  const { id } = await params;
 
-    const receipt = await getRecord(TABLES.RECEIPTS, id);
-    if (!receipt) {
+  try {
+    const [receiptResult, linesResult] = await Promise.all([
+      db.schema("orchard").from("receipts").select("*").eq("id", id).single(),
+      db.schema("orchard").from("receipt_lines").select("*").eq("receipt_id", id),
+    ]);
+
+    if (receiptResult.error || !receiptResult.data) {
       return NextResponse.json({ error: "Receipt not found" }, { status: 404 });
     }
 
-    // Fetch related data in parallel
-    const [allLines, allPOs, allWarehouses, allSKUs] = await Promise.all([
-      getRecords(TABLES.RECEIPT_LINES),
-      getRecords(TABLES.PURCHASE_ORDERS),
-      getRecords(TABLES.WAREHOUSES),
-      getRecords(TABLES.SKUS),
+    const r = receiptResult.data as Record<string, unknown>;
+    const lines = linesResult.data ?? [];
+
+    // Fetch items, locations, and PO in parallel
+    const itemIds = [...new Set(lines.map((l) => l.item_id as string).filter(Boolean))];
+    const [itemsResult, locResult, posResult, availableItemsResult] = await Promise.all([
+      itemIds.length
+        ? db.schema("org_config").from("items").select("id, sku, unit_of_measure").in("id", itemIds)
+        : { data: [] },
+      db.schema("org_config").from("locations").select("id, code, name").eq("id", r.location_id as string).single(),
+      r.po_id
+        ? db.schema("orchard").from("purchase_orders").select("id, po_number").eq("id", r.po_id as string).single()
+        : { data: null },
+      db.schema("org_config").from("items").select("id, sku").eq("is_active", true).order("sku"),
     ]);
 
-    // Filter lines for this receipt
-    const receiptLines = allLines.filter((rl) => {
-      const receiptIds = rl.fields["Receipt"] as string[] | undefined;
-      return receiptIds?.[0] === id;
-    });
+    const itemMap = new Map((itemsResult.data ?? []).map((i) => [i.id, i]));
+    const loc = locResult.data;
+    const po = posResult.data;
 
-    // Build lookup maps
-    const poMap: Record<string, { poNumber: string; id: string }> = {};
-    for (const po of allPOs) {
-      poMap[po.id] = { poNumber: po.fields["PO Number"] as string, id: po.id };
-    }
+    // Check which receipt lines are linked to PO lines
+    const lineIds = lines.map((l) => l.id as string);
+    const { data: links } = lineIds.length
+      ? await db.schema("orchard_calcs").from("po_line_receipt_line_links").select("receipt_line_id").in("receipt_line_id", lineIds)
+      : { data: [] };
+    const matchedLineIds = new Set((links ?? []).map((l) => l.receipt_line_id as string));
 
-    const warehouseMap: Record<string, string> = {};
-    for (const wh of allWarehouses) {
-      warehouseMap[wh.id] = (wh.fields["Code"] as string) || (wh.fields["Name"] as string) || wh.id;
-    }
-
-    const skuMap: Record<string, { standardSku: string; uom: string }> = {};
-    for (const sku of allSKUs) {
-      skuMap[sku.id] = {
-        standardSku: (sku.fields["Standard SKU"] as string) || (sku.fields["Name"] as string) || sku.id,
-        uom: (sku.fields["UOM"] as string) || "Each",
-      };
-    }
-
-    const poIds = receipt.fields["Purchase Order"] as string[] | undefined;
-    const warehouseIds = receipt.fields["Warehouses"] as string[] | undefined;
-    const poInfo = poIds?.[0] ? poMap[poIds[0]] : null;
-
-    // Available items for SKU editing
-    const availableItems = allSKUs
-      .filter((item) => (item.fields["Status"] as string) !== "Inactive")
-      .map((item) => ({
-        id: item.id,
-        standardSku: (item.fields["Standard SKU"] as string) || (item.fields["Name"] as string) || item.id,
-      }))
-      .sort((a, b) => a.standardSku.localeCompare(b.standardSku));
-
-    const lines = receiptLines.map((l) => {
-      const skuIds = l.fields["SKU"] as string[] | undefined;
-      let skuId = skuIds?.[0] || null;
-      const threePlSku = (l.fields["3PL SKU"] as string) || null;
-      const poLineItemLink = l.fields["PO Line Item"] as string[] | undefined;
-
-      // Fallback: resolve from 3PL SKU mapping if no direct SKU link
-      if (!skuId && threePlSku) {
-        const mapping = SKU_MAPPING[threePlSku];
-        if (mapping) skuId = mapping.airtableId;
-      }
-
-      const skuInfo = skuId ? skuMap[skuId] : null;
-
+    type Item = { id: string; sku: string; unit_of_measure: string };
+    const mappedLines = lines.map((l) => {
+      const item = itemMap.get(l.item_id as string) as Item | undefined;
       return {
         id: l.id,
-        skuId,
-        sku: skuInfo?.standardSku || null,
-        uom: skuInfo?.uom || null,
-        qtyReceived: (l.fields["Qty Received"] as number) || 0,
-        threePlSku,
-        lotNumber: (l.fields["Lot Number"] as string) || null,
-        matched: !!(poLineItemLink && poLineItemLink.length > 0),
+        skuId: l.item_id ?? null,
+        sku: item?.sku ?? null,
+        uom: item?.unit_of_measure ?? null,
+        qtyReceived: Number(l.qty_received) || 0,
+        threePlSku: l.three_pl_sku ?? null,
+        lotNumber: l.lot_number ?? null,
+        matched: matchedLineIds.has(l.id as string),
       };
     });
 
+    const availableItems = (availableItemsResult.data ?? []).map((i) => ({
+      id: i.id,
+      standardSku: i.sku,
+    }));
+
     return NextResponse.json({
-      id: receipt.id,
-      receiptNumber: receipt.fields["Receipt Number"] as string,
-      receivedDate: receipt.fields["Received Date"] as string,
-      externalReceiptId: (receipt.fields["External Receipt ID"] as string) || null,
-      stordReceiptId: (receipt.fields["Stord Receipt ID"] as string) || null,
-      notes: (receipt.fields["Notes"] as string) || null,
-      purchaseOrder: poInfo?.poNumber || null,
-      purchaseOrderId: poInfo?.id || null,
-      warehouse: warehouseIds?.[0] ? warehouseMap[warehouseIds[0]] : null,
-      warehouseId: warehouseIds?.[0] || null,
-      lines,
+      id: r.id,
+      receiptNumber: r.receipt_number,
+      receivedDate: r.received_date,
+      externalReceiptId: r.external_id ?? null,
+      stordReceiptId: r.stord_receipt_id ?? null,
+      notes: r.notes ?? null,
+      purchaseOrder: po?.po_number ?? null,
+      purchaseOrderId: po?.id ?? null,
+      warehouse: loc ? (loc.code ?? loc.name) : null,
+      warehouseId: r.location_id,
+      lines: mappedLines,
       availableItems,
     });
   } catch (error) {
-    console.error("Get receipt error:", error);
     return NextResponse.json(
       { error: `Failed to get receipt: ${error instanceof Error ? error.message : "Unknown error"}` },
       { status: 500 }
@@ -114,71 +86,41 @@ export async function GET(
   }
 }
 
-/**
- * PATCH /api/receipts/[id]
- *
- * Update receipt header fields.
- */
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
-    const { id } = await params;
-    const body = await request.json();
-    const updates: Record<string, unknown> = {};
+  const { id } = await params;
+  const body = await request.json();
 
-    if (body.notes !== undefined) updates["Notes"] = body.notes;
-    if (body.externalReceiptId !== undefined) updates["External Receipt ID"] = body.externalReceiptId;
-    if (body.receivedDate !== undefined) updates["Received Date"] = body.receivedDate;
-    if (body.warehouseId !== undefined) updates["Warehouses"] = body.warehouseId ? [body.warehouseId] : [];
-    if (body.purchaseOrderId !== undefined) updates["Purchase Order"] = body.purchaseOrderId ? [body.purchaseOrderId] : [];
+  const updates: Record<string, unknown> = {};
+  if (body.notes !== undefined) updates.notes = body.notes;
+  if (body.externalReceiptId !== undefined) updates.external_id = body.externalReceiptId;
+  if (body.receivedDate !== undefined) updates.received_date = body.receivedDate;
+  if (body.warehouseId !== undefined) updates.location_id = body.warehouseId || null;
+  if (body.purchaseOrderId !== undefined) updates.po_id = body.purchaseOrderId || null;
 
-    if (Object.keys(updates).length === 0) {
-      return NextResponse.json({ error: "No fields to update" }, { status: 400 });
-    }
-
-    await updateRecord(TABLES.RECEIPTS, id, updates);
-    return NextResponse.json({ success: true, id });
-  } catch (error) {
-    console.error("Update receipt error:", error);
-    return NextResponse.json(
-      { error: `Failed to update: ${error instanceof Error ? error.message : "Unknown error"}` },
-      { status: 500 }
-    );
+  if (Object.keys(updates).length === 0) {
+    return NextResponse.json({ error: "No fields to update" }, { status: 400 });
   }
+
+  const { error } = await db.schema("orchard").from("receipts").update(updates).eq("id", id);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ success: true, id });
 }
 
-/**
- * DELETE /api/receipts/[id]
- *
- * Delete a receipt and all its receipt lines.
- */
 export async function DELETE(
-  request: NextRequest,
+  _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params;
+
   try {
-    const { id } = await params;
-
-    // Find all receipt lines for this receipt
-    const allLines = await getRecords(TABLES.RECEIPT_LINES);
-    const lineIds = allLines
-      .filter((rl) => {
-        const receiptIds = rl.fields["Receipt"] as string[] | undefined;
-        return receiptIds?.[0] === id;
-      })
-      .map((rl) => rl.id);
-
-    // Delete lines first, then the receipt
-    if (lineIds.length > 0) {
-      await deleteRecords(TABLES.RECEIPT_LINES, lineIds);
-    }
-    await deleteRecord(TABLES.RECEIPTS, id);
-
-    return NextResponse.json({ success: true, deleted: { receipt: id, lines: lineIds.length } });
+    // receipt_lines cascade on delete via FK
+    const { error } = await db.schema("orchard").from("receipts").delete().eq("id", id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Delete receipt error:", error);
     return NextResponse.json(
       { error: `Failed to delete: ${error instanceof Error ? error.message : "Unknown error"}` },
       { status: 500 }

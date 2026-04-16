@@ -1,25 +1,32 @@
 import { NextResponse } from "next/server";
-import { getRecords, TABLES } from "@/lib/airtable";
+import { db } from "@/lib/supabase";
 
 export async function GET() {
-  const records = await getRecords(TABLES.SUPPLIERS, {
-    sort: [{ field: "Supplier Name", direction: "asc" }],
-  });
+  const { data, error } = await db
+    .schema("org_config")
+    .from("suppliers")
+    .select("*")
+    .order("name");
 
-  const suppliers = records.map((r) => ({
-    id: r.id,
-    name: r.fields["Supplier Name"] as string,
-    type: r.fields["Type"] as string,
-    address: r.fields["Address"] as string,
-    city: r.fields["City"] as string,
-    state: r.fields["State"] as string,
-    zip: r.fields["Zip"] as string,
-    contactName: r.fields["Contact Name"] as string,
-    contactEmail: r.fields["Contact Email"] as string,
-    paymentTerms: r.fields["Payment Terms"] as string,
-    shippingTerms: r.fields["Shipping Terms"] as string,
-    categories: (r.fields["Category"] as string[]) || [],
-  }));
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  return NextResponse.json(suppliers);
+  return NextResponse.json(
+    data.map((s) => ({
+      id: s.id,
+      name: s.name,
+      code: s.code,
+      contactEmail: s.contact_email,
+      contactPhone: s.contact_phone,
+      // fields not in new schema — preserved as null for API compatibility
+      type: null,
+      address: null,
+      city: null,
+      state: null,
+      zip: null,
+      contactName: null,
+      paymentTerms: null,
+      shippingTerms: null,
+      categories: [],
+    }))
+  );
 }

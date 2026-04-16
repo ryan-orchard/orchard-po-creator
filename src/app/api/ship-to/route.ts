@@ -1,44 +1,53 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getRecords, createRecord, TABLES } from "@/lib/airtable";
+import { db } from "@/lib/supabase";
 
 export async function GET() {
-  const records = await getRecords(TABLES.SHIP_TO, {
-    sort: [{ field: "Name", direction: "asc" }],
-  });
+  const { data, error } = await db
+    .schema("org_config")
+    .from("locations")
+    .select("*")
+    .order("name");
 
-  const locations = records.map((r) => ({
-    id: r.id,
-    name: r.fields["Name"] as string,
-    code: (r.fields["Code"] as string) || null,
-    address: r.fields["Address"] as string,
-    city: r.fields["City"] as string,
-    state: r.fields["State"] as string,
-    zip: r.fields["Zip"] as string,
-    isDefault: r.fields["Is Default"] as boolean,
-  }));
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  return NextResponse.json(locations);
+  return NextResponse.json(
+    data.map((l) => ({
+      id: l.id,
+      name: l.name,
+      code: l.code,
+      // fields not in new schema — preserved as null for API compatibility
+      address: null,
+      city: null,
+      state: null,
+      zip: null,
+      isDefault: false,
+    }))
+  );
 }
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
 
-  const record = await createRecord(TABLES.SHIP_TO, {
-    Name: body.name,
-    Address: body.address || "",
-    City: body.city || "",
-    State: body.state || "",
-    Zip: body.zip || "",
-    "Is Default": false,
-  });
+  const { data, error } = await db
+    .schema("org_config")
+    .from("locations")
+    .insert({
+      name: body.name,
+      code: body.code ?? body.name.toUpperCase().slice(0, 8),
+    })
+    .select()
+    .single();
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   return NextResponse.json({
-    id: record.id,
-    name: record.fields["Name"] as string,
-    address: record.fields["Address"] as string,
-    city: record.fields["City"] as string,
-    state: record.fields["State"] as string,
-    zip: record.fields["Zip"] as string,
+    id: data.id,
+    name: data.name,
+    code: data.code,
+    address: null,
+    city: null,
+    state: null,
+    zip: null,
     isDefault: false,
   });
 }

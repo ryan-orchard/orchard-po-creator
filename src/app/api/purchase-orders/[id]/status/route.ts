@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { updateRecord, TABLES } from "@/lib/airtable";
+import { db } from "@/lib/supabase";
 import { logActivity } from "@/lib/activity-log";
 
 export async function PATCH(
@@ -10,16 +10,30 @@ export async function PATCH(
   const { status, soNumber } = await request.json();
 
   try {
-    // Write status first — always succeeds independently of SO number
-    await updateRecord(TABLES.PURCHASE_ORDERS, id, { Status: status });
+    // Upsert status (row was seeded at PO creation; upsert handles any edge cases)
+    const { error: statusError } = await db
+      .schema("orchard_calcs")
+      .from("po_statuses")
+      .upsert(
+        { po_id: id, status, updated_at: new Date().toISOString(), updated_by: "Ryan Belanger" },
+        { onConflict: "po_id" }
+      );
+
+    if (statusError) {
+      return NextResponse.json({ error: statusError.message }, { status: 500 });
+    }
 
     // Write SO number separately so a field issue doesn't block the status save
     if (soNumber) {
       try {
-        await updateRecord(TABLES.PURCHASE_ORDERS, id, { "ANS SO Number": soNumber });
+        await db
+          .schema("orchard")
+          .from("purchase_orders")
+          .update({ so_number: soNumber })
+          .eq("id", id);
       } catch (soErr) {
-        console.error("Failed to save ANS SO Number:", soErr);
-        // Still return success — status was saved; SO number can be entered manually
+        console.error("Failed to save SO number:", soErr);
+        // Still return success — status was saved
       }
     }
 
@@ -34,9 +48,6 @@ export async function PATCH(
 
     return NextResponse.json({ success: true });
   } catch {
-    return NextResponse.json(
-      { error: "Failed to update status" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to update status" }, { status: 500 });
   }
 }
