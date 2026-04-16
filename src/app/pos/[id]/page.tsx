@@ -16,10 +16,11 @@ interface LinkedInvoice {
   invoiceNumber: string;
   invoiceDate: string | null;
   matchStatus: string | null;
+  paymentStatus: string | null;
   totalAmount: number | null;
 }
 
-const ANS_SUPPLIER_ID = "recQ9MHAO091WGTOO";
+const ANS_SUPPLIER_CODE = "ANS";
 
 interface PODetail {
   id: string;
@@ -244,7 +245,7 @@ export default function PODetailPage() {
     if (!po) return;
     setShowStatusMenu(false);
     // Intercept Accepted for ANS POs — prompt for SO number first
-    if (newStatus === "Accepted" && po.supplierId === ANS_SUPPLIER_ID) {
+    if (newStatus === "Accepted" && po.supplier?.name === ANS_SUPPLIER_CODE) {
       setSoInput("");
       setShowSoModal(true);
       return;
@@ -1183,17 +1184,22 @@ export default function PODetailPage() {
                     {po.invoices.map((inv: LinkedInvoice) => (
                       <a
                         key={inv.id}
-                        href={`/match?from=invoice&id=${inv.id}`}
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1 text-sm font-medium text-warm-700 bg-warm-50 border border-warm-200 rounded-md hover:bg-warm-100 transition-colors"
+                        href={`/invoices/${inv.id}`}
+                        className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-800 bg-white border border-gray-200 rounded-lg hover:border-gray-300 hover:shadow-sm transition-all"
                       >
-                        #{inv.invoiceNumber}
-                        {inv.matchStatus && (
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
-                            inv.matchStatus === "Matched" ? "bg-sage-100 text-sage-700" :
-                            inv.matchStatus === "Discrepancy" ? "bg-gold-100 text-gold-700" :
-                            "bg-gray-100 text-gray-600"
+                        <span className="font-mono text-xs text-gray-500">#{inv.invoiceNumber}</span>
+                        {inv.totalAmount != null && (
+                          <span className="text-sm font-semibold text-gray-900">
+                            {inv.totalAmount.toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                          </span>
+                        )}
+                        {inv.paymentStatus && (
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${
+                            inv.paymentStatus === "Paid" ? "bg-sage-100 text-sage-700" :
+                            inv.paymentStatus === "Disputed" ? "bg-burgundy-100 text-burgundy-700" :
+                            "bg-gray-100 text-gray-500"
                           }`}>
-                            {inv.matchStatus}
+                            {inv.paymentStatus}
                           </span>
                         )}
                       </a>
