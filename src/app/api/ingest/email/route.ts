@@ -77,6 +77,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ received: true, skipped: true, reason: "duplicate" });
   }
 
+  // Debug: log what Postmark sent
+  const attachmentSummary = (payload.Attachments || []).map((a) => ({
+    name: a.Name,
+    type: a.ContentType,
+    size: a.ContentLength,
+    hasContent: !!a.Content,
+    contentID: a.ContentID || null,
+  }));
+  console.log(`Ingest email: ${payload.Subject} | Attachments: ${JSON.stringify(attachmentSummary)}`);
+
   // Store email record
   const { data: emailRecord, error: emailError } = await db
     .schema("orchard")
@@ -90,6 +100,7 @@ export async function POST(request: NextRequest) {
       subject: payload.Subject || null,
       received_at: payload.Date || new Date().toISOString(),
       status: "processing",
+      error_message: `attachments: ${JSON.stringify(attachmentSummary)}`,
     })
     .select("id")
     .single();
