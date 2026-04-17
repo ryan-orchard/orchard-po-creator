@@ -3,6 +3,7 @@ import { requireOperator } from "@/lib/auth";
 import { db } from "@/lib/supabase";
 import { generateNextNumber } from "@/lib/sequence";
 import { logActivity } from "@/lib/activity-log";
+import { resolveItem } from "@/lib/ingest";
 
 export async function POST(
   request: NextRequest,
@@ -98,15 +99,23 @@ export async function POST(
       );
     }
 
-    // Create invoice lines
+    // Create invoice lines — resolve items from descriptions
     if (parsed.lines?.length) {
-      const lines = parsed.lines.map((line) => ({
-        invoice_id: invoice.id,
-        item_id: null, // TODO: resolve item from description
-        qty: line.quantity,
-        unit_price: line.unitPrice,
-        total: line.amount,
-      }));
+      const lines = await Promise.all(
+        parsed.lines.map(async (line) => {
+          const item = await resolveItem(line.description);
+          return {
+            invoice_id: invoice.id,
+            item_id: item?.id || null,
+            sku: item?.sku || null,
+            description: line.description,
+            qty: line.quantity,
+            unit: line.unit || "EA",
+            unit_price: line.unitPrice,
+            total: line.amount,
+          };
+        })
+      );
 
       const { error: linesError } = await db
         .schema("orchard")

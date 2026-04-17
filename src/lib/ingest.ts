@@ -300,6 +300,39 @@ export async function storeAttachment(
   return path;
 }
 
+// ── Resolve item ──────────────────────────────────────────────────
+
+export async function resolveItem(description: string): Promise<{ id: string; sku: string; name: string } | null> {
+  const { data: items } = await db
+    .schema("org_config")
+    .from("items")
+    .select("id, sku, name");
+
+  if (!items?.length) return null;
+
+  const lower = description.toLowerCase();
+
+  // Exact name match
+  const exact = items.find((i) => (i.name as string).toLowerCase() === lower);
+  if (exact) return { id: exact.id as string, sku: exact.sku as string, name: exact.name as string };
+
+  // Partial match — description contains item name or vice versa
+  const partial = items.find(
+    (i) =>
+      lower.includes((i.name as string).toLowerCase()) ||
+      (i.name as string).toLowerCase().includes(lower)
+  );
+  if (partial) return { id: partial.id as string, sku: partial.sku as string, name: partial.name as string };
+
+  // SKU match — check if description contains a SKU
+  const skuMatch = items.find(
+    (i) => lower.includes((i.sku as string).toLowerCase())
+  );
+  if (skuMatch) return { id: skuMatch.id as string, sku: skuMatch.sku as string, name: skuMatch.name as string };
+
+  return null;
+}
+
 // ── Utils ──────────────────────────────────────────────────────────
 
 function extractJson(raw: string): string {

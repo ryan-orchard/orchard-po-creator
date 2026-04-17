@@ -272,7 +272,7 @@ export default function InboxPage() {
                       <DetailRow label="Tracking #" value={parsed.trackingNumber} />
                       <DetailRow label="Ship To" value={parsed.shipTo} />
                       <DetailRow label="Type" value={parsed.suggestedType} />
-                      <DetailRow label="Supplier Resolved" value={doc.supplier_id ? "Yes" : "No"} highlight={!!doc.supplier_id} warn={!doc.supplier_id} />
+                      <DetailRow label="Existing Supplier" value={doc.supplier_id ? "Yes" : "No"} highlight={!!doc.supplier_id} warn={!doc.supplier_id} />
                     </div>
 
                     {/* Line items */}
