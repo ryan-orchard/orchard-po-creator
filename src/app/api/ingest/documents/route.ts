@@ -6,9 +6,9 @@ export async function GET(request: NextRequest) {
   const authError = await requireOperator();
   if (authError) return authError;
 
-  const status = request.nextUrl.searchParams.get("status") || "pending";
+  const status = request.nextUrl.searchParams.get("status"); // null = all
 
-  const { data: documents, error } = await db
+  let query = db
     .schema("orchard")
     .from("ingested_documents")
     .select(`
@@ -26,6 +26,7 @@ export async function GET(request: NextRequest) {
       invoice_number,
       status,
       created_at,
+      reviewed_at,
       ingested_emails (
         from_address,
         from_name,
@@ -33,8 +34,16 @@ export async function GET(request: NextRequest) {
         received_at
       )
     `)
-    .eq("status", status)
     .order("created_at", { ascending: false });
+
+  if (status) {
+    query = query.eq("status", status);
+  } else {
+    // Exclude rejected by default when no filter specified
+    query = query.neq("status", "rejected");
+  }
+
+  const { data: documents, error } = await query;
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

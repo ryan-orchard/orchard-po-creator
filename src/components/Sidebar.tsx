@@ -31,6 +31,7 @@ const NAV_SECTIONS = [
   {
     label: "ADMIN",
     items: [
+      { name: "Inbox", href: "/inbox", icon: InboxIcon },
       { name: "Data Ingestion", href: "/warehouse/data-ingestion", icon: UploadIcon },
       { name: "Items", href: "/items", icon: TagIcon },
     ],
