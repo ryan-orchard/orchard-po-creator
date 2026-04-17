@@ -388,11 +388,14 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Mark email as processed
+  // Mark email as processed — keep diagnostics if no documents were created
+  const diagnosticMsg = results.length === 0
+    ? `No documents created. hasRawEmail: ${hasRawEmail}, attachments: ${JSON.stringify(attachmentSummary)}`
+    : null;
   await db
     .schema("orchard")
     .from("ingested_emails")
-    .update({ status: "processed", error_message: null })
+    .update({ status: "processed", error_message: diagnosticMsg })
     .eq("id", emailId);
 
   console.log(`Processed email ${payload.MessageID}: ${results.length} documents`);
