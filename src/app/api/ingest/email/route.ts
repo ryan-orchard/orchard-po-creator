@@ -187,8 +187,16 @@ export async function POST(request: NextRequest) {
     contentID: a.ContentID || null,
   }));
   const hasRawEmail = !!payload.RawEmail;
+  const rawEmailLength = payload.RawEmail ? payload.RawEmail.length : 0;
+  // Log all top-level keys to diagnose what Postmark actually sends
+  const payloadKeys = Object.keys(payload).map((k) => {
+    const val = (payload as unknown as Record<string, unknown>)[k];
+    if (typeof val === "string") return `${k}(${val.length})`;
+    if (Array.isArray(val)) return `${k}[${val.length}]`;
+    return k;
+  });
   console.log(
-    `Ingest email: "${payload.Subject}" | ${attachmentSummary.length} attachments | hasRawEmail: ${hasRawEmail} | details: ${JSON.stringify(attachmentSummary)}`
+    `Ingest email: "${payload.Subject}" | keys: ${payloadKeys.join(",")} | hasRawEmail: ${hasRawEmail} (${rawEmailLength} chars) | attachments: ${JSON.stringify(attachmentSummary)}`
   );
 
   // Store email record
@@ -388,10 +396,8 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Mark email as processed — keep diagnostics if no documents were created
-  const diagnosticMsg = results.length === 0
-    ? `No documents created. hasRawEmail: ${hasRawEmail}, attachments: ${JSON.stringify(attachmentSummary)}`
-    : null;
+  // Mark email as processed — always keep diagnostics for now
+  const diagnosticMsg = `keys: ${payloadKeys.join(",")} | hasRawEmail: ${hasRawEmail} (${rawEmailLength}) | atts: ${JSON.stringify(attachmentSummary)} | results: ${JSON.stringify(results)}`;
   await db
     .schema("orchard")
     .from("ingested_emails")
