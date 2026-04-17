@@ -40,9 +40,14 @@ export async function POST(
       paymentTerms: string | null;
       vendor: string;
       poReference: string | null;
-      invoiceAmount: number;
+      salesOrder: string | null;
+      trackingNumber: string | null;
+      shipTo: string | null;
+      deliveryTerms: string | null;
+      subtotal: number | null;
       freight: number | null;
       tax: number | null;
+      invoiceAmount: number;
       lines: { description: string; quantity: number; unit: string; unitPrice: number; amount: number }[];
       suggestedType: string;
     };
@@ -66,15 +71,22 @@ export async function POST(
       .insert({
         invoice_number: parsed.invoiceNumber,
         supplier_id: supplierId,
+        po_id: poId || null,
         invoice_date: parsed.invoiceDate,
         due_date: parsed.dueDate || null,
+        payment_terms: parsed.paymentTerms || null,
+        sales_order: parsed.salesOrder || null,
+        tracking_number: parsed.trackingNumber || null,
+        ship_to_text: parsed.shipTo || null,
+        delivery_terms: parsed.deliveryTerms || null,
+        subtotal: parsed.subtotal || 0,
+        freight: parsed.freight || 0,
+        tax: parsed.tax || 0,
         total_amount: parsed.invoiceAmount,
-        notes: [
-          parsed.paymentTerms ? `Terms: ${parsed.paymentTerms}` : null,
-          parsed.suggestedType ? `Type: ${parsed.suggestedType}` : null,
-        ]
-          .filter(Boolean)
-          .join(". ") || null,
+        invoice_type: parsed.suggestedType || "Supplier",
+        po_reference: parsed.poReference || null,
+        match_status: "Open",
+        notes: null,
       })
       .select("id")
       .single();

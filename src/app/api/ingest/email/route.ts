@@ -321,7 +321,13 @@ export async function POST(request: NextRequest) {
 
       if (classification.documentType === "invoice" && classification.confidence >= 0.5) {
         try {
-          const parsed = await parseInvoicePdf(attachment.content);
+          // Try to detect supplier from sender for template hints
+          const senderLower = (payload.From || "").toLowerCase() + " " + (payload.FromName || "").toLowerCase();
+          const supplierHint = senderLower.includes("ans") || senderLower.includes("arizona nutritional")
+            ? "ans"
+            : undefined;
+
+          const parsed = await parseInvoicePdf(attachment.content, supplierHint);
           parsedData = parsed;
           supplierName = parsed.vendor || null;
           poReference = parsed.poReference || null;

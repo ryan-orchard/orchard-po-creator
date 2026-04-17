@@ -26,6 +26,10 @@ export interface ParsedInvoice {
   paymentTerms: string | null;
   vendor: string;
   poReference: string | null;
+  salesOrder: string | null;
+  trackingNumber: string | null;
+  shipTo: string | null;
+  deliveryTerms: string | null;
   subtotal: number | null;
   freight: number | null;
   tax: number | null;
@@ -140,7 +144,11 @@ const INVOICE_PARSE_PROMPT = `Extract structured data from this invoice. Return 
   "dueDate": "YYYY-MM-DD or null",
   "paymentTerms": "e.g. Net 30 or null",
   "vendor": "company name",
-  "poReference": "PO number or null",
+  "poReference": "PO number referenced on the invoice, or null",
+  "salesOrder": "supplier's sales/order number, or null",
+  "trackingNumber": "shipping tracking number, or null",
+  "shipTo": "ship-to address or location name, or null",
+  "deliveryTerms": "e.g. FOB Destination, or null",
   "subtotal": number or null,
   "freight": number or null,
   "tax": number or null,
@@ -157,10 +165,39 @@ const INVOICE_PARSE_PROMPT = `Extract structured data from this invoice. Return 
   "suggestedType": "Supplier" | "Freight" | "Customs" | "Packaging" | "Work Order"
 }
 
-For dueDate: if payment terms are present but no explicit due date, compute from invoiceDate + days.
-Use null for fields not present. All amounts as numbers (no $ or commas).`;
+Rules:
+- For dueDate: if payment terms are present but no explicit due date, compute from invoiceDate + days.
+- Use null for fields not present. All amounts as numbers (no $ or commas).
+- "freight" is the shipping/freight line amount (separate from product lines). "tax" is sales tax.
+- "invoiceAmount" is the grand total including freight and tax.
+- "subtotal" is product lines only (before freight and tax).`;
 
-export async function parseInvoicePdf(base64Content: string): Promise<ParsedInvoice> {
+// Supplier-specific extraction hints — helps the AI find fields that have non-obvious labels
+const SUPPLIER_TEMPLATES: Record<string, string> = {
+  ans: `
+Supplier: Arizona Nutritional Supplements (ANS)
+Field mapping:
+- "Your Reference" = the PO number (poReference)
+- "Sales Order" = ANS's internal sales order number (salesOrder)
+- "Tracking Number" or "Tracking #" = shipping tracking (trackingNumber)
+- "Ship To" = delivery destination (shipTo)
+- "Freight" = freight/shipping charge line (freight)
+- "Sales Tax" = tax amount (tax)
+- Line items list product descriptions with qty, unit price, and extended amount.
+- ANS invoices typically have a subtotal, then freight, then tax, then grand total.`,
+};
+
+export async function parseInvoicePdf(base64Content: string, supplierHint?: string): Promise<ParsedInvoice> {
+  // Build prompt with supplier-specific template if available
+  let prompt = INVOICE_PARSE_PROMPT;
+  if (supplierHint) {
+    const key = supplierHint.toLowerCase();
+    const template = SUPPLIER_TEMPLATES[key];
+    if (template) {
+      prompt += `\n\nSupplier-specific guidance:${template}`;
+    }
+  }
+
   const message = await claude.messages.create({
     model: "claude-sonnet-4-6",
     max_tokens: 2048,
@@ -172,7 +209,7 @@ export async function parseInvoicePdf(base64Content: string): Promise<ParsedInvo
             type: "document",
             source: { type: "base64", media_type: "application/pdf", data: base64Content },
           } as Anthropic.DocumentBlockParam,
-          { type: "text", text: INVOICE_PARSE_PROMPT },
+          { type: "text", text: prompt },
         ],
       },
     ],
