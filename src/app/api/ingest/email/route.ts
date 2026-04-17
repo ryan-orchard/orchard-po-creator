@@ -387,7 +387,28 @@ export async function POST(request: NextRequest) {
         status,
       });
     } catch (docError) {
+      const errMsg = docError instanceof Error ? docError.message : String(docError);
+      const errStack = docError instanceof Error ? docError.stack?.slice(0, 500) : "";
       console.error(`Error processing attachment ${att.Name}:`, docError);
+
+      // Save error details to a document record so we can debug
+      await db
+        .schema("orchard")
+        .from("ingested_documents")
+        .insert({
+          email_id: emailId,
+          filename: att.Name,
+          content_type: att.ContentType,
+          file_size_bytes: att.ContentLength,
+          document_type: "unknown",
+          confidence: 0,
+          parsed_data: { error: errMsg, stack: errStack },
+          status: "pending",
+        })
+        .then(({ error }) => {
+          if (error) console.error("Failed to save error doc:", error);
+        });
+
       results.push({
         filename: att.Name,
         documentType: "error",
