@@ -58,6 +58,87 @@ async function extractAttachmentsFromRaw(
   return result;
 }
 
+// ── Fetch attachment content via Postmark API ──────────────────────
+
+async function fetchAttachmentsFromPostmarkAPI(
+  messageID: string
+): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  const serverToken = process.env.POSTMARK_SERVER_TOKEN;
+  if (!serverToken) {
+    console.warn("POSTMARK_SERVER_TOKEN not set — cannot fetch attachments via API");
+    return result;
+  }
+
+  try {
+    // Search for the inbound message by MessageID
+    const searchRes = await fetch(
+      `https://api.postmarkapp.com/messages/inbound?count=1&offset=0&recipient=magna@orchardinventory.com&subject=&mailboxhash=&status=&fromemail=&tag=&todate=&fromdate=`,
+      {
+        headers: {
+          Accept: "application/json",
+          "X-Postmark-Server-Token": serverToken,
+        },
+      }
+    );
+
+    if (!searchRes.ok) {
+      // Try fetching by the Postmark MessageID directly
+      const detailRes = await fetch(
+        `https://api.postmarkapp.com/messages/inbound/${messageID}/details`,
+        {
+          headers: {
+            Accept: "application/json",
+            "X-Postmark-Server-Token": serverToken,
+          },
+        }
+      );
+
+      if (!detailRes.ok) {
+        console.error(`Postmark API error: ${detailRes.status}`);
+        return result;
+      }
+
+      const detail = await detailRes.json();
+      for (const att of detail.Attachments || []) {
+        if (att.Content) {
+          result.set(att.Name, att.Content);
+        }
+      }
+      return result;
+    }
+
+    // Find our message and get its details
+    const messages = await searchRes.json();
+    for (const msg of messages.InboundMessages || []) {
+      if (msg.MessageID === messageID) {
+        // Fetch full details
+        const detailRes = await fetch(
+          `https://api.postmarkapp.com/messages/inbound/${msg.MessageID}/details`,
+          {
+            headers: {
+              Accept: "application/json",
+              "X-Postmark-Server-Token": serverToken,
+            },
+          }
+        );
+        if (detailRes.ok) {
+          const detail = await detailRes.json();
+          for (const att of detail.Attachments || []) {
+            if (att.Content) {
+              result.set(att.Name, att.Content);
+            }
+          }
+        }
+        break;
+      }
+    }
+  } catch (err) {
+    console.error("Failed to fetch from Postmark API:", err);
+  }
+  return result;
+}
+
 // ── Webhook handler ────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
@@ -148,21 +229,34 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ received: true, emailId, documents: [], note: "No attachments" });
   }
 
-  // If any attachment is missing Content, try extracting from RawEmail
-  const needsRawParse = attachments.some((a) => !a.Content);
-  let rawAttachments: Map<string, string> | null = null;
-  if (needsRawParse && payload.RawEmail) {
-    console.log("Extracting attachments from RawEmail MIME source...");
-    rawAttachments = await extractAttachmentsFromRaw(payload.RawEmail);
-    console.log(`Extracted ${rawAttachments.size} attachments from RawEmail: ${[...rawAttachments.keys()].join(", ")}`);
+  // If any attachment is missing Content, try fallbacks:
+  // 1. Parse RawEmail MIME source (if "Include raw email content" is enabled)
+  // 2. Fetch from Postmark API (if POSTMARK_SERVER_TOKEN is set)
+  const needsFallback = attachments.some((a) => !a.Content);
+  let recoveredAttachments: Map<string, string> | null = null;
+
+  if (needsFallback) {
+    // Try RawEmail first
+    if (payload.RawEmail) {
+      console.log("Trying RawEmail MIME extraction...");
+      recoveredAttachments = await extractAttachmentsFromRaw(payload.RawEmail);
+      console.log(`RawEmail extraction: ${recoveredAttachments.size} attachments`);
+    }
+
+    // If RawEmail didn't work, try Postmark API
+    if (!recoveredAttachments || recoveredAttachments.size === 0) {
+      console.log("Trying Postmark API fallback...");
+      recoveredAttachments = await fetchAttachmentsFromPostmarkAPI(payload.MessageID);
+      console.log(`Postmark API: ${recoveredAttachments.size} attachments`);
+    }
   }
 
   for (const att of attachments) {
     try {
       // Resolve content: prefer Postmark Content, fall back to RawEmail extraction
       let content = att.Content;
-      if (!content && rawAttachments) {
-        content = rawAttachments.get(att.Name) || undefined;
+      if (!content && recoveredAttachments) {
+        content = recoveredAttachments.get(att.Name) || undefined;
         if (content) {
           console.log(`Recovered attachment ${att.Name} from RawEmail`);
         }
