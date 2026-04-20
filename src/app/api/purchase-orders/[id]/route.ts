@@ -28,8 +28,8 @@ export async function GET(
 
     // Fetch supplier and location (ship-to) in parallel
     const [supplierResult, locationResult] = await Promise.all([
-      db.schema("org_config").from("suppliers").select("id, name").eq("id", po.supplier_id as string).single(),
-      db.schema("org_config").from("locations").select("id, name, code").eq("id", po.location_id as string).single(),
+      db.schema("org_config").from("suppliers").select("id, name, address, city, state, zip").eq("id", po.supplier_id as string).single(),
+      db.schema("org_config").from("locations").select("id, name, code, address, city, state, zip").eq("id", po.location_id as string).single(),
     ]);
 
     // Fetch item details for line items
@@ -166,8 +166,8 @@ export async function GET(
       grandTotal,
       supplierId: po.supplier_id,
       shipToId: po.location_id,
-      supplier: supplier ? { id: supplier.id, name: supplier.name, address: null, city: null, state: null, zip: null } : null,
-      shipTo: location ? { id: location.id, name: location.name, address: null, city: null, state: null, zip: null } : null,
+      supplier: supplier ? { id: supplier.id, name: supplier.name, address: supplier.address ?? null, city: supplier.city ?? null, state: supplier.state ?? null, zip: supplier.zip ?? null } : null,
+      shipTo: location ? { id: location.id, name: location.name, address: location.address ?? null, city: location.city ?? null, state: location.state ?? null, zip: location.zip ?? null } : null,
       lineItems: lineItemsWithSkus,
       receipts,
       invoices,

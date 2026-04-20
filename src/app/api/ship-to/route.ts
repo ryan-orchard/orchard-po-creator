@@ -5,7 +5,7 @@ export async function GET() {
   const { data, error } = await db
     .schema("org_config")
     .from("locations")
-    .select("*")
+    .select("id, name, code, address, city, state, zip")
     .order("name");
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -15,11 +15,10 @@ export async function GET() {
       id: l.id,
       name: l.name,
       code: l.code,
-      // fields not in new schema — preserved as null for API compatibility
-      address: null,
-      city: null,
-      state: null,
-      zip: null,
+      address: l.address ?? null,
+      city: l.city ?? null,
+      state: l.state ?? null,
+      zip: l.zip ?? null,
       isDefault: false,
     }))
   );
@@ -34,6 +33,10 @@ export async function POST(request: NextRequest) {
     .insert({
       name: body.name,
       code: body.code ?? body.name.toUpperCase().slice(0, 8),
+      address: body.address || null,
+      city: body.city || null,
+      state: body.state || null,
+      zip: body.zip || null,
     })
     .select()
     .single();
@@ -44,10 +47,10 @@ export async function POST(request: NextRequest) {
     id: data.id,
     name: data.name,
     code: data.code,
-    address: null,
-    city: null,
-    state: null,
-    zip: null,
+    address: data.address ?? null,
+    city: data.city ?? null,
+    state: data.state ?? null,
+    zip: data.zip ?? null,
     isDefault: false,
   });
 }
