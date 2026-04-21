@@ -1,29 +1,26 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { useSearchParams } from "next/navigation";
-import Link from "next/link";
 
 // ─────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────
 
-type Status = "open" | "linked" | "matched" | "excluded";
+type Status = "Unmatched" | "Matched" | "Excluded";
 
-interface MatchingLine {
+interface ReceiptLine {
   id: string;
   receiptId: string;
-  receiptDate: string;
-  orderNumber: string;
-  receiptNumber: string;
-  sourceLineId: string | null;
-  sku: string;
-  skuId: string | null;
-  receiptQty: number;
-  status: Status;
+  date: string;
   warehouse: string | null;
-  matchedPO: { poId: string; poNumber: string; poLineItemId: string } | null;
-  matchedWO: { woId: string; woNumber: string; woLineItemId: string } | null;
+  item: string;
+  itemId: string | null;
+  threePlSku: string | null;
+  qty: number;
+  orderRef: string | null;
+  poNumber: string | null;
+  stordReceiptId: string | null;
+  status: Status;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -31,7 +28,7 @@ interface MatchingLine {
 // ─────────────────────────────────────────────────────────────
 
 function formatDate(d: string) {
-  if (!d) return "—";
+  if (!d) return "\u2014";
   return new Date(d + "T00:00:00").toLocaleDateString("en-US", {
     month: "2-digit",
     day: "2-digit",
@@ -40,33 +37,81 @@ function formatDate(d: string) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Sort
+// ─────────────────────────────────────────────────────────────
+
+type SortField = "date" | "warehouse" | "item" | "qty" | "orderRef";
+type SortDir = "asc" | "desc";
+
+function sortLines(
+  lines: ReceiptLine[],
+  field: SortField,
+  dir: SortDir
+): ReceiptLine[] {
+  return [...lines].sort((a, b) => {
+    let aVal: string | number = "";
+    let bVal: string | number = "";
+    switch (field) {
+      case "date":
+        aVal = a.date || "";
+        bVal = b.date || "";
+        break;
+      case "warehouse":
+        aVal = a.warehouse || "";
+        bVal = b.warehouse || "";
+        break;
+      case "item":
+        aVal = a.item || "";
+        bVal = b.item || "";
+        break;
+      case "qty":
+        aVal = a.qty;
+        bVal = b.qty;
+        break;
+      case "orderRef":
+        aVal = a.poNumber || a.orderRef || "";
+        bVal = b.poNumber || b.orderRef || "";
+        break;
+    }
+    if (aVal < bVal) return dir === "asc" ? -1 : 1;
+    if (aVal > bVal) return dir === "asc" ? 1 : -1;
+    return 0;
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
 // Page
 // ─────────────────────────────────────────────────────────────
 
 export default function ReceiptsPage() {
-  const searchParams = useSearchParams();
-  const [lines, setLines] = useState<MatchingLine[]>([]);
-  const [counts, setCounts] = useState({ open: 0, linked: 0, matched: 0, excluded: 0 });
+  const [lines, setLines] = useState<ReceiptLine[]>([]);
   const [loading, setLoading] = useState(true);
-  const initialTab = (searchParams.get("tab") as Status) || "open";
-  const [activeTab, setActiveTab] = useState<Status>(initialTab);
+  const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<Status>("Unmatched");
   const [search, setSearch] = useState("");
   const [refreshing, setRefreshing] = useState(false);
-  const [excluding, setExcluding] = useState<string | null>(null);
-  const [restoring, setRestoring] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [actionLoading, setActionLoading] = useState(false);
+  const [sortConfig, setSortConfig] = useState<{
+    field: SortField;
+    dir: SortDir;
+  }>({ field: "date", dir: "desc" });
 
-  type SortField = "date" | "receiptNumber" | "sku" | "qty";
-  type SortDir = "asc" | "desc";
-  const [sortConfig, setSortConfig] = useState<{ field: SortField; dir: SortDir } | null>(null);
+  // ── Data fetching ──────────────────────────────────────────
 
   const fetchData = useCallback(async () => {
     try {
-      const res = await fetch("/api/receipt-lines/matching");
+      setError(null);
+      const res = await fetch("/api/receipt-lines");
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error || `Server error (${res.status})`);
+        return;
+      }
       const data = await res.json();
-      setLines(data.lines || []);
-      setCounts(data.counts || { open: 0, linked: 0, matched: 0, excluded: 0 });
-    } catch (err) {
-      console.error("Failed to fetch receipts:", err);
+      setLines(data.lines || data || []);
+    } catch {
+      setError("Failed to connect to server.");
     } finally {
       setLoading(false);
     }
@@ -82,51 +127,17 @@ export default function ReceiptsPage() {
     setRefreshing(false);
   };
 
-  const handleExclude = async (lineId: string) => {
-    setExcluding(lineId);
-    try {
-      await fetch(`/api/receipt-lines/${lineId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ matchStatus: "Excluded" }),
-      });
-      await fetchData();
-    } catch {
-      alert("Failed to exclude.");
-    } finally {
-      setExcluding(null);
+  // ── Tab counts ─────────────────────────────────────────────
+
+  const counts = useMemo(() => {
+    const c = { Unmatched: 0, Matched: 0, Excluded: 0 };
+    for (const l of lines) {
+      if (l.status in c) c[l.status]++;
     }
-  };
+    return c;
+  }, [lines]);
 
-  const handleRestore = async (lineId: string) => {
-    setRestoring(lineId);
-    try {
-      await fetch(`/api/receipt-lines/${lineId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ matchStatus: "Open" }),
-      });
-      await fetchData();
-    } catch {
-      alert("Failed to restore.");
-    } finally {
-      setRestoring(null);
-    }
-  };
-
-  const handleSort = (field: SortField) => {
-    setSortConfig((prev) =>
-      prev?.field === field
-        ? { field, dir: prev.dir === "asc" ? "desc" : "asc" }
-        : { field, dir: "asc" }
-    );
-  };
-
-  const SortIcon = ({ field }: { field: SortField }) => {
-    if (!sortConfig || sortConfig.field !== field)
-      return <span className="ml-1 text-gray-300">↕</span>;
-    return <span className="ml-1">{sortConfig.dir === "asc" ? "↑" : "↓"}</span>;
-  };
+  // ── Filtering + sorting ────────────────────────────────────
 
   const filteredLines = useMemo(() => {
     let result = lines.filter((l) => l.status === activeTab);
@@ -134,33 +145,111 @@ export default function ReceiptsPage() {
       const q = search.trim().toLowerCase();
       result = result.filter(
         (l) =>
-          l.orderNumber?.toLowerCase().includes(q) ||
-          l.receiptNumber?.toLowerCase().includes(q) ||
-          l.sku?.toLowerCase().includes(q)
+          l.item?.toLowerCase().includes(q) ||
+          l.orderRef?.toLowerCase().includes(q) ||
+          l.poNumber?.toLowerCase().includes(q) ||
+          l.stordReceiptId?.toLowerCase().includes(q)
       );
     }
-    if (sortConfig) {
-      result = [...result].sort((a, b) => {
-        let aVal: string | number = "";
-        let bVal: string | number = "";
-        if (sortConfig.field === "date") { aVal = a.receiptDate; bVal = b.receiptDate; }
-        else if (sortConfig.field === "receiptNumber") { aVal = a.receiptNumber; bVal = b.receiptNumber; }
-        else if (sortConfig.field === "sku") { aVal = a.sku; bVal = b.sku; }
-        else if (sortConfig.field === "qty") { aVal = a.receiptQty; bVal = b.receiptQty; }
-        if (aVal < bVal) return sortConfig.dir === "asc" ? -1 : 1;
-        if (aVal > bVal) return sortConfig.dir === "asc" ? 1 : -1;
-        return 0;
-      });
-    }
-    return result;
+    return sortLines(result, sortConfig.field, sortConfig.dir);
   }, [lines, activeTab, search, sortConfig]);
 
-  const tabs = [
-    { key: "open" as Status, label: "Open", count: counts.open },
-    { key: "linked" as Status, label: "Source Linked", count: counts.linked },
-    { key: "matched" as Status, label: "Matched", count: counts.matched },
-    { key: "excluded" as Status, label: "Excluded", count: counts.excluded },
+  // ── Selection ──────────────────────────────────────────────
+
+  // Clear selection when switching tabs
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [activeTab]);
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filteredLines.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredLines.map((l) => l.id)));
+    }
+  };
+
+  const allSelected =
+    filteredLines.length > 0 && selectedIds.size === filteredLines.length;
+
+  // ── Actions ────────────────────────────────────────────────
+
+  const handleExclude = async () => {
+    setActionLoading(true);
+    try {
+      await Promise.all(
+        Array.from(selectedIds).map((id) =>
+          fetch(`/api/receipt-lines/${id}/exclude`, { method: "POST" })
+        )
+      );
+      setSelectedIds(new Set());
+      await fetchData();
+    } catch {
+      alert("Failed to exclude receipt lines.");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleRestore = async () => {
+    setActionLoading(true);
+    try {
+      await Promise.all(
+        Array.from(selectedIds).map((id) =>
+          fetch(`/api/receipt-lines/${id}/restore`, { method: "POST" })
+        )
+      );
+      setSelectedIds(new Set());
+      await fetchData();
+    } catch {
+      alert("Failed to restore receipt lines.");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleLinkInvoice = () => {
+    console.log("Link Invoice clicked for IDs:", Array.from(selectedIds));
+  };
+
+  // ── Sort ───────────────────────────────────────────────────
+
+  const handleSort = (field: SortField) => {
+    setSortConfig((prev) =>
+      prev.field === field
+        ? { field, dir: prev.dir === "asc" ? "desc" : "asc" }
+        : { field, dir: "asc" }
+    );
+  };
+
+  const SortIcon = ({ field }: { field: SortField }) => {
+    if (sortConfig.field !== field)
+      return <span className="ml-1 text-gray-300">&uarr;&darr;</span>;
+    return (
+      <span className="ml-1">
+        {sortConfig.dir === "asc" ? "\u2191" : "\u2193"}
+      </span>
+    );
+  };
+
+  // ── Tabs config ────────────────────────────────────────────
+
+  const tabs: { key: Status; label: string; count: number }[] = [
+    { key: "Unmatched", label: "Unmatched", count: counts.Unmatched },
+    { key: "Matched", label: "Matched", count: counts.Matched },
+    { key: "Excluded", label: "Excluded", count: counts.Excluded },
   ];
+
+  // ── Render ─────────────────────────────────────────────────
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -170,36 +259,40 @@ export default function ReceiptsPage() {
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Receipts</h1>
             <p className="text-sm text-gray-500 mt-1">
-              Link receipt lines to purchase orders and invoices
+              Match receipt lines to invoices
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleRefresh}
-              disabled={refreshing || loading}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
-            >
-              {refreshing ? "Refreshing..." : "Refresh"}
-            </button>
-            <Link
-              href="/receipts/new"
-              className="px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-md hover:bg-gray-800"
-            >
-              + Add Receipt
-            </Link>
-          </div>
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing || loading}
+            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
+          >
+            {refreshing ? "Refreshing..." : "Refresh"}
+          </button>
         </div>
 
-        {loading ? (
-          <p className="text-gray-500">Loading...</p>
-        ) : lines.length === 0 ? (
-          <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
-            <p className="text-gray-500 mb-4">No receipts yet.</p>
-            <p className="text-sm text-gray-400">
-              Receipts arrive automatically via Stord webhook, or upload manually from Data Ingestion.
-            </p>
+        {/* Loading */}
+        {loading && <p className="text-gray-500">Loading...</p>}
+
+        {/* Error */}
+        {!loading && error && (
+          <div className="bg-red-50 rounded-lg border border-red-200 p-12 text-center">
+            <p className="text-red-700 mb-4">Failed to load receipts</p>
+            <p className="text-sm text-red-500 mb-4">{error}</p>
+            <button
+              onClick={() => {
+                setLoading(true);
+                fetchData();
+              }}
+              className="px-4 py-2 text-sm font-medium text-red-700 bg-white border border-red-300 rounded-md hover:bg-red-50"
+            >
+              Retry
+            </button>
           </div>
-        ) : (
+        )}
+
+        {/* Main content */}
+        {!loading && !error && (
           <>
             {/* Tabs + Search */}
             <div className="flex items-center justify-between mb-4">
@@ -217,7 +310,9 @@ export default function ReceiptsPage() {
                     {tab.label}
                     <span
                       className={`ml-1.5 text-xs ${
-                        activeTab === tab.key ? "text-gray-500" : "text-gray-400"
+                        activeTab === tab.key
+                          ? "text-gray-500"
+                          : "text-gray-400"
                       }`}
                     >
                       {tab.count}
@@ -242,17 +337,17 @@ export default function ReceiptsPage() {
                 </svg>
                 <input
                   type="text"
-                  placeholder="Search by order #, SKU, or receipt #..."
+                  placeholder="Search by item, order #, or receipt #..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  className="pl-9 pr-4 py-2 text-sm border border-gray-300 rounded-md w-72 focus:outline-none focus:ring-1 focus:ring-gray-400"
+                  className="pl-9 pr-4 py-2 text-sm border border-gray-300 rounded-md w-80 focus:outline-none focus:ring-1 focus:ring-gray-400"
                 />
                 {search && (
                   <button
                     onClick={() => setSearch("")}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                   >
-                    ×
+                    &times;
                   </button>
                 )}
               </div>
@@ -263,163 +358,154 @@ export default function ReceiptsPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200">
+                    <th className="px-4 py-3 w-10">
+                      <input
+                        type="checkbox"
+                        checked={allSelected}
+                        onChange={toggleSelectAll}
+                        className="rounded border-gray-300 text-gray-900 focus:ring-gray-400"
+                      />
+                    </th>
                     <th
-                      className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-20 cursor-pointer select-none hover:text-gray-700"
+                      className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer select-none hover:text-gray-700"
                       onClick={() => handleSort("date")}
                     >
-                      Date<SortIcon field="date" />
+                      Date
+                      <SortIcon field="date" />
                     </th>
                     <th
                       className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer select-none hover:text-gray-700"
-                      onClick={() => handleSort("receiptNumber")}
+                      onClick={() => handleSort("warehouse")}
                     >
-                      Order #<SortIcon field="receiptNumber" />
-                    </th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">
                       Warehouse
+                      <SortIcon field="warehouse" />
                     </th>
                     <th
                       className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer select-none hover:text-gray-700"
-                      onClick={() => handleSort("sku")}
+                      onClick={() => handleSort("item")}
                     >
-                      Item<SortIcon field="sku" />
+                      Item
+                      <SortIcon field="item" />
                     </th>
                     <th
                       className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-24 cursor-pointer select-none hover:text-gray-700"
                       onClick={() => handleSort("qty")}
                     >
-                      Qty<SortIcon field="qty" />
+                      Qty
+                      <SortIcon field="qty" />
+                    </th>
+                    <th
+                      className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer select-none hover:text-gray-700"
+                      onClick={() => handleSort("orderRef")}
+                    >
+                      PO / Order #
+                      <SortIcon field="orderRef" />
                     </th>
                     <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                      {activeTab === "open" ? "Action" : "Linked To"}
+                      Stord ID
                     </th>
-                    <th className="px-4 py-3 w-24"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {filteredLines.map((line) => (
-                    <tr key={line.id} className="hover:bg-gray-50 transition-colors">
-                      {/* Date */}
+                    <tr
+                      key={line.id}
+                      className={`hover:bg-gray-50 transition-colors ${
+                        selectedIds.has(line.id) ? "bg-gray-50" : ""
+                      }`}
+                    >
+                      <td className="px-4 py-3 w-10">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(line.id)}
+                          onChange={() => toggleSelect(line.id)}
+                          className="rounded border-gray-300 text-gray-900 focus:ring-gray-400"
+                        />
+                      </td>
+                      <td className="px-4 py-3 text-gray-500 text-sm whitespace-nowrap">
+                        {formatDate(line.date)}
+                      </td>
                       <td className="px-4 py-3 text-gray-500 text-sm">
-                        {formatDate(line.receiptDate)}
+                        {line.warehouse || "\u2014"}
                       </td>
-
-                      {/* Order # */}
-                      <td className="px-4 py-3">
-                        <div className="font-medium text-gray-900 truncate max-w-48">
-                          {line.orderNumber || "—"}
-                        </div>
-                        <div className="text-xs text-gray-400">{line.receiptNumber}</div>
-                      </td>
-
-                      {/* Warehouse */}
-                      <td className="px-4 py-3 text-gray-500 text-sm w-24">
-                        {line.warehouse || "—"}
-                      </td>
-
-                      {/* Item */}
                       <td className="px-4 py-3 text-gray-900">
-                        <div>{line.sku}</div>
-                        {line.sourceLineId && (
-                          <div className="text-xs text-gray-400">{line.sourceLineId}</div>
-                        )}
-                      </td>
-
-                      {/* Qty */}
-                      <td className="px-4 py-3 text-right font-medium text-gray-900 w-24">
-                        {line.receiptQty.toLocaleString()}
-                      </td>
-
-                      {/* Linked To / Action */}
-                      <td className="px-4 py-3">
-                        {line.status === "open" && (
-                          <Link
-                            href={`/match?from=receipt&id=${line.receiptId}`}
-                            className="text-sm font-medium text-stone-700 hover:text-stone-900 underline underline-offset-2"
-                          >
-                            Link →
-                          </Link>
-                        )}
-                        {(line.status === "linked" || line.status === "matched") && (
-                          <div className="flex items-center gap-2">
-                            {line.matchedPO && (
-                              <span className="text-sm font-medium text-gray-800">
-                                {line.matchedPO.poNumber}
-                              </span>
-                            )}
-                            {line.matchedWO && (
-                              <span className="text-sm font-medium text-gray-800">
-                                {line.matchedWO.woNumber}
-                              </span>
-                            )}
-                            {!line.matchedPO && !line.matchedWO && (
-                              <span className="text-sm text-gray-500">Linked</span>
-                            )}
-                            {line.status === "matched" && (
-                              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                + Invoice
-                              </span>
-                            )}
+                        <div>{line.item}</div>
+                        {line.threePlSku && (
+                          <div className="text-xs text-gray-400">
+                            {line.threePlSku}
                           </div>
                         )}
-                        {line.status === "excluded" && (
-                          <span className="text-gray-400 italic text-xs">Excluded</span>
-                        )}
                       </td>
-
-                      {/* Actions */}
-                      <td className="px-4 py-3 text-right w-24">
-                        <div className="flex items-center justify-end gap-2">
-                          {(line.status === "linked" || line.status === "matched") && (
-                            <Link
-                              href={`/match?from=receipt&id=${line.receiptId}`}
-                              className="text-xs text-gray-400 hover:text-gray-700 transition-colors"
-                            >
-                              Re-link
-                            </Link>
-                          )}
-                          {line.status === "open" && (
-                            <button
-                              onClick={() => handleExclude(line.id)}
-                              disabled={excluding === line.id}
-                              className="text-xs text-gray-400 hover:text-red-500 transition-colors disabled:opacity-50"
-                            >
-                              {excluding === line.id ? "…" : "Exclude"}
-                            </button>
-                          )}
-                          {line.status === "excluded" && (
-                            <button
-                              onClick={() => handleRestore(line.id)}
-                              disabled={restoring === line.id}
-                              className="text-xs text-gray-500 hover:text-gray-800 transition-colors disabled:opacity-50"
-                            >
-                              {restoring === line.id ? "…" : "Restore"}
-                            </button>
-                          )}
-                        </div>
+                      <td className="px-4 py-3 text-right font-medium text-gray-900 w-24">
+                        {line.qty.toLocaleString()}
+                      </td>
+                      <td className="px-4 py-3 text-gray-900">
+                        {line.poNumber || line.orderRef || "\u2014"}
+                      </td>
+                      <td className="px-4 py-3 text-gray-400 text-xs font-mono truncate max-w-32">
+                        {line.stordReceiptId || "\u2014"}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
 
+              {/* Empty states */}
               {filteredLines.length === 0 && (
-                <div className="p-8 text-center text-gray-400 text-sm">
-                  {search
-                    ? `No results matching "${search}"`
-                    : activeTab === "open"
-                    ? "All receipt lines have been actioned."
-                    : activeTab === "linked"
-                    ? "No source-linked receipt lines yet."
-                    : activeTab === "matched"
-                    ? "No fully matched receipt lines yet."
-                    : "No excluded receipt lines."}
+                <div className="p-12 text-center text-gray-400 text-sm">
+                  {search ? (
+                    `No results matching "${search}"`
+                  ) : activeTab === "Unmatched" ? (
+                    "All caught up \u2014 no unmatched receipts."
+                  ) : activeTab === "Matched" ? (
+                    "No matched receipts yet."
+                  ) : (
+                    "No excluded receipts."
+                  )}
                 </div>
               )}
             </div>
           </>
         )}
       </div>
+
+      {/* Floating action bar */}
+      {selectedIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50">
+          <div className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl shadow-lg px-5 py-3">
+            <span className="text-sm text-gray-500">
+              {selectedIds.size} selected
+            </span>
+            <div className="w-px h-5 bg-gray-200" />
+            {activeTab === "Excluded" ? (
+              <button
+                onClick={handleRestore}
+                disabled={actionLoading}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
+              >
+                {actionLoading ? "Restoring..." : "Restore"}
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={handleLinkInvoice}
+                  disabled={actionLoading}
+                  className="px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-md hover:bg-gray-800 disabled:opacity-50"
+                >
+                  Link Invoice
+                </button>
+                <button
+                  onClick={handleExclude}
+                  disabled={actionLoading}
+                  className="px-4 py-2 text-sm font-medium text-red-600 bg-white border border-gray-300 rounded-md hover:bg-red-50 hover:border-red-300 disabled:opacity-50"
+                >
+                  {actionLoading ? "Excluding..." : "Exclude"}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

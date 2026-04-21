@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useClerk, useUser } from "@clerk/nextjs";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 const NAV_SECTIONS = [
   {
@@ -139,20 +139,7 @@ export default function Sidebar() {
   const pathname = usePathname();
   const { signOut } = useClerk();
   const { user } = useUser();
-  const [unmatchedReceiptCount, setUnmatchedReceiptCount] = useState<number | null>(null);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
-
-  useEffect(() => {
-    const fetchCounts = () => {
-      fetch("/api/receipts/count")
-        .then((r) => r.json())
-        .then((d) => setUnmatchedReceiptCount(d.unmatched ?? null))
-        .catch(() => {});
-    };
-    fetchCounts();
-    const interval = setInterval(fetchCounts, 60_000); // refresh every minute
-    return () => clearInterval(interval);
-  }, []);
 
   return (
     <aside className="w-56 bg-sidebar-bg flex flex-col h-screen fixed left-0 top-0 print:hidden">
@@ -179,11 +166,6 @@ export default function Sidebar() {
                 const isActive = pathname.startsWith(item.href);
                 const isSoon = "soon" in item && item.soon;
                 const Icon = item.icon;
-                const staticBadge = "badge" in item ? (item.badge as number) : undefined;
-                const rawBadge = item.href === "/receipts"
-                  ? (unmatchedReceiptCount ?? staticBadge)
-                  : staticBadge;
-                const badge = rawBadge && rawBadge > 0 ? rawBadge : undefined;
 
                 if (isSoon) {
                   return (
@@ -191,11 +173,6 @@ export default function Sidebar() {
                       <span className="flex items-center gap-2.5 px-2 py-1.5 text-sm text-sidebar-text-muted cursor-default rounded-md">
                         <Icon className="w-4 h-4" />
                         <span className="flex-1">{item.name}</span>
-                        {badge && (
-                          <span className="bg-badge-bg text-badge-text text-[10px] font-semibold px-1.5 py-0.5 rounded-full">
-                            {badge}
-                          </span>
-                        )}
                       </span>
                     </li>
                   );
@@ -213,11 +190,6 @@ export default function Sidebar() {
                     >
                       <Icon className="w-4 h-4" />
                       <span className="flex-1">{item.name}</span>
-                      {badge && (
-                        <span className="bg-badge-bg text-badge-text text-[10px] font-semibold px-1.5 py-0.5 rounded-full">
-                          {badge}
-                        </span>
-                      )}
                     </Link>
                   </li>
                 );

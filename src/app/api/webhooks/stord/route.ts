@@ -110,7 +110,7 @@ export async function POST(request: NextRequest) {
     const facilityCode = resolveFacilityCode(data.facility_id);
     const { data: warehouse } = await db
       .schema("org_config")
-      .from("warehouses")
+      .from("locations")
       .select("id")
       .eq("code", facilityCode)
       .maybeSingle();
@@ -152,7 +152,7 @@ export async function POST(request: NextRequest) {
         received_date: data.received_at.split("T")[0],
         external_id: externalId,
         stord_receipt_id: stordReceiptId,
-        ...(orderNum ? { po_reference: orderNum } : {}),
+        source: "Stord",
         ...(locationId ? { location_id: locationId } : {}),
         ...(resolvedPoId ? { po_id: resolvedPoId } : {}),
         ...(data.bol ? { notes: `BOL: ${data.bol}` } : {}),
@@ -174,7 +174,7 @@ export async function POST(request: NextRequest) {
         qty_received: parseFloat(item.quantity) || 0,
         three_pl_sku: item.sku,
         lot_number: item.lot_number ?? null,
-        status: "Open",
+        status: "Unmatched",
       };
     });
 

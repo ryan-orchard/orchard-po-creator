@@ -22,12 +22,12 @@ export async function GET() {
       warehousesResult,
     ] = await Promise.all([
       db.schema("orchard").from("receipt_lines").select("id, receipt_id, item_id, qty_received, three_pl_sku, lot_number, status"),
-      db.schema("orchard").from("receipts").select("id, receipt_number, received_date, external_id, po_reference, location_id, po_id"),
+      db.schema("orchard").from("receipts").select("id, receipt_number, received_date, external_id, location_id, po_id"),
       db.schema("orchard_calcs").from("po_statuses").select("po_id, status"),
       db.schema("orchard").from("work_orders").select("id, wo_number, status, notes"),
-      db.schema("org_config").from("items").select("id, sku, uom"),
+      db.schema("org_config").from("items").select("id, sku, unit_of_measure"),
       db.schema("org_config").from("suppliers").select("id, name"),
-      db.schema("org_config").from("warehouses").select("id, code, name"),
+      db.schema("org_config").from("locations").select("id, code, name"),
     ]);
 
     const allReceiptLines = receiptLinesResult.data ?? [];
@@ -37,7 +37,7 @@ export async function GET() {
 
     // Build lookups
     const itemMap = new Map(
-      allItems.map((i) => [i.id as string, { sku: i.sku as string, uom: i.uom as string }])
+      allItems.map((i) => [i.id as string, { sku: i.sku as string, uom: i.unit_of_measure as string }])
     );
     const skuNameToItemId = new Map(allItems.map((i) => [i.sku as string, i.id as string]));
     const supplierMap = new Map((suppliersResult.data ?? []).map((s) => [s.id as string, s.name as string]));
@@ -49,15 +49,14 @@ export async function GET() {
     const receiptMap = new Map(
       allReceipts.map((r) => {
         const externalId = (r.external_id as string) || "";
-        const poRef = (r.po_reference as string) || "";
-        const orderNumber = poRef || externalId;
+        const orderNumber = externalId;
         return [
           r.id as string,
           {
             receiptNumber: (r.receipt_number as string) || "",
             receivedDate: (r.received_date as string) || "",
             orderNumber,
-            poReference: poRef,
+            poReference: "",
             warehouse: r.location_id ? (warehouseMap.get(r.location_id as string) ?? null) : null,
             poId: (r.po_id as string) || null,
           },
@@ -105,15 +104,21 @@ export async function GET() {
       poLinesByPO.get(key)!.push(pl);
     }
 
-    // Fetch existing po_line_receipt_line_links
-    const allPOLineIds = allPOLines.map((pl) => pl.id as string);
-    const { data: allPoRlLinks } = allPOLineIds.length > 0
-      ? await db
-          .schema("orchard_calcs")
-          .from("po_line_receipt_line_links")
-          .select("po_line_id, receipt_line_id")
-          .in("po_line_id", allPOLineIds)
+    // Fetch ALL po_line_receipt_line_links (not just matchable POs) so we can
+    // correctly detect linked status for receipt lines matched to any PO
+    const { data: allPoRlLinks } = await db
+      .schema("orchard_calcs")
+      .from("po_line_receipt_line_links")
+      .select("po_line_id, receipt_line_id");
+
+    // We need ALL po_lines (not just matchable) to resolve link → PO ID
+    const allPoRlPoLineIds = [...new Set((allPoRlLinks ?? []).map((l) => l.po_line_id as string))];
+    const { data: allLinkedPOLines } = allPoRlPoLineIds.length > 0
+      ? await db.schema("orchard").from("po_lines").select("id, po_id").in("id", allPoRlPoLineIds)
       : { data: [] };
+    const poLineToPoId = new Map(
+      (allLinkedPOLines ?? []).map((pl) => [pl.id as string, pl.po_id as string])
+    );
 
     // Which receipt_lines are PO-matched, and what po_line/PO do they link to?
     const receiptLineToPOLink = new Map<string, { poLineId: string; poId: string }>();
@@ -122,12 +127,29 @@ export async function GET() {
     for (const link of allPoRlLinks ?? []) {
       const rlId = link.receipt_line_id as string;
       const plId = link.po_line_id as string;
-      const pl = allPOLines.find((p) => p.id === plId);
-      if (pl) receiptLineToPOLink.set(rlId, { poLineId: plId, poId: pl.po_id as string });
+      const poId = poLineToPoId.get(plId);
+      if (poId) receiptLineToPOLink.set(rlId, { poLineId: plId, poId });
     }
 
-    // Sum received qty per po_line (for option cards)
-    const linkedReceiptLineIds = (allPoRlLinks ?? []).map((l) => l.receipt_line_id as string);
+    // Fetch PO numbers for all linked POs (including non-matchable ones like Received/Closed)
+    const allLinkedPoIds = [...new Set([...receiptLineToPOLink.values()].map((l) => l.poId))];
+    const nonMatchablePoIds = allLinkedPoIds.filter((id) => !poMap.has(id));
+    const allPoNumberMap = new Map<string, string>();
+    if (nonMatchablePoIds.length > 0) {
+      const { data: extraPOs } = await db
+        .schema("orchard")
+        .from("purchase_orders")
+        .select("id, po_number")
+        .in("id", nonMatchablePoIds);
+      for (const po of extraPOs ?? []) {
+        allPoNumberMap.set(po.id as string, po.po_number as string);
+      }
+    }
+
+    // Sum received qty per po_line (for option cards — only matchable POs)
+    const matchablePOLineIds = new Set(allPOLines.map((pl) => pl.id as string));
+    const matchablePoRlLinks = (allPoRlLinks ?? []).filter((l) => matchablePOLineIds.has(l.po_line_id as string));
+    const linkedReceiptLineIds = matchablePoRlLinks.map((l) => l.receipt_line_id as string);
     if (linkedReceiptLineIds.length > 0) {
       const { data: linkedRLs } = await db
         .schema("orchard")
@@ -137,7 +159,7 @@ export async function GET() {
       const receiptLineQty = new Map(
         (linkedRLs ?? []).map((rl) => [rl.id as string, Number(rl.qty_received) || 0])
       );
-      for (const link of allPoRlLinks ?? []) {
+      for (const link of matchablePoRlLinks) {
         const qty = receiptLineQty.get(link.receipt_line_id as string) || 0;
         receivedByPoLine.set(
           link.po_line_id as string,
@@ -436,9 +458,10 @@ export async function GET() {
       if (isPOMatched) {
         const link = receiptLineToPOLink.get(rl.id as string)!;
         const po = poMap.get(link.poId);
+        const poNumber = po?.poNumber ?? allPoNumberMap.get(link.poId) ?? link.poId;
         matchedPO = {
           poId: link.poId,
-          poNumber: po?.poNumber ?? link.poId,
+          poNumber,
           poLineItemId: link.poLineId,
         };
       }
