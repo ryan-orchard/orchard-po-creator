@@ -89,7 +89,6 @@ export default function ReceiptsPage() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Status>("Unmatched");
   const [search, setSearch] = useState("");
-  const [refreshing, setRefreshing] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [actionLoading, setActionLoading] = useState(false);
   const [sortConfig, setSortConfig] = useState<{
@@ -120,12 +119,6 @@ export default function ReceiptsPage() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
-
-  const handleRefresh = async () => {
-    setRefreshing(true);
-    await fetchData();
-    setRefreshing(false);
-  };
 
   // ── Tab counts ─────────────────────────────────────────────
 
@@ -262,13 +255,6 @@ export default function ReceiptsPage() {
               Match receipt lines to invoices
             </p>
           </div>
-          <button
-            onClick={handleRefresh}
-            disabled={refreshing || loading}
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
-          >
-            {refreshing ? "Refreshing..." : "Refresh"}
-          </button>
         </div>
 
         {/* Loading */}

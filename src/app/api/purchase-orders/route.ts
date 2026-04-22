@@ -18,12 +18,15 @@ export async function GET() {
   const statuses = new Map((statusesResult.data ?? []).map((s) => [s.po_id, s.status]));
   const items = new Map((itemsResult.data ?? []).map((i) => [i.id, i.sku]));
 
-  // Grand total, line IDs, and SKU list per PO — one pass over lines
+  // Grand total, line IDs, SKU list, and total units per PO — one pass over lines
   const totalsByPO: Record<string, number> = {};
   const lineIdsByPO: Record<string, string[]> = {};
   const skusByPO: Record<string, string[]> = {};
+  const unitsByPO: Record<string, number> = {};
   for (const l of linesResult.data ?? []) {
-    totalsByPO[l.po_id] = (totalsByPO[l.po_id] ?? 0) + Number(l.qty) * Number(l.unit_cost);
+    const qty = Number(l.qty) || 0;
+    totalsByPO[l.po_id] = (totalsByPO[l.po_id] ?? 0) + qty * Number(l.unit_cost);
+    unitsByPO[l.po_id] = (unitsByPO[l.po_id] ?? 0) + qty;
     if (!lineIdsByPO[l.po_id]) lineIdsByPO[l.po_id] = [];
     lineIdsByPO[l.po_id].push(l.id);
     const sku = items.get(l.item_id);
@@ -57,6 +60,8 @@ export async function GET() {
     paymentTerms: po.payment_terms,
     notes: po.notes,
     grandTotal: totalsByPO[po.id] ?? 0,
+    totalSkus: (skusByPO[po.id] ?? []).length,
+    totalUnits: unitsByPO[po.id] ?? 0,
     lineItems: lineIdsByPO[po.id] ?? [],
     skus: skusByPO[po.id] ?? [],
   }));

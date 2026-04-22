@@ -5,22 +5,24 @@ import { useState, useEffect } from "react";
 interface Item {
   id: string;
   standardSku: string;
+  name: string;
   category: string;
-  flavor: string;
   uom: string;
   count: string;
   description: string;
   status: string;
+  unitCost: number | null;
 }
 
 const EMPTY_FORM = {
   standardSku: "",
+  name: "",
   category: "",
-  flavor: "",
   uom: "Each",
   count: "",
   description: "",
   status: "Active",
+  unitCost: "",
 };
 
 export default function ItemsListPage() {
@@ -47,7 +49,7 @@ export default function ItemsListPage() {
     const q = search.toLowerCase();
     return (
       item.standardSku?.toLowerCase().includes(q) ||
-      item.flavor?.toLowerCase().includes(q) ||
+      item.name?.toLowerCase().includes(q) ||
       item.category?.toLowerCase().includes(q) ||
       item.description?.toLowerCase().includes(q)
     );
@@ -66,6 +68,9 @@ export default function ItemsListPage() {
     }
   };
 
+  const fmtCost = (n: number) =>
+    n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+
   function openAdd() {
     setEditing(null);
     setForm(EMPTY_FORM);
@@ -77,12 +82,13 @@ export default function ItemsListPage() {
     setEditing(item);
     setForm({
       standardSku: item.standardSku || "",
+      name: item.name || "",
       category: item.category || "",
-      flavor: item.flavor || "",
       uom: item.uom || "Each",
       count: item.count ? String(item.count) : "",
       description: item.description || "",
       status: item.status || "Active",
+      unitCost: item.unitCost != null ? String(item.unitCost) : "",
     });
     setError("");
     setModalOpen(true);
@@ -101,7 +107,10 @@ export default function ItemsListPage() {
       const res = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          ...form,
+          unitCost: form.unitCost ? parseFloat(form.unitCost) : null,
+        }),
       });
       if (!res.ok) throw new Error("Save failed");
       const saved: Item = await res.json();
@@ -142,7 +151,7 @@ export default function ItemsListPage() {
         <div className="mb-4">
           <input
             type="text"
-            placeholder="Search by SKU, flavor, category..."
+            placeholder="Search by SKU, name, or type..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full max-w-sm px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-gray-400 focus:border-gray-400"
@@ -166,16 +175,16 @@ export default function ItemsListPage() {
                     SKU
                   </th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                    Category
+                    Name
                   </th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                    Flavor
+                    Type
                   </th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
                     UOM
                   </th>
                   <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                    Sticks/Ctn
+                    Unit Cost
                   </th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
                     Status
@@ -190,19 +199,19 @@ export default function ItemsListPage() {
                     className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
                   >
                     <td className="px-4 py-3 font-semibold text-gray-900">
-                      {item.standardSku || "—"}
+                      {item.standardSku || "\u2014"}
                     </td>
                     <td className="px-4 py-3 text-gray-600">
-                      {item.category || "—"}
+                      {item.name || "\u2014"}
                     </td>
                     <td className="px-4 py-3 text-gray-600">
-                      {item.flavor || "—"}
+                      {item.category || "\u2014"}
                     </td>
                     <td className="px-4 py-3 text-gray-600">
-                      {item.uom || "—"}
+                      {item.uom || "\u2014"}
                     </td>
-                    <td className="px-4 py-3 text-right text-gray-600">
-                      {item.count || "—"}
+                    <td className="px-4 py-3 text-right text-gray-600 tabular-nums">
+                      {item.unitCost != null ? fmtCost(item.unitCost) : "\u2014"}
                     </td>
                     <td className="px-4 py-3">
                       {item.status ? (
@@ -212,7 +221,7 @@ export default function ItemsListPage() {
                           {item.status}
                         </span>
                       ) : (
-                        "—"
+                        "\u2014"
                       )}
                     </td>
                   </tr>
@@ -243,7 +252,7 @@ export default function ItemsListPage() {
                     value={form.standardSku}
                     onChange={(e) => setForm({ ...form, standardSku: e.target.value })}
                     className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-gray-400"
-                    placeholder="e.g. ANS-STK-28-VAN"
+                    placeholder="e.g. ELEC-LEMONLIME-28"
                   />
                 </div>
                 <div>
@@ -262,23 +271,23 @@ export default function ItemsListPage() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Category</label>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Name</label>
+                  <input
+                    type="text"
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-gray-400"
+                    placeholder="e.g. Lemon Lime 28ct"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Type</label>
                   <input
                     type="text"
                     value={form.category}
                     onChange={(e) => setForm({ ...form, category: e.target.value })}
                     className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-gray-400"
                     placeholder="e.g. Finished Good"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Flavor</label>
-                  <input
-                    type="text"
-                    value={form.flavor}
-                    onChange={(e) => setForm({ ...form, flavor: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-gray-400"
-                    placeholder="e.g. Vanilla"
                   />
                 </div>
               </div>
@@ -296,26 +305,20 @@ export default function ItemsListPage() {
                     <option>Carton</option>
                   </select>
                 </div>
-                {form.uom === "Carton" && (
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">
-                      Sticks per Carton
-                    </label>
-                    <select
-                      value={form.count}
-                      onChange={(e) => setForm({ ...form, count: e.target.value })}
-                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-gray-400"
-                    >
-                      <option value="">—</option>
-                      <option>2</option>
-                      <option>7</option>
-                      <option>8</option>
-                      <option>10</option>
-                      <option>14</option>
-                      <option>28</option>
-                    </select>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Unit Cost</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">$</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={form.unitCost}
+                      onChange={(e) => setForm({ ...form, unitCost: e.target.value })}
+                      className="w-full pl-7 pr-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-gray-400"
+                      placeholder="0.00"
+                    />
                   </div>
-                )}
+                </div>
               </div>
 
               <div>

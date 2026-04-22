@@ -14,7 +14,7 @@ export async function GET(
     // PO header + status + lines (with items) in parallel
     const [poResult, statusResult, linesResult] = await Promise.all([
       db.schema("orchard").from("purchase_orders").select("*").eq("id", id).single(),
-      db.schema("orchard_calcs").from("po_statuses").select("status").eq("po_id", id).maybeSingle(),
+      db.schema("orchard_calcs").from("po_statuses").select("status, issued_at, accepted_at, shipped_at, received_at").eq("po_id", id).maybeSingle(),
       db.schema("orchard").from("po_lines").select("*").eq("po_id", id),
     ]);
 
@@ -28,7 +28,7 @@ export async function GET(
 
     // Fetch supplier and location (ship-to) in parallel
     const [supplierResult, locationResult] = await Promise.all([
-      db.schema("org_config").from("suppliers").select("id, name, address, city, state, zip").eq("id", po.supplier_id as string).single(),
+      db.schema("org_config").from("suppliers").select("id, name, code, address, city, state, zip").eq("id", po.supplier_id as string).single(),
       db.schema("org_config").from("locations").select("id, name, code, address, city, state, zip").eq("id", po.location_id as string).single(),
     ]);
 
@@ -158,6 +158,12 @@ export async function GET(
       poNumber: po.po_number,
       date: po.order_date,
       status: statusResult.data?.status ?? "Draft",
+      milestones: {
+        issuedAt: statusResult.data?.issued_at ?? null,
+        acceptedAt: statusResult.data?.accepted_at ?? null,
+        shippedAt: statusResult.data?.shipped_at ?? null,
+        receivedAt: statusResult.data?.received_at ?? null,
+      },
       deliveryDate: po.delivery_date ?? null,
       shippingTerms: po.shipping_terms ?? null,
       paymentTerms: po.payment_terms ?? null,
@@ -166,7 +172,7 @@ export async function GET(
       grandTotal,
       supplierId: po.supplier_id,
       shipToId: po.location_id,
-      supplier: supplier ? { id: supplier.id, name: supplier.name, address: supplier.address ?? null, city: supplier.city ?? null, state: supplier.state ?? null, zip: supplier.zip ?? null } : null,
+      supplier: supplier ? { id: supplier.id, name: supplier.name, code: supplier.code ?? null, address: supplier.address ?? null, city: supplier.city ?? null, state: supplier.state ?? null, zip: supplier.zip ?? null } : null,
       shipTo: location ? { id: location.id, name: location.name, address: location.address ?? null, city: location.city ?? null, state: location.state ?? null, zip: location.zip ?? null } : null,
       lineItems: lineItemsWithSkus,
       receipts,
@@ -246,6 +252,20 @@ export async function PUT(
       if (lineError) {
         return NextResponse.json({ error: lineError.message }, { status: 500 });
       }
+    }
+
+    // Update status if provided
+    if (body.status) {
+      const milestoneField: Record<string, string> = {
+        Issued: "issued_at", Accepted: "accepted_at",
+        Shipped: "shipped_at", Received: "received_at", "Partially Received": "received_at",
+      };
+      const now = new Date().toISOString();
+      const upsertData: Record<string, unknown> = {
+        po_id: id, status: body.status, updated_at: now, updated_by: "Ryan Belanger",
+      };
+      if (milestoneField[body.status]) upsertData[milestoneField[body.status]] = now;
+      await db.schema("orchard_calcs").from("po_statuses").upsert(upsertData, { onConflict: "po_id" });
     }
 
     // Fetch PO number for activity log

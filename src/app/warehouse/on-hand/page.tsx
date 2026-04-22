@@ -40,6 +40,7 @@ interface PivotRow {
   standardSku: string;
   stordSku: string | null;
   category: string | null;
+  productName: string;
   stord: number;
   ans: number;
   bmc: number;
@@ -109,6 +110,7 @@ export default function OnHandInventoryPage() {
           standardSku: item.standardSku,
           stordSku: item.stordSku,
           category: item.category,
+          productName: item.productName || item.standardSku,
           stord: 0,
           ans: 0,
           bmc: 0,
@@ -157,7 +159,8 @@ export default function OnHandInventoryPage() {
         (r) =>
           r.standardSku.toLowerCase().includes(q) ||
           (r.stordSku?.toLowerCase().includes(q) ?? false) ||
-          (r.category?.toLowerCase().includes(q) ?? false)
+          (r.category?.toLowerCase().includes(q) ?? false) ||
+          r.productName.toLowerCase().includes(q)
       );
     }
     return rows.sort((a, b) => {
@@ -191,7 +194,8 @@ export default function OnHandInventoryPage() {
         (i) =>
           i.standardSku.toLowerCase().includes(q) ||
           (i.stordSku?.toLowerCase().includes(q) ?? false) ||
-          (i.category?.toLowerCase().includes(q) ?? false)
+          (i.category?.toLowerCase().includes(q) ?? false) ||
+          i.productName.toLowerCase().includes(q)
       );
     }
     return items.sort((a, b) => {
@@ -265,10 +269,10 @@ export default function OnHandInventoryPage() {
   );
 
   const fmt = (n: number) =>
-    n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+    n.toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
-  const fmtCompact = (n: number) =>
-    n >= 1000 ? "$" + (n / 1000).toFixed(1) + "k" : fmt(n);
+  const fmtCost = (n: number) =>
+    n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 
   const activeWarehouse = data?.warehouses?.find((w) => w.code === activeTab);
 
@@ -279,7 +283,7 @@ export default function OnHandInventoryPage() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">
-              On-Hand Inventory
+              Inventory
             </h1>
             <p className="text-sm text-gray-500 mt-1">
               Inventory across all locations
@@ -359,11 +363,11 @@ export default function OnHandInventoryPage() {
 
         {/* Summary Cards */}
         {data && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+          <div className="grid grid-cols-3 gap-4 mb-6">
             <div className="bg-white rounded-lg border border-gray-200 px-4 py-3">
-              <p className="text-xs text-gray-500 mb-1">SKUs</p>
-              <p className="text-xl font-semibold text-gray-500">
-                {viewSummary.totalSkus.toLocaleString()}
+              <p className="text-xs text-gray-500 mb-1">Inventory Value</p>
+              <p className="text-xl font-semibold text-gray-900">
+                {fmt(viewSummary.totalValue)}
               </p>
             </div>
             <div className="bg-white rounded-lg border border-gray-200 px-4 py-3">
@@ -373,15 +377,9 @@ export default function OnHandInventoryPage() {
               </p>
             </div>
             <div className="bg-white rounded-lg border border-gray-200 px-4 py-3">
-              <p className="text-xs text-gray-500 mb-1">Total Value</p>
-              <p className="text-xl font-semibold text-gray-900">
-                {fmt(viewSummary.totalValue)}
-              </p>
-            </div>
-            <div className="bg-white rounded-lg border border-gray-200 px-4 py-3">
-              <p className="text-xs text-gray-500 mb-1">Incoming</p>
-              <p className="text-xl font-semibold text-amber-700">
-                {viewSummary.totalIncoming.toLocaleString()}
+              <p className="text-xs text-gray-500 mb-1">SKUs</p>
+              <p className="text-xl font-semibold text-gray-500">
+                {viewSummary.totalSkus.toLocaleString()}
               </p>
             </div>
           </div>
@@ -392,7 +390,7 @@ export default function OnHandInventoryPage() {
           <div className="flex items-center gap-4 mb-4">
             <input
               type="text"
-              placeholder="Search by SKU or category..."
+              placeholder="Search by SKU, name, or category..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full max-w-sm px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-gray-400 focus:border-gray-400"
@@ -426,17 +424,11 @@ export default function OnHandInventoryPage() {
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
                   <SortHeader field="sku" label="SKU" />
-                  <SortHeader field="category" label="Category" />
-                  <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                    Stord
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                    Name
                   </th>
-                  <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                    ANS
-                  </th>
-                  <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                    BMC
-                  </th>
-                  <SortHeader field="totalOnHand" label="Total" align="right" />
+                  <SortHeader field="category" label="Type" />
+                  <SortHeader field="totalOnHand" label="On Hand" align="right" />
                   <SortHeader field="unitCost" label="Unit Cost" align="right" />
                   <SortHeader field="totalValue" label="Value" align="right" />
                 </tr>
@@ -456,24 +448,18 @@ export default function OnHandInventoryPage() {
                           {row.standardSku}
                         </span>
                       </td>
+                      <td className="px-4 py-3 text-gray-700 text-xs">
+                        {row.productName !== row.standardSku ? row.productName : "\u2014"}
+                      </td>
                       <td className="px-4 py-3 text-gray-500 text-xs">
                         {row.category || "\u2014"}
-                      </td>
-                      <td className="px-4 py-3 text-right text-gray-700 tabular-nums">
-                        {row.stord > 0 ? row.stord.toLocaleString() : "\u2014"}
-                      </td>
-                      <td className="px-4 py-3 text-right text-gray-700 tabular-nums">
-                        {row.ans > 0 ? row.ans.toLocaleString() : "\u2014"}
-                      </td>
-                      <td className="px-4 py-3 text-right text-gray-700 tabular-nums">
-                        {row.bmc > 0 ? row.bmc.toLocaleString() : "\u2014"}
                       </td>
                       <td className="px-4 py-3 text-right text-gray-900 font-semibold tabular-nums">
                         {row.total.toLocaleString()}
                       </td>
                       <td className="px-4 py-3 text-right">
                         {row.unitCost !== null ? (
-                          <span className="text-gray-700">{fmt(row.unitCost)}</span>
+                          <span className="text-gray-700">{fmtCost(row.unitCost)}</span>
                         ) : missingCost ? (
                           <span className="text-red-500 text-xs font-medium">Missing</span>
                         ) : (
@@ -482,7 +468,7 @@ export default function OnHandInventoryPage() {
                       </td>
                       <td className="px-4 py-3 text-right font-semibold">
                         {row.totalValue !== null ? (
-                          <span className="text-gray-900">{fmtCompact(row.totalValue)}</span>
+                          <span className="text-gray-900">{fmt(row.totalValue)}</span>
                         ) : (
                           <span className="text-gray-300">{"\u2014"}</span>
                         )}
@@ -493,17 +479,8 @@ export default function OnHandInventoryPage() {
               </tbody>
               <tfoot>
                 <tr className="bg-gray-50 border-t-2 border-gray-300">
-                  <td colSpan={2} className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  <td colSpan={3} className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">
                     Totals
-                  </td>
-                  <td className="px-4 py-3 text-right font-semibold text-gray-700 tabular-nums">
-                    {filteredPivot.reduce((s, r) => s + r.stord, 0).toLocaleString()}
-                  </td>
-                  <td className="px-4 py-3 text-right font-semibold text-gray-700 tabular-nums">
-                    {filteredPivot.reduce((s, r) => s + r.ans, 0).toLocaleString()}
-                  </td>
-                  <td className="px-4 py-3 text-right font-semibold text-gray-700 tabular-nums">
-                    {filteredPivot.reduce((s, r) => s + r.bmc, 0).toLocaleString()}
                   </td>
                   <td className="px-4 py-3 text-right font-bold text-gray-900 tabular-nums">
                     {viewSummary.totalOnHand.toLocaleString()}
@@ -525,7 +502,10 @@ export default function OnHandInventoryPage() {
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
                   <SortHeader field="sku" label="SKU" />
-                  <SortHeader field="category" label="Category" />
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                    Name
+                  </th>
+                  <SortHeader field="category" label="Type" />
                   <SortHeader field="totalOnHand" label="On-Hand" align="right" />
                   <SortHeader field="unitCost" label="Unit Cost" align="right" />
                   <SortHeader field="totalValue" label="Value" align="right" />
@@ -549,6 +529,9 @@ export default function OnHandInventoryPage() {
                           {item.standardSku}
                         </span>
                       </td>
+                      <td className="px-4 py-3 text-gray-700 text-xs">
+                        {item.productName !== item.standardSku ? item.productName : "\u2014"}
+                      </td>
                       <td className="px-4 py-3 text-gray-500 text-xs">
                         {item.category || "\u2014"}
                       </td>
@@ -557,7 +540,7 @@ export default function OnHandInventoryPage() {
                       </td>
                       <td className="px-4 py-3 text-right">
                         {item.unitCost !== null ? (
-                          <span className="text-gray-700">{fmt(item.unitCost)}</span>
+                          <span className="text-gray-700">{fmtCost(item.unitCost)}</span>
                         ) : missingCost ? (
                           <span className="text-red-500 text-xs font-medium">Missing</span>
                         ) : (
@@ -566,7 +549,7 @@ export default function OnHandInventoryPage() {
                       </td>
                       <td className="px-4 py-3 text-right font-semibold">
                         {item.extendedValue !== null ? (
-                          <span className="text-gray-900">{fmtCompact(item.extendedValue)}</span>
+                          <span className="text-gray-900">{fmt(item.extendedValue)}</span>
                         ) : (
                           <span className="text-gray-300">{"\u2014"}</span>
                         )}
@@ -583,7 +566,7 @@ export default function OnHandInventoryPage() {
               <tfoot>
                 <tr className="bg-gray-50 border-t-2 border-gray-300">
                   <td
-                    colSpan={activeTab === "STORD" ? 4 : 3}
+                    colSpan={activeTab === "STORD" ? 6 : 5}
                     className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider"
                   >
                     Total

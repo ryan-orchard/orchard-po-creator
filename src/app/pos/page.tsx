@@ -11,6 +11,8 @@ interface PO {
   status: string;
   supplier: string[];
   grandTotal: number;
+  totalSkus: number;
+  totalUnits: number;
 }
 
 interface Supplier {
@@ -18,17 +20,36 @@ interface Supplier {
   name: string;
 }
 
-const STATUS_TABS = ["All", "Draft", "Issued", "Accepted", "Received", "Closed"] as const;
-
 const statusColors: Record<string, string> = {
   Draft: "bg-warm-100 text-warm-800",
   Issued: "bg-gold-100 text-gold-800",
   Accepted: "bg-blue-100 text-blue-800",
+  Shipped: "bg-blue-100 text-blue-800",
+  "Partially Received": "bg-gold-100 text-gold-800",
   Received: "bg-sage-100 text-sage-800",
   Closed: "bg-gray-100 text-gray-600",
+  Cancelled: "bg-gray-100 text-gray-600",
 };
 
-type CardFilter = "open" | "Draft" | "Issued" | "Accepted" | null;
+const statusDotColors: Record<string, string> = {
+  Draft: "bg-warm-400",
+  Issued: "bg-gold-500",
+  Accepted: "bg-blue-500",
+  Shipped: "bg-blue-500",
+  "Partially Received": "bg-gold-500",
+  Received: "bg-sage-500",
+  Closed: "bg-gray-400",
+  Cancelled: "bg-gray-400",
+};
+
+const OPEN_STATUSES = ["Draft", "Issued", "Accepted", "Shipped", "Partially Received"];
+
+// Status groups for the summary card
+const STATUS_GROUPS = [
+  { label: "Open", statuses: ["Draft", "Issued"], dotColor: "bg-gold-500" },
+  { label: "In Production", statuses: ["Accepted"], dotColor: "bg-blue-500" },
+  { label: "Post Production", statuses: ["Shipped", "Partially Received", "Received", "Closed", "Cancelled"], dotColor: "bg-sage-500" },
+];
 
 type SortField = "poNumber" | "supplier" | "status" | "grandTotal" | "date" | "deliveryDate";
 type SortDir = "asc" | "desc";
@@ -39,8 +60,7 @@ export default function POListPage() {
   const [suppliers, setSuppliers] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<string>("All");
-  const [cardFilter, setCardFilter] = useState<CardFilter>("open");
+  const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [sortField, setSortField] = useState<SortField>("date");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
@@ -81,15 +101,20 @@ export default function POListPage() {
     }
   };
 
-  const OPEN_STATUSES = ["Draft", "Issued", "Accepted"];
+  // Count by status
+  const statusCounts: Record<string, number> = {};
+  for (const po of pos) {
+    statusCounts[po.status] = (statusCounts[po.status] || 0) + 1;
+  }
 
-  const filteredPOs = cardFilter === "open"
-    ? pos.filter((po) => OPEN_STATUSES.includes(po.status))
-    : cardFilter
-    ? pos.filter((po) => po.status === cardFilter)
-    : activeTab === "All"
-    ? pos
-    : pos.filter((po) => po.status === activeTab);
+  const openPOs = pos.filter((p) => OPEN_STATUSES.includes(p.status));
+  const openPOValue = openPOs.reduce((s, p) => s + (p.grandTotal || 0), 0);
+
+  // Filter by status group
+  const activeGroup = STATUS_GROUPS.find((g) => g.label === statusFilter);
+  const filteredPOs = activeGroup
+    ? pos.filter((po) => activeGroup.statuses.includes(po.status))
+    : pos;
 
   const sortedPOs = [...filteredPOs].sort((a, b) => {
     let cmp = 0;
@@ -119,146 +144,111 @@ export default function POListPage() {
     return sortDir === "asc" ? cmp : -cmp;
   });
 
-  const exportCSV = () => {
-    const rows = [
-      ["PO #", "Supplier", "Status", "Total", "Date", "Delivery Date"],
-      ...sortedPOs.map((po) => [
-        po.poNumber,
-        po.supplier?.[0] ? suppliers[po.supplier[0]] || "" : "",
-        po.status,
-        po.grandTotal != null ? po.grandTotal.toFixed(2) : "",
-        po.date ? new Date(po.date + "T00:00:00").toLocaleDateString("en-US") : "",
-        po.deliveryDate ? new Date(po.deliveryDate + "T00:00:00").toLocaleDateString("en-US") : "",
-      ]),
-    ];
-    const csv = rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "purchase-orders.csv";
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+  const fmtDate = (d: string) =>
+    new Date(d + "T00:00:00").toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
 
-  const tabCounts = STATUS_TABS.reduce((acc, tab) => {
-    acc[tab] = tab === "All" ? pos.length : pos.filter((p) => p.status === tab).length;
-    return acc;
-  }, {} as Record<string, number>);
+  const fmt = (n: number) =>
+    n.toLocaleString("en-US", {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    });
+
+  // Group counts for the card
+  const groupCounts = STATUS_GROUPS.map((g) => ({
+    ...g,
+    count: pos.filter((p) => g.statuses.includes(p.status)).length,
+  }));
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="max-w-6xl mx-auto px-6 py-8">
+      <div className="max-w-7xl mx-auto px-6 py-8">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">
-              Purchase Orders
-            </h1>
-            <p className="text-sm text-gray-500 mt-1">
-              {pos.length} {pos.length === 1 ? "order" : "orders"}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            {!loading && sortedPOs.length > 0 && (
-              <button
-                onClick={exportCSV}
-                className="border border-gray-300 text-gray-700 px-4 py-2 text-sm rounded-md hover:bg-gray-50"
-              >
-                Export CSV
-              </button>
-            )}
-            <button
-              onClick={() => {}}
-              className="border border-gray-300 text-gray-700 px-4 py-2 text-sm rounded-md hover:bg-gray-50"
-            >
-              Upload PO
-            </button>
-            <button
-              onClick={() => router.push("/pos/new")}
-              className="bg-gray-900 text-white px-4 py-2 text-sm rounded-md hover:bg-gray-800"
-            >
-              + Create PO
-            </button>
-          </div>
+        <div className="flex items-center justify-between mb-8">
+          <h1 className="text-2xl font-bold text-gray-900">Purchase Orders</h1>
+          <button
+            onClick={() => router.push("/pos/new")}
+            className="bg-gray-900 text-white px-5 py-2.5 text-sm font-medium rounded-lg hover:bg-gray-800"
+          >
+            + Create PO
+          </button>
         </div>
 
         {/* Summary Cards */}
         {!loading && (
-          <div className="grid grid-cols-4 gap-4 mb-6">
-            {/* Total Open POs */}
-            <button
-              onClick={() => { setCardFilter(cardFilter === "open" ? null : "open"); setActiveTab("All"); }}
-              className={`text-left rounded-lg px-5 py-4 transition-colors ${cardFilter === "open" ? "bg-gray-900 text-white" : "bg-gray-900 text-white opacity-90 hover:opacity-100"}`}
-            >
-              <p className="text-xs font-medium uppercase tracking-wider opacity-70">Open POs</p>
-              <p className="text-2xl font-bold mt-1 tabular-nums">
-                {pos.filter((p) => ["Draft", "Issued", "Accepted"].includes(p.status)).length}
+          <div className="grid grid-cols-2 gap-4 mb-8">
+            {/* Orders by Status */}
+            <div className="bg-white rounded-lg border border-gray-200 px-6 py-5">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">
+                Purchase Orders by Status
               </p>
-              <p className="text-xs opacity-50 mt-1">
-                {pos.filter((p) => ["Draft", "Issued", "Accepted"].includes(p.status))
-                  .reduce((s, p) => s + (p.grandTotal || 0), 0)
-                  .toLocaleString("en-US", { style: "currency", currency: "USD" })}
+              <div className="space-y-2.5">
+                {groupCounts.map((group) => (
+                  <button
+                    key={group.label}
+                    onClick={() => setStatusFilter(statusFilter === group.label ? null : group.label)}
+                    className={`flex items-center justify-between w-full text-left px-2 py-1.5 rounded-md transition-colors ${
+                      statusFilter === group.label
+                        ? "bg-gray-100"
+                        : "hover:bg-gray-50"
+                    }`}
+                  >
+                    <span className="flex items-center gap-2.5">
+                      <span className={`w-2 h-2 rounded-full ${group.count > 0 ? group.dotColor : "bg-gray-200"}`} />
+                      <span className={`text-sm ${group.count > 0 ? "text-gray-700" : "text-gray-400"}`}>{group.label}</span>
+                    </span>
+                    <span className={`text-sm tabular-nums ${group.count > 0 ? "font-semibold text-gray-900" : "text-gray-300"}`}>
+                      {group.count}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Open PO Value */}
+            <div className="bg-white rounded-lg border border-gray-200 px-6 py-5">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
+                Open PO Value
               </p>
-            </button>
+              <p className="text-3xl font-bold text-gray-900 tabular-nums">
+                {fmt(openPOValue)}
+              </p>
+              <p className="text-sm text-gray-400 mt-1">
+                Across {openPOs.length} open {openPOs.length === 1 ? "order" : "orders"}
+              </p>
+            </div>
+          </div>
+        )}
 
-            {/* Draft */}
+        {/* Active filter indicator */}
+        {statusFilter && (
+          <div className="flex items-center gap-2 mb-4">
+            <span className="text-sm text-gray-500">Showing:</span>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-700">
+              {statusFilter}
+            </span>
             <button
-              onClick={() => { setCardFilter(cardFilter === "Draft" ? null : "Draft"); setActiveTab("All"); }}
-              className={`text-left rounded-lg border px-5 py-4 transition-colors ${cardFilter === "Draft" ? "bg-warm-600 border-warm-600" : "bg-warm-50 border-warm-200 hover:bg-warm-100"}`}
+              onClick={() => setStatusFilter(null)}
+              className="text-xs text-gray-400 hover:text-gray-600 ml-1"
             >
-              <p className={`text-xs font-medium uppercase tracking-wider ${cardFilter === "Draft" ? "text-warm-100" : "text-warm-700"}`}>Draft</p>
-              <p className={`text-2xl font-bold mt-1 tabular-nums ${cardFilter === "Draft" ? "text-white" : "text-warm-900"}`}>{tabCounts["Draft"]}</p>
-            </button>
-
-            {/* Issued */}
-            <button
-              onClick={() => { setCardFilter(cardFilter === "Issued" ? null : "Issued"); setActiveTab("All"); }}
-              className={`text-left rounded-lg border px-5 py-4 transition-colors ${cardFilter === "Issued" ? "bg-gold-600 border-gold-600" : "bg-gold-50 border-gold-200 hover:bg-gold-100"}`}
-            >
-              <p className={`text-xs font-medium uppercase tracking-wider ${cardFilter === "Issued" ? "text-gold-100" : "text-gold-700"}`}>Issued</p>
-              <p className={`text-2xl font-bold mt-1 tabular-nums ${cardFilter === "Issued" ? "text-white" : "text-gold-900"}`}>{tabCounts["Issued"]}</p>
-            </button>
-
-            {/* Accepted */}
-            <button
-              onClick={() => { setCardFilter(cardFilter === "Accepted" ? null : "Accepted"); setActiveTab("All"); }}
-              className={`text-left rounded-lg border px-5 py-4 transition-colors ${cardFilter === "Accepted" ? "bg-blue-600 border-blue-600" : "bg-blue-50 border-blue-200 hover:bg-blue-100"}`}
-            >
-              <p className={`text-xs font-medium uppercase tracking-wider ${cardFilter === "Accepted" ? "text-blue-100" : "text-blue-700"}`}>Accepted</p>
-              <p className={`text-2xl font-bold mt-1 tabular-nums ${cardFilter === "Accepted" ? "text-white" : "text-blue-900"}`}>{tabCounts["Accepted"]}</p>
+              Clear
             </button>
           </div>
         )}
 
-        {/* Status tabs */}
-        <div className="flex items-center gap-1 mb-4 border-b border-gray-200">
-          {STATUS_TABS.map((tab) => (
-            <button
-              key={tab}
-              onClick={() => { setActiveTab(tab); setCardFilter(null); }}
-              className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === tab
-                  ? "border-gray-900 text-gray-900"
-                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-              }`}
-            >
-              {tab}
-              <span className={`ml-1.5 text-xs ${activeTab === tab ? "text-gray-600" : "text-gray-400"}`}>
-                {tabCounts[tab]}
-              </span>
-            </button>
-          ))}
-        </div>
-
         {loading ? (
           <p className="text-gray-500">Loading...</p>
-        ) : filteredPOs.length === 0 ? (
+        ) : sortedPOs.length === 0 ? (
           <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
             <p className="text-gray-500 mb-4">
-              {activeTab === "All" ? "No purchase orders yet." : `No ${activeTab.toLowerCase()} purchase orders.`}
+              {statusFilter ? `No ${statusFilter.toLowerCase()} purchase orders.` : "No purchase orders yet."}
             </p>
-            {activeTab === "All" && (
+            {!statusFilter && (
               <button
                 onClick={() => router.push("/pos/new")}
                 className="bg-gray-900 text-white px-4 py-2 text-sm rounded-md hover:bg-gray-800"
@@ -271,27 +261,30 @@ export default function POListPage() {
           <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-gray-50 border-b border-gray-200">
+                <tr className="border-b border-gray-200">
                   {([
-                    { field: "poNumber" as SortField, label: "PO #", align: "text-left" },
-                    { field: "supplier" as SortField, label: "Supplier", align: "text-left" },
+                    { field: "poNumber" as SortField, label: "PO Number", align: "text-left" },
                     { field: "status" as SortField, label: "Status", align: "text-left" },
-                    { field: "grandTotal" as SortField, label: "Total", align: "text-right" },
-                    { field: "date" as SortField, label: "Date", align: "text-left" },
-                    { field: "deliveryDate" as SortField, label: "Delivery Date", align: "text-left" },
+                    { field: "supplier" as SortField, label: "Supplier", align: "text-left" },
+                    { field: "date" as SortField, label: "Created Date", align: "text-left" },
+                    { field: "deliveryDate" as SortField, label: "Expected Delivery", align: "text-left" },
+                    { field: "grandTotal" as SortField, label: "Total Value", align: "text-right" },
                   ]).map((col) => (
                     <th
                       key={col.field}
                       onClick={() => handleSort(col.field)}
-                      className={`${col.align} px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700 select-none`}
+                      className={`${col.align} px-5 py-3.5 text-xs font-semibold text-gray-400 uppercase tracking-wider cursor-pointer hover:text-gray-600 select-none`}
                     >
                       {col.label}
                       {sortField === col.field && (
-                        <span className="ml-1">{sortDir === "asc" ? "↑" : "↓"}</span>
+                        <span className="ml-1">{sortDir === "asc" ? "\u2191" : "\u2193"}</span>
                       )}
                     </th>
                   ))}
-                  <th className="px-4 py-3 w-10"></th>
+                  <th className="text-right px-5 py-3.5 text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                    SKUs / Units
+                  </th>
+                  <th className="px-3 py-3.5 w-10"></th>
                 </tr>
               </thead>
               <tbody>
@@ -299,41 +292,40 @@ export default function POListPage() {
                   <tr
                     key={po.id}
                     onClick={() => router.push(`/pos/${po.id}`)}
-                    className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
+                    className="border-b border-gray-100 hover:bg-gray-50/80 cursor-pointer"
                   >
-                    <td className="px-4 py-3 font-semibold text-gray-900">
+                    <td className="px-5 py-4 font-semibold text-gray-900">
                       {po.poNumber}
                     </td>
-                    <td className="px-4 py-3 text-gray-600">
-                      {po.supplier?.[0] ? suppliers[po.supplier[0]] || "—" : "—"}
-                    </td>
-                    <td className="px-4 py-3">
+                    <td className="px-5 py-4">
                       <span
-                        className={`inline-block px-2 py-0.5 text-xs font-medium rounded-full ${statusColors[po.status] || "bg-gray-100 text-gray-600"}`}
+                        className={`inline-block px-2.5 py-0.5 text-xs font-medium rounded-full ${statusColors[po.status] || "bg-gray-100 text-gray-600"}`}
                       >
                         {po.status}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right font-semibold tabular-nums">
-                      {po.grandTotal != null
-                        ? `$${po.grandTotal.toLocaleString("en-US", { minimumFractionDigits: 2 })}`
-                        : "—"}
+                    <td className="px-5 py-4 text-gray-600">
+                      {po.supplier?.[0] ? suppliers[po.supplier[0]] || "\u2014" : "\u2014"}
                     </td>
-                    <td className="px-4 py-3 text-gray-600">
-                      {po.date
-                        ? new Date(po.date + "T00:00:00").toLocaleDateString("en-US")
-                        : "—"}
+                    <td className="px-5 py-4 text-gray-600">
+                      {po.date ? fmtDate(po.date) : "\u2014"}
                     </td>
-                    <td className="px-4 py-3 text-gray-600">
-                      {po.deliveryDate
-                        ? new Date(po.deliveryDate + "T00:00:00").toLocaleDateString("en-US")
-                        : "—"}
+                    <td className="px-5 py-4 text-gray-600">
+                      {po.deliveryDate ? fmtDate(po.deliveryDate) : "\u2014"}
                     </td>
-                    <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
+                    <td className="px-5 py-4 text-right font-semibold text-gray-900 tabular-nums">
+                      {po.grandTotal != null ? fmt(po.grandTotal) : "\u2014"}
+                    </td>
+                    <td className="px-5 py-4 text-right">
+                      <span className="text-gray-900 font-semibold">{po.totalSkus} SKUs</span>
+                      <br />
+                      <span className="text-gray-400 text-xs">{po.totalUnits.toLocaleString()} Units</span>
+                    </td>
+                    <td className="px-3 py-4 text-center" onClick={(e) => e.stopPropagation()}>
                       <button
                         onClick={() => handleDelete(po.id, po.poNumber)}
                         disabled={deleting === po.id}
-                        className="text-red-300 hover:text-red-500 disabled:opacity-50 p-1"
+                        className="text-gray-300 hover:text-red-500 disabled:opacity-50 p-1"
                         title="Delete PO"
                       >
                         {deleting === po.id ? (
@@ -349,6 +341,9 @@ export default function POListPage() {
                 ))}
               </tbody>
             </table>
+            <div className="px-5 py-3 border-t border-gray-100 text-sm text-gray-400">
+              Showing {sortedPOs.length} {sortedPOs.length === 1 ? "order" : "orders"}
+            </div>
           </div>
         )}
       </div>

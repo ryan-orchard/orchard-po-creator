@@ -110,7 +110,8 @@ async function fetchStordInventory(
 
 function mapStordToOnHand(
   balances: StordFacilityBalance[],
-  categoryByStandardSku: Map<string, string>
+  categoryByStandardSku: Map<string, string>,
+  nameByStandardSku: Map<string, string>
 ): OnHandItem[] {
   return balances.map((b) => {
     const mapping = SKU_MAPPING[b.sku];
@@ -128,7 +129,7 @@ function mapStordToOnHand(
       standardSku,
       stordSku: b.sku,
       category,
-      productName: b.name,
+      productName: nameByStandardSku.get(standardSku) || b.name,
       warehouse: "STORD",
       totalOnHand,
       incoming,
@@ -221,8 +222,8 @@ async function fetchANSInventory(
     items.push({
       standardSku,
       stordSku,
-      category: null,
-      productName: standardSku,
+      category: null, // will be enriched below
+      productName: standardSku, // will be enriched below
       warehouse: "ANS",
       totalOnHand: qty,
       incoming: 0,
@@ -245,16 +246,23 @@ export async function GET(request: Request) {
   const warehouseFilter = (searchParams.get("warehouse") || "all").toUpperCase();
 
   try {
-    // Fetch all items from org_config
+    // Fetch all items from org_config (including metadata for name/category)
     const { data: allItemsRaw } = await db
       .schema("org_config")
       .from("items")
-      .select("id, sku, uom");
+      .select("id, sku, uom, metadata");
 
     const itemMap = new Map(
       (allItemsRaw ?? []).map((i) => [i.id as string, { sku: i.sku as string, uom: i.uom as string }])
     );
-    const categoryByStandardSku = new Map<string, string>(); // category not yet in Supabase items table
+    const categoryByStandardSku = new Map<string, string>();
+    const nameByStandardSku = new Map<string, string>();
+    for (const item of allItemsRaw ?? []) {
+      const meta = item.metadata as Record<string, unknown> | null;
+      const sku = item.sku as string;
+      if (meta?.category) categoryByStandardSku.set(sku, meta.category as string);
+      if (meta?.flavor) nameByStandardSku.set(sku, meta.flavor as string);
+    }
 
     const includeStord = warehouseFilter === "ALL" || warehouseFilter === "STORD";
     const includeANS = warehouseFilter === "ALL" || warehouseFilter === "ANS";
@@ -278,7 +286,7 @@ export async function GET(request: Request) {
         if (apiKey && orgId && networkId) {
           fetches.push(
             fetchStordInventory(apiKey, orgId, networkId).then((balances) => {
-              stordItems = mapStordToOnHand(balances, categoryByStandardSku);
+              stordItems = mapStordToOnHand(balances, categoryByStandardSku, nameByStandardSku);
               stordCachedItems = stordItems;
               stordCachedAt = Date.now();
             })
@@ -297,7 +305,16 @@ export async function GET(request: Request) {
 
     await Promise.all(fetches);
 
-    const allOnHand = [...stordItems, ...ansItems, ...bmcItems].sort((a, b) =>
+    // Enrich all items with category/name from item metadata
+    const allRaw = [...stordItems, ...ansItems, ...bmcItems];
+    for (const item of allRaw) {
+      if (!item.category) item.category = categoryByStandardSku.get(item.standardSku) ?? null;
+      if (!item.productName || item.productName === item.standardSku) {
+        item.productName = nameByStandardSku.get(item.standardSku) || item.standardSku;
+      }
+    }
+
+    const allOnHand = allRaw.sort((a, b) =>
       a.standardSku.localeCompare(b.standardSku)
     );
 
