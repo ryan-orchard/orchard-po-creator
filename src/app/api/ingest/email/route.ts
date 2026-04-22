@@ -11,6 +11,8 @@ import {
   type IngestAttachment,
 } from "@/lib/ingest";
 import { logActivity } from "@/lib/activity-log";
+import { isBmcReport, parseBmcReport } from "@/lib/bmc-parser";
+import { processBmcReport } from "@/lib/bmc-ingest";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // Allow up to 60s for AI parsing
@@ -306,6 +308,78 @@ export async function POST(request: NextRequest) {
 
       // Store raw file
       const storagePath = await storeAttachment(emailId, attachment);
+
+      // ── BMC report auto-processing ───────────────────────────────
+      if (isBmcReport(payload.Subject || "", att.Name)) {
+        try {
+          console.log(`Detected BMC report: ${att.Name}`);
+          const buffer = Buffer.from(content, "base64");
+          const parsed = parseBmcReport(buffer);
+          const writeResult = await processBmcReport(parsed, payload.Date);
+
+          // Record as auto-approved document
+          await db
+            .schema("orchard")
+            .from("ingested_documents")
+            .insert({
+              email_id: emailId,
+              filename: att.Name,
+              content_type: att.ContentType,
+              storage_path: storagePath,
+              file_size_bytes: att.ContentLength,
+              document_type: "transaction_export",
+              confidence: 1.0,
+              parsed_data: {
+                type: "bmc_report",
+                snapshotItems: parsed.snapshotItemCount,
+                transactions: parsed.transactionCount,
+                newTransactions: writeResult.newTransactions,
+                skippedDuplicates: writeResult.skippedDuplicates,
+                unmapped: parsed.unmapped,
+                reportDate: parsed.reportDate,
+              },
+              status: "approved",
+              reviewed_at: new Date().toISOString(),
+              reviewed_by: "Orchard AI (auto)",
+            });
+
+          console.log(
+            `BMC report processed: ${parsed.snapshotItemCount} snapshot items, ` +
+            `${writeResult.newTransactions} new / ${writeResult.skippedDuplicates} dup transactions`
+          );
+
+          results.push({
+            filename: att.Name,
+            documentType: "transaction_export",
+            status: "auto_approved",
+          });
+          continue; // Skip normal classification flow
+        } catch (bmcError) {
+          console.error(`BMC report parse failed for ${att.Name}:`, bmcError);
+          // Fall through to normal classification — will land in inbox for manual review
+          await db
+            .schema("orchard")
+            .from("ingested_documents")
+            .insert({
+              email_id: emailId,
+              filename: att.Name,
+              content_type: att.ContentType,
+              storage_path: storagePath,
+              file_size_bytes: att.ContentLength,
+              document_type: "transaction_export",
+              confidence: 0.9,
+              parsed_data: { error: (bmcError as Error).message, type: "bmc_report_failed" },
+              status: "pending",
+            });
+
+          results.push({
+            filename: att.Name,
+            documentType: "transaction_export",
+            status: "parse_failed",
+          });
+          continue;
+        }
+      }
 
       // Classify
       const classification = await classifyDocument(attachment, payload.Subject || "");

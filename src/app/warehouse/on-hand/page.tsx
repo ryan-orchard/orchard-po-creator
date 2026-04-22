@@ -42,7 +42,6 @@ interface PivotRow {
   category: string | null;
   productName: string;
   stord: number;
-  ans: number;
   bmc: number;
   total: number;
   incoming: number;
@@ -50,12 +49,11 @@ interface PivotRow {
   totalValue: number | null;
 }
 
-type WarehouseTab = "ALL" | "STORD" | "ANS" | "BMC";
+type WarehouseTab = "ALL" | "STORD" | "BMC";
 
 const TABS: { key: WarehouseTab; label: string }[] = [
   { key: "ALL", label: "All Locations" },
   { key: "STORD", label: "Stord" },
-  { key: "ANS", label: "ANS" },
   { key: "BMC", label: "BMC" },
 ];
 
@@ -112,7 +110,6 @@ export default function OnHandInventoryPage() {
           category: item.category,
           productName: item.productName || item.standardSku,
           stord: 0,
-          ans: 0,
           bmc: 0,
           total: 0,
           incoming: 0,
@@ -123,7 +120,6 @@ export default function OnHandInventoryPage() {
       }
 
       if (item.warehouse === "STORD") row.stord += item.totalOnHand;
-      else if (item.warehouse === "ANS") row.ans += item.totalOnHand;
       else if (item.warehouse === "BMC") row.bmc += item.totalOnHand;
       row.incoming += item.incoming;
 
@@ -133,7 +129,7 @@ export default function OnHandInventoryPage() {
 
     // Calculate totals
     for (const row of bySkuMap.values()) {
-      row.total = row.stord + row.ans + row.bmc;
+      row.total = row.stord + row.bmc;
       row.totalValue =
         row.unitCost !== null && row.total > 0
           ? Math.round(row.unitCost * row.total * 100) / 100
@@ -590,12 +586,8 @@ export default function OnHandInventoryPage() {
               <p className="text-gray-500">
                 {search
                   ? "No items match your search."
-                  : activeTab !== "ALL" && activeTab !== "STORD"
-                  ? `No inventory data for ${activeTab}. ${
-                      activeTab === "BMC"
-                        ? "Upload a snapshot via Data Ingestion."
-                        : "Receive POs at ANS to see inventory here."
-                    }`
+                  : activeTab === "BMC"
+                  ? "No inventory data for BMC. Upload a snapshot via Data Ingestion."
                   : "No inventory items found."}
               </p>
             </div>

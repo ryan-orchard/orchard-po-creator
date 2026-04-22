@@ -2,18 +2,6 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/supabase";
 import { SKU_MAPPING } from "@/lib/client-config";
 
-import unitCostData from "@/../clients/magna/config/unit-costs-2026-02.json";
-
-const UNIT_COSTS: Record<string, number> = unitCostData as Record<string, number>;
-
-// Reverse mapping: standardSku → stordSku (for unit cost lookup by standard SKU)
-const STANDARD_TO_STORD: Record<string, string> = {};
-for (const [stordSku, mapping] of Object.entries(SKU_MAPPING)) {
-  if (mapping?.standardSku) {
-    STANDARD_TO_STORD[mapping.standardSku] = stordSku;
-  }
-}
-
 const STORD_BASE_URL = "https://api-next.stord.com/v1";
 
 interface StordFacilityBalance {
@@ -111,14 +99,15 @@ async function fetchStordInventory(
 function mapStordToOnHand(
   balances: StordFacilityBalance[],
   categoryByStandardSku: Map<string, string>,
-  nameByStandardSku: Map<string, string>
+  nameByStandardSku: Map<string, string>,
+  unitCostBySku: Map<string, number>
 ): OnHandItem[] {
   return balances.map((b) => {
     const mapping = SKU_MAPPING[b.sku];
     const standardSku = mapping?.standardSku || b.sku;
     const totalOnHand = parseInt(b.total_on_hand) || 0;
     const incoming = parseInt(b.incoming) || 0;
-    const unitCost = UNIT_COSTS[b.sku] ?? null;
+    const unitCost = unitCostBySku.get(standardSku) ?? null;
     const extendedValue =
       unitCost !== null && totalOnHand > 0
         ? Math.round(unitCost * totalOnHand * 100) / 100
@@ -139,103 +128,7 @@ function mapStordToOnHand(
   });
 }
 
-// --- ANS calculated from Supabase receipts + work orders ---
-
-async function fetchANSInventory(
-  itemMap: Map<string, { sku: string; uom: string }>
-): Promise<OnHandItem[]> {
-  // Find ANS warehouse id
-  const { data: warehouse } = await db
-    .schema("org_config")
-    .from("warehouses")
-    .select("id")
-    .eq("code", "ANS")
-    .maybeSingle();
-
-  if (!warehouse) return [];
-  const ansWarehouseId = warehouse.id as string;
-
-  // Fetch ANS receipts and work orders in parallel
-  const [receiptsResult, wosResult] = await Promise.all([
-    db.schema("orchard").from("receipts").select("id").eq("location_id", ansWarehouseId),
-    db
-      .schema("orchard")
-      .from("work_orders")
-      .select("id")
-      .eq("location_id", ansWarehouseId)
-      .eq("status", "Completed"),
-  ]);
-
-  const ansReceiptIds = (receiptsResult.data ?? []).map((r) => r.id as string);
-  const ansWOIds = (wosResult.data ?? []).map((wo) => wo.id as string);
-
-  const qtyByItemId = new Map<string, number>();
-
-  // Add received quantities from ANS receipts
-  if (ansReceiptIds.length > 0) {
-    const { data: receiptLines } = await db
-      .schema("orchard")
-      .from("receipt_lines")
-      .select("item_id, qty_received")
-      .in("receipt_id", ansReceiptIds);
-
-    for (const line of receiptLines ?? []) {
-      const itemId = line.item_id as string;
-      if (!itemId) continue;
-      const qty = Number(line.qty_received) || 0;
-      qtyByItemId.set(itemId, (qtyByItemId.get(itemId) || 0) + qty);
-    }
-  }
-
-  // Adjust for completed WOs at ANS: subtract inputs, add outputs
-  if (ansWOIds.length > 0) {
-    const { data: woLines } = await db
-      .schema("orchard")
-      .from("work_order_lines")
-      .select("item_id, qty, line_type")
-      .in("wo_id", ansWOIds);
-
-    for (const line of woLines ?? []) {
-      const itemId = line.item_id as string;
-      if (!itemId) continue;
-      const qty = Number(line.qty) || 0;
-      const lineType = line.line_type as string;
-      if (lineType === "Input") {
-        qtyByItemId.set(itemId, (qtyByItemId.get(itemId) || 0) - qty);
-      } else if (lineType === "Output") {
-        qtyByItemId.set(itemId, (qtyByItemId.get(itemId) || 0) + qty);
-      }
-    }
-  }
-
-  // Convert to OnHandItem[]
-  const items: OnHandItem[] = [];
-  for (const [itemId, qty] of qtyByItemId) {
-    if (qty <= 0) continue;
-    const itemInfo = itemMap.get(itemId);
-    const standardSku = itemInfo?.sku || itemId;
-    const stordSku = STANDARD_TO_STORD[standardSku] || null;
-    const unitCost = stordSku ? (UNIT_COSTS[stordSku] ?? null) : null;
-    const extendedValue =
-      unitCost !== null && qty > 0 ? Math.round(unitCost * qty * 100) / 100 : null;
-
-    items.push({
-      standardSku,
-      stordSku,
-      category: null, // will be enriched below
-      productName: standardSku, // will be enriched below
-      warehouse: "ANS",
-      totalOnHand: qty,
-      incoming: 0,
-      unitCost,
-      extendedValue,
-    });
-  }
-
-  return items;
-}
-
-// Server-side cache: 24 hours (Stord API only — ANS always fresh from Supabase)
+// Server-side cache: 24 hours (Stord API only)
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 let stordCachedItems: OnHandItem[] | null = null;
 let stordCachedAt = 0;
@@ -246,31 +139,50 @@ export async function GET(request: Request) {
   const warehouseFilter = (searchParams.get("warehouse") || "all").toUpperCase();
 
   try {
-    // Fetch all items from org_config (including metadata for name/category)
+    // Fetch all items from org_config
     const { data: allItemsRaw } = await db
       .schema("org_config")
       .from("items")
-      .select("id, sku, uom, metadata");
+      .select("id, sku, name, unit_of_measure, category");
 
-    const itemMap = new Map(
-      (allItemsRaw ?? []).map((i) => [i.id as string, { sku: i.sku as string, uom: i.uom as string }])
-    );
     const categoryByStandardSku = new Map<string, string>();
     const nameByStandardSku = new Map<string, string>();
+    const itemIdBySku = new Map<string, string>();
     for (const item of allItemsRaw ?? []) {
-      const meta = item.metadata as Record<string, unknown> | null;
       const sku = item.sku as string;
-      if (meta?.category) categoryByStandardSku.set(sku, meta.category as string);
-      if (meta?.flavor) nameByStandardSku.set(sku, meta.flavor as string);
+      if (item.category) categoryByStandardSku.set(sku, item.category as string);
+      if (item.name) nameByStandardSku.set(sku, item.name as string);
+      itemIdBySku.set(sku, item.id as string);
+    }
+
+    // Fetch latest unit cost per item from item_costs table
+    const unitCostByItemId = new Map<string, number>();
+    const { data: costRows } = await db
+      .schema("orchard")
+      .from("item_costs")
+      .select("item_id, unit_cost, effective_date")
+      .order("effective_date", { ascending: false });
+
+    // Keep only the most recent cost per item
+    for (const row of costRows ?? []) {
+      const itemId = row.item_id as string;
+      if (!unitCostByItemId.has(itemId)) {
+        unitCostByItemId.set(itemId, Number(row.unit_cost));
+      }
+    }
+
+    // Build sku → unit cost lookup
+    const unitCostBySku = new Map<string, number>();
+    for (const [sku, itemId] of itemIdBySku) {
+      const cost = unitCostByItemId.get(itemId);
+      if (cost != null) unitCostBySku.set(sku, cost);
     }
 
     const includeStord = warehouseFilter === "ALL" || warehouseFilter === "STORD";
-    const includeANS = warehouseFilter === "ALL" || warehouseFilter === "ANS";
     const includeBMC = warehouseFilter === "ALL" || warehouseFilter === "BMC";
 
     let stordItems: OnHandItem[] = [];
-    let ansItems: OnHandItem[] = [];
-    const bmcItems: OnHandItem[] = []; // BMC snapshot not yet migrated to Supabase
+    let bmcItems: OnHandItem[] = [];
     let bmcSnapshotDate: string | null = null;
 
     const fetches: Promise<void>[] = [];
@@ -286,7 +198,7 @@ export async function GET(request: Request) {
         if (apiKey && orgId && networkId) {
           fetches.push(
             fetchStordInventory(apiKey, orgId, networkId).then((balances) => {
-              stordItems = mapStordToOnHand(balances, categoryByStandardSku, nameByStandardSku);
+              stordItems = mapStordToOnHand(balances, categoryByStandardSku, nameByStandardSku, unitCostBySku);
               stordCachedItems = stordItems;
               stordCachedAt = Date.now();
             })
@@ -295,18 +207,53 @@ export async function GET(request: Request) {
       }
     }
 
-    if (includeANS) {
+    if (includeBMC) {
       fetches.push(
-        fetchANSInventory(itemMap).then((items) => {
-          ansItems = items;
-        })
+        (async () => {
+          // Fetch the most recent BMC snapshot from Supabase
+          const { data: latestSnapshot } = await db
+            .schema("orchard")
+            .from("inventory_snapshots")
+            .select("snapshot_date")
+            .eq("warehouse_code", "BMC")
+            .order("snapshot_date", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (latestSnapshot) {
+            bmcSnapshotDate = latestSnapshot.snapshot_date as string;
+            const { data: snapRows } = await db
+              .schema("orchard")
+              .from("inventory_snapshots")
+              .select("*")
+              .eq("warehouse_code", "BMC")
+              .eq("snapshot_date", bmcSnapshotDate);
+
+            bmcItems = (snapRows || []).map((row) => {
+              const sku = row.sku as string;
+              const onHand = Number(row.qty_on_hand) || 0;
+              const unitCost = unitCostBySku.get(sku) ?? null;
+              return {
+                standardSku: sku,
+                stordSku: null,
+                category: categoryByStandardSku.get(sku) ?? null,
+                productName: nameByStandardSku.get(sku) || sku,
+                warehouse: "BMC",
+                totalOnHand: onHand,
+                incoming: 0,
+                unitCost,
+                extendedValue: unitCost != null ? Math.round(unitCost * onHand * 100) / 100 : null,
+              };
+            });
+          }
+        })()
       );
     }
 
     await Promise.all(fetches);
 
-    // Enrich all items with category/name from item metadata
-    const allRaw = [...stordItems, ...ansItems, ...bmcItems];
+    // Enrich all items with category/name from items table
+    const allRaw = [...stordItems, ...bmcItems];
     for (const item of allRaw) {
       if (!item.category) item.category = categoryByStandardSku.get(item.standardSku) ?? null;
       if (!item.productName || item.productName === item.standardSku) {
@@ -335,15 +282,6 @@ export async function GET(request: Request) {
         asOf: new Date().toISOString(),
       });
     }
-    if (includeANS) {
-      warehouses.push({
-        code: "ANS",
-        name: "ANS",
-        sourceType: "calculated",
-        sourceLabel: "Calculated from receipts + work orders",
-        asOf: new Date().toISOString(),
-      });
-    }
     if (includeBMC) {
       warehouses.push({
         code: "BMC",
@@ -358,7 +296,7 @@ export async function GET(request: Request) {
       items: allOnHand,
       summary,
       warehouses,
-      costEffectiveDate: "2026-02-28",
+      costEffectiveDate: (costRows ?? []).length > 0 ? (costRows![0].effective_date as string) : "",
       fetchedAt: new Date().toISOString(),
     };
 

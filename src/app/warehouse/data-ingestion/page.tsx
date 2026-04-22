@@ -259,7 +259,8 @@ export default function DataIngestionPage() {
           warehouseCode: snapshotWarehouse,
           date: snapshotDate,
           lines: snapshotPreview.lines.map((l) => ({
-            skuRecordId: l.skuRecordId,
+            sku: l.standardSku,
+            itemId: l.skuRecordId,
             qty: l.qty,
           })),
         }),

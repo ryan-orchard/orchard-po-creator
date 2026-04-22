@@ -26,13 +26,13 @@ export async function GET(
     const itemIds = [...new Set(lines.map((l) => l.item_id as string))];
     const [itemsResult, warehouseResult] = await Promise.all([
       itemIds.length
-        ? db.schema("org_config").from("items").select("id, sku, unit_of_measure, sticks_per_carton, metadata").in("id", itemIds)
+        ? db.schema("org_config").from("items").select("id, sku, name, unit_of_measure, sticks_per_carton, category").in("id", itemIds)
         : { data: [] },
       db.schema("org_config").from("locations").select("id, name, code").eq("id", wo.location_id as string).single(),
     ]);
 
     const itemMap = new Map((itemsResult.data ?? []).map((i) => [i.id, i]));
-    type Item = { id: string; sku: string; unit_of_measure: string; sticks_per_carton: number | null; metadata: Record<string, unknown> | null };
+    type Item = { id: string; sku: string; name: string; unit_of_measure: string; sticks_per_carton: number | null; category: string | null };
 
     const lineItemsWithSkus = lines.map((l) => {
       const item = itemMap.get(l.item_id as string) as Item | undefined;
@@ -42,10 +42,10 @@ export async function GET(
         sku: item
           ? {
               standardSku: item.sku,
-              flavor: item.metadata?.flavor ?? null,
+              flavor: item.name ?? null,
               count: item.sticks_per_carton,
               uom: item.unit_of_measure,
-              category: item.metadata?.category ?? null,
+              category: item.category ?? null,
             }
           : null,
         lineType: l.line_type,

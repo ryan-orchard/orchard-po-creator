@@ -24,7 +24,7 @@ export async function GET(
     // Fetch item details for UOM info
     const itemIds = [...new Set(poLines.map((l) => l.item_id as string))];
     const { data: itemsData } = itemIds.length
-      ? await db.schema("org_config").from("items").select("id, sku, unit_of_measure, sticks_per_carton, metadata").in("id", itemIds)
+      ? await db.schema("org_config").from("items").select("id, sku, name, unit_of_measure, sticks_per_carton, category").in("id", itemIds)
       : { data: [] };
     const itemMap = new Map((itemsData ?? []).map((i) => [i.id, i]));
 
@@ -75,7 +75,7 @@ export async function GET(
 
     // Build per-line result
     const uomSet = new Set<string>();
-    type Item = { id: string; sku: string; unit_of_measure: string; sticks_per_carton: number | null; metadata: Record<string, unknown> | null };
+    type Item = { id: string; sku: string; name: string; unit_of_measure: string; sticks_per_carton: number | null; category: string | null };
     const result = poLines.map((l) => {
       const item = itemMap.get(l.item_id as string) as Item | undefined;
       const uom = item?.unit_of_measure ?? "Each";
@@ -89,10 +89,10 @@ export async function GET(
         sku: item
           ? {
               standardSku: item.sku,
-              flavor: (item.metadata as Record<string, unknown>)?.flavor ?? null,
+              flavor: item.name ?? null,
               uom,
               count: item.sticks_per_carton ?? null,
-              category: (item.metadata as Record<string, unknown>)?.category ?? null,
+              category: item.category ?? null,
             }
           : null,
         section: null,

@@ -1,19 +1,14 @@
 import { NextResponse } from "next/server";
-import {
-  getRecords,
-  createRecords,
-  deleteRecords,
-  TABLES,
-} from "@/lib/airtable";
+import { db } from "@/lib/supabase";
 
-// POST — Upload a new inventory snapshot (replaces existing for that warehouse)
+// POST — Upload a new inventory snapshot (replaces existing for that warehouse+date)
 export async function POST(request: Request) {
   try {
     const body = await request.json();
     const { warehouseCode, date, lines } = body as {
       warehouseCode: string;
       date: string;
-      lines: { skuRecordId: string; qty: number }[];
+      lines: { sku: string; itemId?: string; qty: number; qtyOnHold?: number; baseUom?: string; palletCount?: number }[];
     };
 
     if (!warehouseCode || !date || !lines?.length) {
@@ -23,49 +18,40 @@ export async function POST(request: Request) {
       );
     }
 
-    // Find warehouse record ID by code
-    const warehouses = await getRecords(TABLES.WAREHOUSES, {
-      filterByFormula: `{Code} = "${warehouseCode}"`,
-    });
-    if (warehouses.length === 0) {
-      return NextResponse.json(
-        { error: `Warehouse "${warehouseCode}" not found` },
-        { status: 404 }
-      );
-    }
-    const warehouseId = warehouses[0].id;
+    // Delete existing snapshot for this warehouse+date, then insert fresh
+    await db
+      .schema("orchard")
+      .from("inventory_snapshots")
+      .delete()
+      .eq("warehouse_code", warehouseCode)
+      .eq("snapshot_date", date);
 
-    // Delete existing snapshot records for this warehouse
-    const existing = await getRecords(TABLES.INVENTORY_SNAPSHOTS);
-    const toDelete = existing
-      .filter((r) => {
-        const whLinks = r.fields["Warehouse"] as string[] | undefined;
-        return whLinks?.includes(warehouseId);
-      })
-      .map((r) => r.id);
-
-    if (toDelete.length > 0) {
-      await deleteRecords(TABLES.INVENTORY_SNAPSHOTS, toDelete);
-    }
-
-    // Create new snapshot records
-    const source = warehouseCode === "BMC" ? "BMC Report" : "Manual";
-    const records = lines.map((line, idx) => ({
-      fields: {
-        "Snapshot ID": `${warehouseCode}-${date}-${String(idx + 1).padStart(3, "0")}`,
-        Warehouse: [warehouseId],
-        SKU: [line.skuRecordId],
-        "Qty On Hand": line.qty,
-        "Snapshot Date": date,
-        Source: source,
-      },
+    const rows = lines.map((line) => ({
+      client_id: "magna",
+      warehouse_code: warehouseCode,
+      snapshot_date: date,
+      item_id: line.itemId || null,
+      sku: line.sku,
+      qty_on_hand: line.qty,
+      qty_on_hold: line.qtyOnHold ?? 0,
+      qty_available: line.qty - (line.qtyOnHold ?? 0),
+      base_uom: line.baseUom || null,
+      pallet_count: line.palletCount || null,
     }));
 
-    const created = await createRecords(TABLES.INVENTORY_SNAPSHOTS, records);
+    const { data: created, error } = await db
+      .schema("orchard")
+      .from("inventory_snapshots")
+      .insert(rows)
+      .select("id");
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
 
     return NextResponse.json({
       success: true,
-      skusImported: created.length,
+      skusImported: created?.length || 0,
       totalUnits: lines.reduce((sum, l) => sum + l.qty, 0),
       warehouseCode,
       snapshotDate: date,
@@ -73,10 +59,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Snapshot upload error:", error);
     return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : "Failed to upload snapshot",
-      },
+      { error: error instanceof Error ? error.message : "Failed to upload snapshot" },
       { status: 500 }
     );
   }
@@ -85,38 +68,37 @@ export async function POST(request: Request) {
 // GET — List snapshot history
 export async function GET() {
   try {
-    const [snapshots, warehouses] = await Promise.all([
-      getRecords(TABLES.INVENTORY_SNAPSHOTS),
-      getRecords(TABLES.WAREHOUSES),
-    ]);
+    const { data: snapshots, error } = await db
+      .schema("orchard")
+      .from("inventory_snapshots")
+      .select("warehouse_code, snapshot_date, qty_on_hand")
+      .order("snapshot_date", { ascending: false });
 
-    // Build warehouse lookup
-    const warehouseMap = new Map<string, string>();
-    for (const wh of warehouses) {
-      warehouseMap.set(wh.id, (wh.fields["Code"] as string) || (wh.fields["Name"] as string) || wh.id);
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
     // Group by warehouse + date
     const groups = new Map<string, { warehouse: string; date: string; count: number; totalUnits: number }>();
 
-    for (const s of snapshots) {
-      const whLinks = s.fields["Warehouse"] as string[] | undefined;
-      const whCode = whLinks?.[0] ? warehouseMap.get(whLinks[0]) || "Unknown" : "Unknown";
-      const date = (s.fields["Snapshot Date"] as string) || "Unknown";
-      const key = `${whCode}-${date}`;
-      const qty = (s.fields["Qty On Hand"] as number) || 0;
-
+    for (const s of snapshots || []) {
+      const key = `${s.warehouse_code}-${s.snapshot_date}`;
+      const qty = Number(s.qty_on_hand) || 0;
       const existing = groups.get(key);
       if (existing) {
         existing.count++;
         existing.totalUnits += qty;
       } else {
-        groups.set(key, { warehouse: whCode, date, count: 1, totalUnits: qty });
+        groups.set(key, {
+          warehouse: s.warehouse_code as string,
+          date: s.snapshot_date as string,
+          count: 1,
+          totalUnits: qty,
+        });
       }
     }
 
     const history = Array.from(groups.values()).sort((a, b) => b.date.localeCompare(a.date));
-
     return NextResponse.json({ snapshots: history });
   } catch (error) {
     console.error("Snapshot list error:", error);
