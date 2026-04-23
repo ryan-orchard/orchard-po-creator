@@ -16,6 +16,7 @@ export async function GET(request: NextRequest) {
       email_id,
       filename,
       content_type,
+      storage_path,
       document_type,
       confidence,
       parsed_data,

@@ -144,7 +144,7 @@ const INVOICE_PARSE_PROMPT = `Extract structured data from this invoice. Return 
   "dueDate": "YYYY-MM-DD or null",
   "paymentTerms": "e.g. Net 30 or null",
   "vendor": "company name",
-  "poReference": "PO number referenced on the invoice, or null",
+  "poReference": "Customer PO number — look for fields labeled 'Your Reference', 'Your Ref', 'PO #', 'PO Number', 'Customer PO', 'Purchase Order', or 'Reference'. This is the BUYER's PO number, not the supplier's order number. Return the value as-is (do not add prefixes). Null only if truly not present.",
   "salesOrder": "supplier's sales/order number, or null",
   "trackingNumber": "shipping tracking number, or null",
   "shipTo": "ship-to address or location name, or null",
@@ -177,7 +177,7 @@ const SUPPLIER_TEMPLATES: Record<string, string> = {
   ans: `
 Supplier: Arizona Nutritional Supplements (ANS)
 Field mapping:
-- "Your Reference" = the PO number (poReference)
+- "Your Reference" or "Your Ref" = the customer's PO number (poReference). This is a numeric value like "00537988". ALWAYS extract this — it is critical.
 - "Sales Order" = ANS's internal sales order number (salesOrder)
 - "Tracking Number" or "Tracking #" = shipping tracking (trackingNumber)
 - "Ship To" = delivery destination (shipTo)

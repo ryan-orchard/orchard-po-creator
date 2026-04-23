@@ -28,6 +28,7 @@ interface IngestedDocument {
   id: string;
   filename: string;
   content_type: string;
+  storage_path: string | null;
   document_type: string;
   confidence: number;
   parsed_data: ParsedInvoice | null;
@@ -45,6 +46,36 @@ interface IngestedDocument {
     subject: string;
     received_at: string;
   } | null;
+}
+
+interface SupplierOption {
+  id: string;
+  name: string;
+}
+
+interface POOption {
+  id: string;
+  poNumber: string;
+}
+
+// Editable fields for a pending document
+interface EditState {
+  invoiceNumber: string;
+  invoiceDate: string;
+  dueDate: string;
+  paymentTerms: string;
+  deliveryTerms: string;
+  poReference: string;
+  salesOrder: string;
+  trackingNumber: string;
+  shipTo: string;
+  suggestedType: string;
+  supplierId: string;
+  poId: string;
+  subtotal: string;
+  freight: string;
+  tax: string;
+  invoiceAmount: string;
 }
 
 type Tab = "pending" | "approved" | "all";
@@ -95,6 +126,30 @@ const typeColors: Record<string, string> = {
   unknown: "bg-gray-100 text-gray-500",
 };
 
+const INVOICE_TYPES = ["Supplier", "Freight", "Customs", "Packaging", "Work Order"];
+
+function buildEditState(doc: IngestedDocument): EditState {
+  const p = doc.parsed_data;
+  return {
+    invoiceNumber: p?.invoiceNumber || "",
+    invoiceDate: p?.invoiceDate || "",
+    dueDate: p?.dueDate || "",
+    paymentTerms: p?.paymentTerms || "",
+    deliveryTerms: p?.deliveryTerms || "",
+    poReference: p?.poReference || "",
+    salesOrder: p?.salesOrder || "",
+    trackingNumber: p?.trackingNumber || "",
+    shipTo: p?.shipTo || "",
+    suggestedType: p?.suggestedType || "Supplier",
+    supplierId: doc.supplier_id || "",
+    poId: doc.po_id || "",
+    subtotal: p?.subtotal != null ? String(p.subtotal) : "",
+    freight: p?.freight != null ? String(p.freight) : "",
+    tax: p?.tax != null ? String(p.tax) : "",
+    invoiceAmount: p?.invoiceAmount != null ? String(p.invoiceAmount) : "",
+  };
+}
+
 // --- Component ---
 
 export default function InboxPage() {
@@ -103,23 +158,95 @@ export default function InboxPage() {
   const [tab, setTab] = useState<Tab>("pending");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [editStates, setEditStates] = useState<Record<string, EditState>>({});
+  const [suppliers, setSuppliers] = useState<SupplierOption[]>([]);
+  const [pos, setPOs] = useState<POOption[]>([]);
+  const [pdfLoading, setPdfLoading] = useState<string | null>(null);
+
+  // Load reference data
+  useEffect(() => {
+    Promise.all([
+      fetch("/api/suppliers").then((r) => r.json()),
+      fetch("/api/purchase-orders").then((r) => r.json()),
+    ]).then(([suppData, poData]) => {
+      setSuppliers(
+        (suppData || []).map((s: { id: string; name: string }) => ({
+          id: s.id,
+          name: s.name,
+        }))
+      );
+      setPOs(
+        (poData || []).map((p: { id: string; poNumber: string }) => ({
+          id: p.id,
+          poNumber: p.poNumber,
+        }))
+      );
+    });
+  }, []);
 
   const fetchDocs = useCallback(async () => {
     setLoading(true);
     const qs = tab === "all" ? "" : `?status=${tab}`;
     const res = await fetch(`/api/ingest/documents${qs}`);
     const data = await res.json();
-    setDocuments(data.documents || []);
+    const docs: IngestedDocument[] = data.documents || [];
+    setDocuments(docs);
+    // Build edit states for pending docs
+    const states: Record<string, EditState> = {};
+    for (const doc of docs) {
+      if (doc.status === "pending") {
+        states[doc.id] = editStates[doc.id] || buildEditState(doc);
+      }
+    }
+    setEditStates((prev) => ({ ...prev, ...states }));
     setLoading(false);
-  }, [tab]);
+  }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     fetchDocs();
   }, [fetchDocs]);
 
+  const updateField = (docId: string, field: keyof EditState, value: string) => {
+    setEditStates((prev) => ({
+      ...prev,
+      [docId]: { ...prev[docId], [field]: value },
+    }));
+  };
+
   const handleApprove = async (id: string) => {
+    const edit = editStates[id];
+    if (!edit) return;
+
+    if (!edit.supplierId) {
+      alert("Please select a supplier before approving.");
+      return;
+    }
+
     setActionLoading(id);
-    const res = await fetch(`/api/ingest/documents/${id}/approve`, { method: "POST" });
+    const res = await fetch(`/api/ingest/documents/${id}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        supplierId: edit.supplierId || undefined,
+        poId: edit.poId || undefined,
+        overrides: {
+          invoiceNumber: edit.invoiceNumber,
+          invoiceDate: edit.invoiceDate,
+          dueDate: edit.dueDate || null,
+          paymentTerms: edit.paymentTerms || null,
+          deliveryTerms: edit.deliveryTerms || null,
+          poReference: edit.poReference || null,
+          salesOrder: edit.salesOrder || null,
+          trackingNumber: edit.trackingNumber || null,
+          shipTo: edit.shipTo || null,
+          suggestedType: edit.suggestedType || "Supplier",
+          subtotal: edit.subtotal ? parseFloat(edit.subtotal) : null,
+          freight: edit.freight ? parseFloat(edit.freight) : null,
+          tax: edit.tax ? parseFloat(edit.tax) : null,
+          invoiceAmount: edit.invoiceAmount ? parseFloat(edit.invoiceAmount) : null,
+        },
+      }),
+    });
     if (res.ok) {
       await fetchDocs();
       setExpanded(null);
@@ -138,6 +265,21 @@ export default function InboxPage() {
     setActionLoading(null);
   };
 
+  const handleViewPdf = async (id: string) => {
+    setPdfLoading(id);
+    try {
+      const res = await fetch(`/api/ingest/documents/${id}/attachment`);
+      if (res.ok) {
+        const { url } = await res.json();
+        window.open(url, "_blank");
+      } else {
+        alert("Could not load PDF.");
+      }
+    } finally {
+      setPdfLoading(null);
+    }
+  };
+
   const tabs: { key: Tab; label: string }[] = [
     { key: "pending", label: "Pending" },
     { key: "approved", label: "Approved" },
@@ -150,7 +292,7 @@ export default function InboxPage() {
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Inbox</h1>
         <p className="text-sm text-gray-500 mt-1">
-          Documents received via email — review and approve to create records.
+          Documents received via email — review, edit, and approve to create records.
         </p>
       </div>
 
@@ -160,10 +302,10 @@ export default function InboxPage() {
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
               tab === t.key
                 ? "border-gray-900 text-gray-900"
-                : "border-transparent text-gray-500 hover:text-gray-700"
+                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
             }`}
           >
             {t.label}
@@ -193,11 +335,13 @@ export default function InboxPage() {
             const parsed = doc.parsed_data;
             const conf = confidenceBadge(doc.confidence);
             const isInvoice = doc.document_type === "invoice" && parsed && !parsed.error;
+            const isPending = doc.status === "pending";
+            const edit = editStates[doc.id];
 
             return (
               <div
                 key={doc.id}
-                className={`border rounded-lg transition-all ${
+                className={`bg-white border rounded-lg transition-all ${
                   isExpanded ? "border-gray-300 shadow-sm" : "border-gray-200"
                 }`}
               >
@@ -256,109 +400,249 @@ export default function InboxPage() {
                   </svg>
                 </button>
 
-                {/* Expanded detail */}
+                {/* Expanded detail — Invoice, editable if pending */}
                 {isExpanded && isInvoice && (
                   <div className="px-4 pb-4 border-t border-gray-100">
-                    {/* Two-column detail grid */}
-                    <div className="grid grid-cols-2 gap-x-8 gap-y-2 mt-3 text-sm">
-                      <DetailRow label="Invoice #" value={parsed.invoiceNumber} />
-                      <DetailRow label="Vendor" value={parsed.vendor} />
-                      <DetailRow label="Invoice Date" value={formatDate(parsed.invoiceDate)} />
-                      <DetailRow label="Due Date" value={formatDate(parsed.dueDate)} />
-                      <DetailRow label="Payment Terms" value={parsed.paymentTerms} />
-                      <DetailRow label="Delivery Terms" value={parsed.deliveryTerms} />
-                      <DetailRow label="PO Reference" value={parsed.poReference} highlight={!!doc.po_id} />
-                      <DetailRow label="Sales Order" value={parsed.salesOrder} />
-                      <DetailRow label="Tracking #" value={parsed.trackingNumber} />
-                      <DetailRow label="Ship To" value={parsed.shipTo} />
-                      <DetailRow label="Type" value={parsed.suggestedType} />
-                      <DetailRow label="Existing Supplier" value={doc.supplier_id ? "Yes" : "No"} highlight={!!doc.supplier_id} warn={!doc.supplier_id} />
-                    </div>
+                    {/* View PDF */}
+                    {doc.storage_path && (
+                      <div className="mt-3 mb-1">
+                        <button
+                          onClick={() => handleViewPdf(doc.id)}
+                          disabled={pdfLoading === doc.id}
+                          className="text-xs font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                          </svg>
+                          {pdfLoading === doc.id ? "Opening..." : "View Original PDF"}
+                        </button>
+                      </div>
+                    )}
 
-                    {/* Line items */}
-                    {parsed.lines && parsed.lines.length > 0 && (
-                      <div className="mt-4">
-                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                          Line Items
-                        </p>
-                        <table className="w-full text-sm">
-                          <thead>
-                            <tr className="text-left text-xs text-gray-400 border-b border-gray-100">
-                              <th className="pb-1.5 font-medium">Description</th>
-                              <th className="pb-1.5 font-medium text-right">Qty</th>
-                              <th className="pb-1.5 font-medium text-right">Unit Price</th>
-                              <th className="pb-1.5 font-medium text-right">Amount</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {parsed.lines.map((line, i) => (
-                              <tr key={i} className="border-b border-gray-50">
-                                <td className="py-1.5 text-gray-700">{line.description}</td>
-                                <td className="py-1.5 text-right text-gray-600 tabular-nums">
-                                  {line.quantity.toLocaleString()} {line.unit}
-                                </td>
-                                <td className="py-1.5 text-right text-gray-600 tabular-nums">
-                                  {formatCurrency(line.unitPrice)}
-                                </td>
-                                <td className="py-1.5 text-right text-gray-700 font-medium tabular-nums">
-                                  {formatCurrency(line.amount)}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-
-                        {/* Totals */}
-                        <div className="mt-2 flex flex-col items-end gap-0.5 text-sm">
-                          {parsed.subtotal != null && parsed.subtotal !== parsed.invoiceAmount && (
-                            <div className="flex gap-6">
-                              <span className="text-gray-400">Subtotal</span>
-                              <span className="text-gray-600 tabular-nums">{formatCurrency(parsed.subtotal)}</span>
+                    {isPending && edit ? (
+                      /* ── Editable form (pending) ── */
+                      <div className="space-y-4 mt-3">
+                        {/* Invoice Details card */}
+                        <div>
+                          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Invoice Details</h3>
+                          <div className="grid grid-cols-2 gap-4">
+                            <Field label="Invoice #" value={edit.invoiceNumber} onChange={(v) => updateField(doc.id, "invoiceNumber", v)} />
+                            <div>
+                              <label className="block text-xs font-medium text-gray-500 mb-1">Supplier</label>
+                              <select
+                                value={edit.supplierId}
+                                onChange={(e) => updateField(doc.id, "supplierId", e.target.value)}
+                                className={`w-full border rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-black ${
+                                  edit.supplierId ? "border-gray-300" : "border-amber-400 bg-amber-50"
+                                }`}
+                              >
+                                <option value="">Select supplier...</option>
+                                {suppliers.map((s) => (
+                                  <option key={s.id} value={s.id}>{s.name}</option>
+                                ))}
+                              </select>
                             </div>
-                          )}
-                          {parsed.freight != null && parsed.freight > 0 && (
-                            <div className="flex gap-6">
-                              <span className="text-gray-400">Freight</span>
-                              <span className="text-gray-600 tabular-nums">{formatCurrency(parsed.freight)}</span>
-                            </div>
-                          )}
-                          {parsed.tax != null && parsed.tax > 0 && (
-                            <div className="flex gap-6">
-                              <span className="text-gray-400">Tax</span>
-                              <span className="text-gray-600 tabular-nums">{formatCurrency(parsed.tax)}</span>
-                            </div>
-                          )}
-                          <div className="flex gap-6 font-semibold border-t border-gray-200 pt-1 mt-1">
-                            <span className="text-gray-600">Total</span>
-                            <span className="text-gray-900 tabular-nums">{formatCurrency(parsed.invoiceAmount)}</span>
+                            <Field label="Invoice Date" value={edit.invoiceDate} onChange={(v) => updateField(doc.id, "invoiceDate", v)} type="date" />
+                            <Field label="Due Date" value={edit.dueDate} onChange={(v) => updateField(doc.id, "dueDate", v)} type="date" />
+                            <Field label="Payment Terms" value={edit.paymentTerms} onChange={(v) => updateField(doc.id, "paymentTerms", v)} />
+                            <Field label="Delivery Terms" value={edit.deliveryTerms} onChange={(v) => updateField(doc.id, "deliveryTerms", v)} />
                           </div>
                         </div>
-                      </div>
-                    )}
 
-                    {/* Actions */}
-                    {doc.status === "pending" && (
-                      <div className="mt-4 flex gap-2">
-                        <button
-                          onClick={() => handleApprove(doc.id)}
-                          disabled={actionLoading === doc.id}
-                          className="px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-800 disabled:opacity-50 transition-colors"
-                        >
-                          {actionLoading === doc.id ? "Approving..." : "Approve"}
-                        </button>
-                        <button
-                          onClick={() => handleReject(doc.id)}
-                          disabled={actionLoading === doc.id}
-                          className="px-4 py-2 bg-white text-gray-600 text-sm font-medium rounded-md border border-gray-300 hover:bg-gray-50 disabled:opacity-50 transition-colors"
-                        >
-                          Reject
-                        </button>
-                      </div>
-                    )}
+                        {/* Reference & Shipping card */}
+                        <div>
+                          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">References</h3>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-xs font-medium text-gray-500 mb-1">PO Reference</label>
+                              <div className="flex gap-2">
+                                <input
+                                  type="text"
+                                  value={edit.poReference}
+                                  onChange={(e) => updateField(doc.id, "poReference", e.target.value)}
+                                  className="flex-1 border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                                />
+                              </div>
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-500 mb-1">Linked PO</label>
+                              <select
+                                value={edit.poId}
+                                onChange={(e) => updateField(doc.id, "poId", e.target.value)}
+                                className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                              >
+                                <option value="">None</option>
+                                {pos.map((p) => (
+                                  <option key={p.id} value={p.id}>{p.poNumber}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <Field label="Sales Order" value={edit.salesOrder} onChange={(v) => updateField(doc.id, "salesOrder", v)} />
+                            <Field label="Tracking #" value={edit.trackingNumber} onChange={(v) => updateField(doc.id, "trackingNumber", v)} />
+                            <Field label="Ship To" value={edit.shipTo} onChange={(v) => updateField(doc.id, "shipTo", v)} />
+                            <div>
+                              <label className="block text-xs font-medium text-gray-500 mb-1">Invoice Type</label>
+                              <select
+                                value={edit.suggestedType}
+                                onChange={(e) => updateField(doc.id, "suggestedType", e.target.value)}
+                                className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                              >
+                                {INVOICE_TYPES.map((t) => (
+                                  <option key={t} value={t}>{t}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                        </div>
 
-                    {doc.status === "approved" && (
-                      <div className="mt-4 text-xs text-green-600">
-                        Approved {doc.reviewed_at ? formatDateTime(doc.reviewed_at) : ""}
+                        {/* Line items (read-only) */}
+                        {parsed.lines && parsed.lines.length > 0 && (
+                          <div>
+                            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Line Items</h3>
+                            <div className="border border-gray-200 rounded-lg overflow-hidden">
+                              <table className="w-full text-sm">
+                                <thead>
+                                  <tr className="bg-gray-50 border-b border-gray-200">
+                                    <th className="text-left px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">Description</th>
+                                    <th className="text-right px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">Qty</th>
+                                    <th className="text-right px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">Unit Price</th>
+                                    <th className="text-right px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">Amount</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {parsed.lines.map((line, i) => (
+                                    <tr key={i} className="border-b border-gray-100">
+                                      <td className="px-3 py-2 text-gray-700">{line.description}</td>
+                                      <td className="px-3 py-2 text-right text-gray-600 tabular-nums">
+                                        {line.quantity.toLocaleString()} {line.unit}
+                                      </td>
+                                      <td className="px-3 py-2 text-right text-gray-600 tabular-nums">
+                                        {formatCurrency(line.unitPrice)}
+                                      </td>
+                                      <td className="px-3 py-2 text-right text-gray-700 font-medium tabular-nums">
+                                        {formatCurrency(line.amount)}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Totals (editable) */}
+                        <div>
+                          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Totals</h3>
+                          <div className="grid grid-cols-4 gap-4">
+                            <Field label="Subtotal" value={edit.subtotal} onChange={(v) => updateField(doc.id, "subtotal", v)} type="number" />
+                            <Field label="Freight" value={edit.freight} onChange={(v) => updateField(doc.id, "freight", v)} type="number" />
+                            <Field label="Tax" value={edit.tax} onChange={(v) => updateField(doc.id, "tax", v)} type="number" />
+                            <Field label="Grand Total" value={edit.invoiceAmount} onChange={(v) => updateField(doc.id, "invoiceAmount", v)} type="number" />
+                          </div>
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex gap-2 pt-2 border-t border-gray-100">
+                          <button
+                            onClick={() => handleApprove(doc.id)}
+                            disabled={actionLoading === doc.id}
+                            className="px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-800 disabled:opacity-50 transition-colors"
+                          >
+                            {actionLoading === doc.id ? "Approving..." : "Approve & Create Invoice"}
+                          </button>
+                          <button
+                            onClick={() => handleReject(doc.id)}
+                            disabled={actionLoading === doc.id}
+                            className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      /* ── Read-only view (approved/rejected) ── */
+                      <div className="mt-3">
+                        <div className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
+                          <ReadOnlyField label="Invoice #" value={parsed.invoiceNumber} />
+                          <ReadOnlyField label="Vendor" value={parsed.vendor} />
+                          <ReadOnlyField label="Invoice Date" value={formatDate(parsed.invoiceDate)} />
+                          <ReadOnlyField label="Due Date" value={formatDate(parsed.dueDate)} />
+                          <ReadOnlyField label="Payment Terms" value={parsed.paymentTerms} />
+                          <ReadOnlyField label="Delivery Terms" value={parsed.deliveryTerms} />
+                          <ReadOnlyField label="PO Reference" value={parsed.poReference} highlight={!!doc.po_id} />
+                          <ReadOnlyField label="Sales Order" value={parsed.salesOrder} />
+                          <ReadOnlyField label="Tracking #" value={parsed.trackingNumber} />
+                          <ReadOnlyField label="Ship To" value={parsed.shipTo} />
+                          <ReadOnlyField label="Type" value={parsed.suggestedType} />
+                          <ReadOnlyField label="Supplier" value={doc.supplier_id ? "Resolved" : "Not resolved"} highlight={!!doc.supplier_id} warn={!doc.supplier_id} />
+                        </div>
+
+                        {/* Line items */}
+                        {parsed.lines && parsed.lines.length > 0 && (
+                          <div className="mt-4">
+                            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Line Items</h3>
+                            <div className="border border-gray-200 rounded-lg overflow-hidden">
+                              <table className="w-full text-sm">
+                                <thead>
+                                  <tr className="bg-gray-50 border-b border-gray-200">
+                                    <th className="text-left px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">Description</th>
+                                    <th className="text-right px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">Qty</th>
+                                    <th className="text-right px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">Unit Price</th>
+                                    <th className="text-right px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">Amount</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {parsed.lines.map((line, i) => (
+                                    <tr key={i} className="border-b border-gray-100">
+                                      <td className="px-3 py-2 text-gray-700">{line.description}</td>
+                                      <td className="px-3 py-2 text-right text-gray-600 tabular-nums">
+                                        {line.quantity.toLocaleString()} {line.unit}
+                                      </td>
+                                      <td className="px-3 py-2 text-right text-gray-600 tabular-nums">
+                                        {formatCurrency(line.unitPrice)}
+                                      </td>
+                                      <td className="px-3 py-2 text-right text-gray-700 font-medium tabular-nums">
+                                        {formatCurrency(line.amount)}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+
+                            {/* Totals */}
+                            <div className="mt-2 flex flex-col items-end gap-0.5 text-sm">
+                              {parsed.subtotal != null && parsed.subtotal !== parsed.invoiceAmount && (
+                                <div className="flex gap-6">
+                                  <span className="text-gray-400">Subtotal</span>
+                                  <span className="text-gray-600 tabular-nums">{formatCurrency(parsed.subtotal)}</span>
+                                </div>
+                              )}
+                              {parsed.freight != null && parsed.freight > 0 && (
+                                <div className="flex gap-6">
+                                  <span className="text-gray-400">Freight</span>
+                                  <span className="text-gray-600 tabular-nums">{formatCurrency(parsed.freight)}</span>
+                                </div>
+                              )}
+                              {parsed.tax != null && parsed.tax > 0 && (
+                                <div className="flex gap-6">
+                                  <span className="text-gray-400">Tax</span>
+                                  <span className="text-gray-600 tabular-nums">{formatCurrency(parsed.tax)}</span>
+                                </div>
+                              )}
+                              <div className="flex gap-6 font-semibold border-t border-gray-200 pt-1 mt-1">
+                                <span className="text-gray-600">Total</span>
+                                <span className="text-gray-900 tabular-nums">{formatCurrency(parsed.invoiceAmount)}</span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {doc.status === "approved" && (
+                          <div className="mt-4 text-xs text-green-600">
+                            Approved {doc.reviewed_at ? formatDateTime(doc.reviewed_at) : ""}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -378,7 +662,7 @@ export default function InboxPage() {
                       <button
                         onClick={() => handleReject(doc.id)}
                         disabled={actionLoading === doc.id}
-                        className="mt-3 px-4 py-2 bg-white text-gray-600 text-sm font-medium rounded-md border border-gray-300 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                        className="mt-3 px-4 py-2 text-sm font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 transition-colors"
                       >
                         Reject
                       </button>
@@ -396,7 +680,32 @@ export default function InboxPage() {
 
 // --- Sub-components ---
 
-function DetailRow({
+function Field({
+  label,
+  value,
+  onChange,
+  type = "text",
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  type?: "text" | "date" | "number";
+}) {
+  return (
+    <div>
+      <label className="block text-xs font-medium text-gray-500 mb-1">{label}</label>
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        step={type === "number" ? "0.01" : undefined}
+        className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+      />
+    </div>
+  );
+}
+
+function ReadOnlyField({
   label,
   value,
   highlight,
@@ -408,15 +717,15 @@ function DetailRow({
   warn?: boolean;
 }) {
   return (
-    <div className="flex items-baseline gap-2">
-      <span className="text-gray-400 text-xs w-28 flex-shrink-0">{label}</span>
-      <span
-        className={`text-gray-700 truncate ${
-          highlight ? "text-green-700 font-medium" : ""
+    <div>
+      <p className="text-xs text-gray-400 mb-0.5">{label}</p>
+      <p
+        className={`text-sm font-medium text-gray-900 ${
+          highlight ? "text-green-700" : ""
         } ${warn ? "text-amber-600" : ""}`}
       >
         {value || "\u2014"}
-      </span>
+      </p>
     </div>
   );
 }

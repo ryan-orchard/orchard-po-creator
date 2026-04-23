@@ -58,6 +58,7 @@ export async function POST(
     }
 
     // Use overrides or fall back to AI-extracted values
+    const overrides = body.overrides || {};
     const supplierId = body.supplierId || doc.supplier_id;
     const poId = body.poId || doc.po_id;
 
@@ -65,27 +66,43 @@ export async function POST(
       return NextResponse.json({ error: "Supplier must be resolved before approving" }, { status: 400 });
     }
 
+    // Merge: UI overrides > parsed data > defaults
+    const invoiceNumber = overrides.invoiceNumber || parsed.invoiceNumber;
+    const invoiceDate = overrides.invoiceDate || parsed.invoiceDate;
+    const dueDate = overrides.dueDate ?? parsed.dueDate ?? null;
+    const paymentTerms = overrides.paymentTerms ?? parsed.paymentTerms ?? null;
+    const salesOrder = overrides.salesOrder ?? parsed.salesOrder ?? null;
+    const trackingNumber = overrides.trackingNumber ?? parsed.trackingNumber ?? null;
+    const shipTo = overrides.shipTo ?? parsed.shipTo ?? null;
+    const deliveryTerms = overrides.deliveryTerms ?? parsed.deliveryTerms ?? null;
+    const subtotal = overrides.subtotal ?? parsed.subtotal ?? 0;
+    const freight = overrides.freight ?? parsed.freight ?? 0;
+    const tax = overrides.tax ?? parsed.tax ?? 0;
+    const invoiceAmount = overrides.invoiceAmount ?? parsed.invoiceAmount;
+    const invoiceType = overrides.suggestedType || parsed.suggestedType || "Supplier";
+    const poReference = overrides.poReference ?? parsed.poReference ?? null;
+
     // Create invoice
     const { data: invoice, error: invoiceError } = await db
       .schema("orchard")
       .from("invoices")
       .insert({
-        invoice_number: parsed.invoiceNumber,
+        invoice_number: invoiceNumber,
         supplier_id: supplierId,
         po_id: poId || null,
-        invoice_date: parsed.invoiceDate,
-        due_date: parsed.dueDate || null,
-        payment_terms: parsed.paymentTerms || null,
-        sales_order: parsed.salesOrder || null,
-        tracking_number: parsed.trackingNumber || null,
-        ship_to_text: parsed.shipTo || null,
-        delivery_terms: parsed.deliveryTerms || null,
-        subtotal: parsed.subtotal || 0,
-        freight: parsed.freight || 0,
-        tax: parsed.tax || 0,
-        total_amount: parsed.invoiceAmount,
-        invoice_type: parsed.suggestedType || "Supplier",
-        po_reference: parsed.poReference || null,
+        invoice_date: invoiceDate,
+        due_date: dueDate,
+        payment_terms: paymentTerms,
+        sales_order: salesOrder,
+        tracking_number: trackingNumber,
+        ship_to_text: shipTo,
+        delivery_terms: deliveryTerms,
+        subtotal: subtotal || 0,
+        freight: freight || 0,
+        tax: tax || 0,
+        total_amount: invoiceAmount,
+        invoice_type: invoiceType,
+        po_reference: poReference,
         match_status: "Open",
         notes: null,
       })
@@ -150,7 +167,7 @@ export async function POST(
       logActivity({
         poId,
         action: "invoice_created",
-        description: `Invoice ${parsed.invoiceNumber} created from email ingestion`,
+        description: `Invoice ${invoiceNumber} created from email ingestion`,
         actor: "Ryan Belanger",
         relatedRecordType: "invoice",
         relatedRecordId: invoice.id,
@@ -161,7 +178,7 @@ export async function POST(
       approved: true,
       recordType: "invoice",
       recordId: invoice.id,
-      invoiceNumber: parsed.invoiceNumber,
+      invoiceNumber,
     });
   }
 

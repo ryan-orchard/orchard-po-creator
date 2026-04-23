@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useClerk, useUser } from "@clerk/nextjs";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 const NAV_SECTIONS = [
   {
@@ -140,6 +140,21 @@ export default function Sidebar() {
   const { signOut } = useClerk();
   const { user } = useUser();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [inboxCount, setInboxCount] = useState(0);
+
+  useEffect(() => {
+    const fetchCount = () =>
+      fetch("/api/ingest/documents/count")
+        .then((r) => {
+          if (!r.ok) throw new Error(`Badge fetch failed: ${r.status}`);
+          return r.json();
+        })
+        .then((d) => setInboxCount(d.pending ?? 0))
+        .catch((err) => console.error("Inbox badge error:", err));
+    fetchCount();
+    const interval = setInterval(fetchCount, 60_000);
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <aside className="w-56 bg-sidebar-bg flex flex-col h-screen fixed left-0 top-0 print:hidden">
@@ -190,6 +205,11 @@ export default function Sidebar() {
                     >
                       <Icon className="w-4 h-4" />
                       <span className="flex-1">{item.name}</span>
+                      {item.name === "Inbox" && inboxCount > 0 && (
+                        <span className="ml-auto inline-flex items-center justify-center w-5 h-5 text-[10px] font-semibold text-white bg-red-500 rounded-full">
+                          {inboxCount}
+                        </span>
+                      )}
                     </Link>
                   </li>
                 );
