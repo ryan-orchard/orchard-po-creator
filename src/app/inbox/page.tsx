@@ -58,6 +58,13 @@ interface POOption {
   poNumber: string;
 }
 
+interface EditLine {
+  description: string;
+  quantity: string;
+  unitPrice: string;
+  amount: string;
+}
+
 // Editable fields for a pending document
 interface EditState {
   invoiceNumber: string;
@@ -76,6 +83,7 @@ interface EditState {
   freight: string;
   tax: string;
   invoiceAmount: string;
+  lines: EditLine[];
 }
 
 type Tab = "pending" | "approved" | "all";
@@ -147,6 +155,12 @@ function buildEditState(doc: IngestedDocument): EditState {
     freight: p?.freight != null ? String(p.freight) : "",
     tax: p?.tax != null ? String(p.tax) : "",
     invoiceAmount: p?.invoiceAmount != null ? String(p.invoiceAmount) : "",
+    lines: (p?.lines || []).map((l) => ({
+      description: l.description,
+      quantity: String(l.quantity),
+      unitPrice: String(l.unitPrice),
+      amount: String(l.amount),
+    })),
   };
 }
 
@@ -213,6 +227,16 @@ export default function InboxPage() {
     }));
   };
 
+  const updateLine = (docId: string, lineIdx: number, field: keyof EditLine, value: string) => {
+    setEditStates((prev) => {
+      const state = prev[docId];
+      if (!state) return prev;
+      const lines = [...state.lines];
+      lines[lineIdx] = { ...lines[lineIdx], [field]: value };
+      return { ...prev, [docId]: { ...state, lines } };
+    });
+  };
+
   const handleApprove = async (id: string) => {
     const edit = editStates[id];
     if (!edit) return;
@@ -244,6 +268,12 @@ export default function InboxPage() {
           freight: edit.freight ? parseFloat(edit.freight) : null,
           tax: edit.tax ? parseFloat(edit.tax) : null,
           invoiceAmount: edit.invoiceAmount ? parseFloat(edit.invoiceAmount) : null,
+          lines: edit.lines.map((l) => ({
+            description: l.description,
+            quantity: parseFloat(l.quantity) || 0,
+            unitPrice: parseFloat(l.unitPrice) || 0,
+            amount: parseFloat(l.amount) || 0,
+          })),
         },
       }),
     });
@@ -495,8 +525,8 @@ export default function InboxPage() {
                           </div>
                         </div>
 
-                        {/* Line items (read-only) */}
-                        {parsed.lines && parsed.lines.length > 0 && (
+                        {/* Line items (editable) */}
+                        {edit.lines.length > 0 && (
                           <div>
                             <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Line Items</h3>
                             <div className="border border-gray-200 rounded-lg overflow-hidden">
@@ -504,23 +534,48 @@ export default function InboxPage() {
                                 <thead>
                                   <tr className="bg-gray-50 border-b border-gray-200">
                                     <th className="text-left px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">Description</th>
-                                    <th className="text-right px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">Qty</th>
-                                    <th className="text-right px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">Unit Price</th>
-                                    <th className="text-right px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">Amount</th>
+                                    <th className="text-right px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-28">Qty</th>
+                                    <th className="text-right px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-28">Unit Price</th>
+                                    <th className="text-right px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-28">Amount</th>
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {parsed.lines.map((line, i) => (
+                                  {edit.lines.map((line, i) => (
                                     <tr key={i} className="border-b border-gray-100">
-                                      <td className="px-3 py-2 text-gray-700">{line.description}</td>
-                                      <td className="px-3 py-2 text-right text-gray-600 tabular-nums">
-                                        {line.quantity.toLocaleString()} {line.unit}
+                                      <td className="px-2 py-1.5">
+                                        <input
+                                          type="text"
+                                          value={line.description}
+                                          onChange={(e) => updateLine(doc.id, i, "description", e.target.value)}
+                                          className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                                        />
                                       </td>
-                                      <td className="px-3 py-2 text-right text-gray-600 tabular-nums">
-                                        {formatCurrency(line.unitPrice)}
+                                      <td className="px-2 py-1.5">
+                                        <input
+                                          type="number"
+                                          value={line.quantity}
+                                          onChange={(e) => updateLine(doc.id, i, "quantity", e.target.value)}
+                                          step="0.01"
+                                          className="w-full border border-gray-300 rounded px-2 py-1 text-sm text-right tabular-nums focus:outline-none focus:ring-2 focus:ring-black"
+                                        />
                                       </td>
-                                      <td className="px-3 py-2 text-right text-gray-700 font-medium tabular-nums">
-                                        {formatCurrency(line.amount)}
+                                      <td className="px-2 py-1.5">
+                                        <input
+                                          type="number"
+                                          value={line.unitPrice}
+                                          onChange={(e) => updateLine(doc.id, i, "unitPrice", e.target.value)}
+                                          step="0.01"
+                                          className="w-full border border-gray-300 rounded px-2 py-1 text-sm text-right tabular-nums focus:outline-none focus:ring-2 focus:ring-black"
+                                        />
+                                      </td>
+                                      <td className="px-2 py-1.5">
+                                        <input
+                                          type="number"
+                                          value={line.amount}
+                                          onChange={(e) => updateLine(doc.id, i, "amount", e.target.value)}
+                                          step="0.01"
+                                          className="w-full border border-gray-300 rounded px-2 py-1 text-sm text-right tabular-nums focus:outline-none focus:ring-2 focus:ring-black"
+                                        />
                                       </td>
                                     </tr>
                                   ))}
@@ -596,7 +651,7 @@ export default function InboxPage() {
                                     <tr key={i} className="border-b border-gray-100">
                                       <td className="px-3 py-2 text-gray-700">{line.description}</td>
                                       <td className="px-3 py-2 text-right text-gray-600 tabular-nums">
-                                        {line.quantity.toLocaleString()} {line.unit}
+                                        {line.quantity.toLocaleString()}
                                       </td>
                                       <td className="px-3 py-2 text-right text-gray-600 tabular-nums">
                                         {formatCurrency(line.unitPrice)}

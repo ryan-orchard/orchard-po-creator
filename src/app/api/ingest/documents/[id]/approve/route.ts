@@ -116,10 +116,11 @@ export async function POST(
       );
     }
 
-    // Create invoice lines — resolve items from descriptions
-    if (parsed.lines?.length) {
+    // Create invoice lines — use overrides if provided, else parsed data
+    const sourceLines = overrides.lines?.length ? overrides.lines : parsed.lines;
+    if (sourceLines?.length) {
       const lines = await Promise.all(
-        parsed.lines.map(async (line) => {
+        sourceLines.map(async (line: { description: string; quantity: number; unitPrice: number; amount: number; unit?: string }) => {
           const item = await resolveItem(line.description);
           return {
             invoice_id: invoice.id,
@@ -127,7 +128,6 @@ export async function POST(
             sku: item?.sku || null,
             description: line.description,
             qty: line.quantity,
-            unit: line.unit || "EA",
             unit_price: line.unitPrice,
             total: line.amount,
           };
