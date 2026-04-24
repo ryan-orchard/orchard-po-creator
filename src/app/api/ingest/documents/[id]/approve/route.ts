@@ -119,13 +119,30 @@ export async function POST(
     // Create invoice lines — use overrides if provided, else parsed data
     const sourceLines = overrides.lines?.length ? overrides.lines : parsed.lines;
     if (sourceLines?.length) {
+      // Fetch items for SKU lookup when itemId is provided
+      const { data: allItems } = await db.schema("org_config").from("items").select("id, sku");
+      const itemMap = new Map((allItems || []).map((i) => [i.id, i.sku as string]));
+
       const lines = await Promise.all(
-        sourceLines.map(async (line: { description: string; quantity: number; unitPrice: number; amount: number; unit?: string }) => {
-          const item = await resolveItem(line.description);
+        sourceLines.map(async (line: { description: string; quantity: number; unitPrice: number; amount: number; itemId?: string }) => {
+          // Use explicit itemId if provided, otherwise try fuzzy resolution
+          let itemId = line.itemId || null;
+          let sku: string | null = null;
+
+          if (itemId) {
+            sku = itemMap.get(itemId) || null;
+          } else {
+            const resolved = await resolveItem(line.description);
+            if (resolved) {
+              itemId = resolved.id;
+              sku = resolved.sku;
+            }
+          }
+
           return {
             invoice_id: invoice.id,
-            item_id: item?.id || null,
-            sku: item?.sku || null,
+            item_id: itemId,
+            sku,
             description: line.description,
             qty: line.quantity,
             unit_price: line.unitPrice,

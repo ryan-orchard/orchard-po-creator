@@ -58,11 +58,18 @@ interface POOption {
   poNumber: string;
 }
 
+interface ItemOption {
+  id: string;
+  sku: string;
+  name: string | null;
+}
+
 interface EditLine {
   description: string;
   quantity: string;
   unitPrice: string;
   amount: string;
+  itemId: string;
 }
 
 // Editable fields for a pending document
@@ -160,6 +167,7 @@ function buildEditState(doc: IngestedDocument): EditState {
       quantity: String(l.quantity),
       unitPrice: String(l.unitPrice),
       amount: String(l.amount),
+      itemId: "",
     })),
   };
 }
@@ -175,6 +183,7 @@ export default function InboxPage() {
   const [editStates, setEditStates] = useState<Record<string, EditState>>({});
   const [suppliers, setSuppliers] = useState<SupplierOption[]>([]);
   const [pos, setPOs] = useState<POOption[]>([]);
+  const [items, setItems] = useState<ItemOption[]>([]);
   const [pdfLoading, setPdfLoading] = useState<string | null>(null);
 
   // Load reference data
@@ -182,7 +191,8 @@ export default function InboxPage() {
     Promise.all([
       fetch("/api/suppliers").then((r) => r.json()),
       fetch("/api/purchase-orders").then((r) => r.json()),
-    ]).then(([suppData, poData]) => {
+      fetch("/api/skus").then((r) => r.json()),
+    ]).then(([suppData, poData, itemData]) => {
       setSuppliers(
         (suppData || []).map((s: { id: string; name: string }) => ({
           id: s.id,
@@ -193,6 +203,13 @@ export default function InboxPage() {
         (poData || []).map((p: { id: string; poNumber: string }) => ({
           id: p.id,
           poNumber: p.poNumber,
+        }))
+      );
+      setItems(
+        (itemData || []).map((i: { id: string; standardSku: string; name: string | null }) => ({
+          id: i.id,
+          sku: i.standardSku,
+          name: i.name,
         }))
       );
     });
@@ -273,6 +290,7 @@ export default function InboxPage() {
             quantity: parseFloat(l.quantity) || 0,
             unitPrice: parseFloat(l.unitPrice) || 0,
             amount: parseFloat(l.amount) || 0,
+            itemId: l.itemId || null,
           })),
         },
       }),
@@ -533,6 +551,7 @@ export default function InboxPage() {
                               <table className="w-full text-sm">
                                 <thead>
                                   <tr className="bg-gray-50 border-b border-gray-200">
+                                    <th className="text-left px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">Item</th>
                                     <th className="text-left px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">Description</th>
                                     <th className="text-right px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-28">Qty</th>
                                     <th className="text-right px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-28">Unit Price</th>
@@ -542,6 +561,22 @@ export default function InboxPage() {
                                 <tbody>
                                   {edit.lines.map((line, i) => (
                                     <tr key={i} className="border-b border-gray-100">
+                                      <td className="px-2 py-1.5">
+                                        <select
+                                          value={line.itemId}
+                                          onChange={(e) => updateLine(doc.id, i, "itemId", e.target.value)}
+                                          className={`w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-black ${
+                                            line.itemId ? "border-gray-300" : "border-amber-400 bg-amber-50"
+                                          }`}
+                                        >
+                                          <option value="">Select item...</option>
+                                          {items.map((item) => (
+                                            <option key={item.id} value={item.id}>
+                                              {item.sku}{item.name ? ` — ${item.name}` : ""}
+                                            </option>
+                                          ))}
+                                        </select>
+                                      </td>
                                       <td className="px-2 py-1.5">
                                         <input
                                           type="text"
