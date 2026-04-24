@@ -16,7 +16,6 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       description: body.description ?? null,
       is_active: body.status !== "Inactive",
       category: body.category ?? null,
-      supplier_item_name: body.supplierItemName ?? null,
     })
     .eq("id", id)
     .select()

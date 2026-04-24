@@ -71,7 +71,7 @@ interface PODetail {
       uom: string;
       category: string;
       description: string;
-      supplierItemName: string;
+      ansItemNumber: string;
     } | null;
     section: string;
     qtySticks: number;
@@ -110,7 +110,7 @@ interface SKU {
   uom: string;
   count: number | null;
   description: string;
-  supplierItemName: string;
+  ansItemNumber: string;
 }
 
 interface ShipTo {
@@ -401,7 +401,7 @@ export default function PODetailPage() {
           uom: li.sku.uom,
           count: li.sku.count,
           description: li.sku.description || "",
-          supplierItemName: li.sku.supplierItemName || "",
+          ansItemNumber: li.sku.ansItemNumber || "",
         } : undefined,
         qtySticks: li.qtySticks,
         qtyCartons: li.qtyCartons,
@@ -873,7 +873,7 @@ export default function PODetailPage() {
                           <td className="px-4 py-2 relative">
                             <input
                               type="text"
-                              value={item.sku ? `${item.sku.standardSku} — ${item.sku.flavor || item.sku.supplierItemName || ""}` : skuSearch[item.key] || ""}
+                              value={item.sku ? `${item.sku.standardSku} — ${item.sku.flavor || item.sku.ansItemNumber || ""}` : skuSearch[item.key] || ""}
                               onChange={(e) => {
                                 setSkuSearch((prev) => ({ ...prev, [item.key]: e.target.value }));
                                 setActiveDropdown(item.key);
@@ -943,7 +943,7 @@ export default function PODetailPage() {
                       po.lineItems.map((item) => (
                         <tr key={item.id} className="border-b border-gray-100">
                           <td className="px-4 py-3 text-xs font-medium text-gray-900 whitespace-nowrap">
-                            {item.sku?.supplierItemName || item.sku?.flavor || item.sku?.standardSku || "\u2014"}
+                            {item.sku?.ansItemNumber || item.sku?.flavor || item.sku?.standardSku || "\u2014"}
                           </td>
                           {!isSimpleMode && (
                             <td className="px-4 py-3 text-xs text-gray-700">

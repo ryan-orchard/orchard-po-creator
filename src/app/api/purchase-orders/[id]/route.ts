@@ -35,12 +35,12 @@ export async function GET(
     // Fetch item details for line items
     const itemIds = [...new Set(poLines.map((l) => l.item_id as string))];
     const { data: itemsData } = itemIds.length
-      ? await db.schema("org_config").from("items").select("id, sku, name, unit_of_measure, sticks_per_carton, category, supplier_item_name").in("id", itemIds)
+      ? await db.schema("org_config").from("items").select("id, sku, name, unit_of_measure, sticks_per_carton, category").in("id", itemIds)
       : { data: [] };
     const itemMap = new Map((itemsData ?? []).map((i) => [i.id, i]));
 
     // Map line items
-    type Item = { id: string; sku: string; name: string; unit_of_measure: string; sticks_per_carton: number | null; category: string | null; supplier_item_name: string | null };
+    type Item = { id: string; sku: string; name: string; unit_of_measure: string; sticks_per_carton: number | null; category: string | null };
     const lineItemsWithSkus = poLines.map((l) => {
       const item = itemMap.get(l.item_id as string) as Item | undefined;
       const uom = item?.unit_of_measure ?? "Each";
@@ -55,7 +55,6 @@ export async function GET(
               count: item.sticks_per_carton,
               uom,
               category: item.category ?? null,
-              supplierItemName: item.supplier_item_name ?? null,
             }
           : null,
         section: null, // not stored in new schema

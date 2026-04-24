@@ -24,7 +24,7 @@ interface SKU {
   count: string;
   uom: string;
   description: string;
-  supplierItemName: string;
+  ansItemNumber: string;
 }
 
 interface ShipTo {

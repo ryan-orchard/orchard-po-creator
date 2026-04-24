@@ -21,7 +21,9 @@ export async function GET() {
       count: item.sticks_per_carton,
       description: item.description,
       status: item.is_active ? "Active" : "Inactive",
-      supplierItemName: item.supplier_item_name ?? null,
+      ansItemNumber: item.ans_item_number ?? null,
+      bmcItemNo: item.bmc_item_no ?? null,
+      stordSku: item.stord_sku ?? null,
     }))
   );
 }
@@ -43,7 +45,6 @@ export async function POST(req: Request) {
       description: body.description ?? null,
       is_active: body.status !== "Inactive",
       category: body.category ?? null,
-      supplier_item_name: body.supplierItemName ?? null,
     })
     .select()
     .single();

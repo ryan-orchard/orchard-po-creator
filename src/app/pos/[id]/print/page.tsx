@@ -35,7 +35,7 @@ interface POPrint {
       flavor: string;
       count: number | null;
       uom: string;
-      supplierItemName: string;
+      ansItemNumber: string;
     } | null;
     section: string;
     qtySticks: number;
@@ -252,7 +252,7 @@ export default function POPrintPage() {
                   {items.map((item) => (
                     <tr key={item.id} style={{ borderBottom: "1px solid #f0f0f0" }}>
                       <td style={{ padding: "9px 12px 9px 0", color: "#111", whiteSpace: "nowrap" }}>
-                        {item.sku?.supplierItemName || item.sku?.flavor || item.sku?.standardSku || "—"}
+                        {item.sku?.ansItemNumber || item.sku?.flavor || item.sku?.standardSku || "—"}
                       </td>
                       {!isSimpleMode && (
                         <td style={{ padding: "9px 12px", color: "#888", whiteSpace: "nowrap" }}>

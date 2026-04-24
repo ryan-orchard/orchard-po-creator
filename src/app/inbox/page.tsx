@@ -62,7 +62,9 @@ interface ItemOption {
   id: string;
   sku: string;
   name: string | null;
-  supplierItemName: string | null;
+  ansItemNumber: string | null;
+  bmcItemNo: string | null;
+  stordSku: string | null;
 }
 
 interface EditLine {
@@ -147,12 +149,12 @@ const INVOICE_TYPES = ["Supplier", "Freight", "Customs", "Packaging", "Work Orde
 function buildEditState(doc: IngestedDocument, itemsList: ItemOption[]): EditState {
   const p = doc.parsed_data;
 
-  // Build lookup: supplier item name → item ID
+  // Build lookup: supplier item number → item ID (ANS, BMC, Stord)
   const supplierItemMap = new Map<string, string>();
   for (const item of itemsList) {
-    if (item.supplierItemName) {
-      supplierItemMap.set(item.supplierItemName.toLowerCase(), item.id);
-    }
+    if (item.ansItemNumber) supplierItemMap.set(item.ansItemNumber.toLowerCase(), item.id);
+    if (item.bmcItemNo) supplierItemMap.set(item.bmcItemNo.toLowerCase(), item.id);
+    if (item.stordSku) supplierItemMap.set(item.stordSku.toLowerCase(), item.id);
   }
 
   return {
@@ -179,13 +181,9 @@ function buildEditState(doc: IngestedDocument, itemsList: ItemOption[]): EditSta
         matchedItemId = supplierItemMap.get(l.itemNumber.toLowerCase()) || "";
       }
       if (!matchedItemId && l.description) {
-        // Try matching description against supplier item names
+        // Try matching description against item names
         const descLower = l.description.toLowerCase();
         for (const item of itemsList) {
-          if (item.supplierItemName && descLower.includes(item.supplierItemName.toLowerCase())) {
-            matchedItemId = item.id;
-            break;
-          }
           if (item.name && descLower.includes(item.name.toLowerCase())) {
             matchedItemId = item.id;
             break;
@@ -237,11 +235,13 @@ export default function InboxPage() {
         }))
       );
       setItems(
-        (itemData || []).map((i: { id: string; standardSku: string; name: string | null; supplierItemName: string | null }) => ({
+        (itemData || []).map((i: { id: string; standardSku: string; name: string | null; ansItemNumber: string | null; bmcItemNo: string | null; stordSku: string | null }) => ({
           id: i.id,
           sku: i.standardSku,
           name: i.name,
-          supplierItemName: i.supplierItemName,
+          ansItemNumber: i.ansItemNumber,
+          bmcItemNo: i.bmcItemNo,
+          stordSku: i.stordSku,
         }))
       );
     });
