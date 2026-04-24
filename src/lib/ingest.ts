@@ -35,9 +35,10 @@ export interface ParsedInvoice {
   tax: number | null;
   invoiceAmount: number;
   lines: {
+    itemNumber?: string | null;
     description: string;
     quantity: number;
-    unit: string;
+    unit?: string;
     unitPrice: number;
     amount: number;
   }[];
@@ -155,9 +156,9 @@ const INVOICE_PARSE_PROMPT = `Extract structured data from this invoice. Return 
   "invoiceAmount": number,
   "lines": [
     {
-      "description": "string",
+      "itemNumber": "supplier's item/part number (e.g. F4063S-1-11L), or null if not present",
+      "description": "full product description exactly as shown on the invoice",
       "quantity": number,
-      "unit": "EA or similar",
       "unitPrice": number,
       "amount": number
     }
@@ -183,6 +184,7 @@ Field mapping:
 - "Ship To" = delivery destination (shipTo)
 - "Freight" = freight/shipping charge line (freight)
 - "Sales Tax" = tax amount (tax)
+- Line items have an item/part number (e.g. "F4063S-1-11L") — extract this as "itemNumber". It is typically in its own column.
 - Line items list product descriptions with qty, unit price, and extended amount.
 - ANS invoices typically have a subtotal, then freight, then tax, then grand total.`,
 };

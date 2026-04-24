@@ -19,7 +19,7 @@ interface ParsedInvoice {
   freight?: number;
   tax?: number;
   invoiceAmount?: number;
-  lines?: { description: string; quantity: number; unit: string; unitPrice: number; amount: number }[];
+  lines?: { itemNumber?: string | null; description: string; quantity: number; unit?: string; unitPrice: number; amount: number }[];
   suggestedType?: string;
   error?: string;
 }
@@ -62,6 +62,7 @@ interface ItemOption {
   id: string;
   sku: string;
   name: string | null;
+  supplierItemName: string | null;
 }
 
 interface EditLine {
@@ -143,8 +144,17 @@ const typeColors: Record<string, string> = {
 
 const INVOICE_TYPES = ["Supplier", "Freight", "Customs", "Packaging", "Work Order"];
 
-function buildEditState(doc: IngestedDocument): EditState {
+function buildEditState(doc: IngestedDocument, itemsList: ItemOption[]): EditState {
   const p = doc.parsed_data;
+
+  // Build lookup: supplier item name → item ID
+  const supplierItemMap = new Map<string, string>();
+  for (const item of itemsList) {
+    if (item.supplierItemName) {
+      supplierItemMap.set(item.supplierItemName.toLowerCase(), item.id);
+    }
+  }
+
   return {
     invoiceNumber: p?.invoiceNumber || "",
     invoiceDate: p?.invoiceDate || "",
@@ -162,13 +172,34 @@ function buildEditState(doc: IngestedDocument): EditState {
     freight: p?.freight != null ? String(p.freight) : "",
     tax: p?.tax != null ? String(p.tax) : "",
     invoiceAmount: p?.invoiceAmount != null ? String(p.invoiceAmount) : "",
-    lines: (p?.lines || []).map((l) => ({
-      description: l.description,
-      quantity: String(l.quantity),
-      unitPrice: String(l.unitPrice),
-      amount: String(l.amount),
-      itemId: "",
-    })),
+    lines: (p?.lines || []).map((l) => {
+      // Auto-match: try supplier item number first, then description
+      let matchedItemId = "";
+      if (l.itemNumber) {
+        matchedItemId = supplierItemMap.get(l.itemNumber.toLowerCase()) || "";
+      }
+      if (!matchedItemId && l.description) {
+        // Try matching description against supplier item names
+        const descLower = l.description.toLowerCase();
+        for (const item of itemsList) {
+          if (item.supplierItemName && descLower.includes(item.supplierItemName.toLowerCase())) {
+            matchedItemId = item.id;
+            break;
+          }
+          if (item.name && descLower.includes(item.name.toLowerCase())) {
+            matchedItemId = item.id;
+            break;
+          }
+        }
+      }
+      return {
+        description: l.description,
+        quantity: String(l.quantity),
+        unitPrice: String(l.unitPrice),
+        amount: String(l.amount),
+        itemId: matchedItemId,
+      };
+    }),
   };
 }
 
@@ -206,10 +237,11 @@ export default function InboxPage() {
         }))
       );
       setItems(
-        (itemData || []).map((i: { id: string; standardSku: string; name: string | null }) => ({
+        (itemData || []).map((i: { id: string; standardSku: string; name: string | null; supplierItemName: string | null }) => ({
           id: i.id,
           sku: i.standardSku,
           name: i.name,
+          supplierItemName: i.supplierItemName,
         }))
       );
     });
@@ -226,7 +258,7 @@ export default function InboxPage() {
     const states: Record<string, EditState> = {};
     for (const doc of docs) {
       if (doc.status === "pending") {
-        states[doc.id] = editStates[doc.id] || buildEditState(doc);
+        states[doc.id] = editStates[doc.id] || buildEditState(doc, items);
       }
     }
     setEditStates((prev) => ({ ...prev, ...states }));
@@ -547,75 +579,66 @@ export default function InboxPage() {
                         {edit.lines.length > 0 && (
                           <div>
                             <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Line Items</h3>
-                            <div className="border border-gray-200 rounded-lg overflow-hidden">
-                              <table className="w-full text-sm">
-                                <thead>
-                                  <tr className="bg-gray-50 border-b border-gray-200">
-                                    <th className="text-left px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">Item</th>
-                                    <th className="text-left px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">Description</th>
-                                    <th className="text-right px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-28">Qty</th>
-                                    <th className="text-right px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-28">Unit Price</th>
-                                    <th className="text-right px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider w-28">Amount</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {edit.lines.map((line, i) => (
-                                    <tr key={i} className="border-b border-gray-100">
-                                      <td className="px-2 py-1.5">
-                                        <select
-                                          value={line.itemId}
-                                          onChange={(e) => updateLine(doc.id, i, "itemId", e.target.value)}
-                                          className={`w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-black ${
-                                            line.itemId ? "border-gray-300" : "border-amber-400 bg-amber-50"
-                                          }`}
-                                        >
-                                          <option value="">Select item...</option>
-                                          {items.map((item) => (
-                                            <option key={item.id} value={item.id}>
-                                              {item.sku}{item.name ? ` — ${item.name}` : ""}
-                                            </option>
-                                          ))}
-                                        </select>
-                                      </td>
-                                      <td className="px-2 py-1.5">
-                                        <input
-                                          type="text"
-                                          value={line.description}
-                                          onChange={(e) => updateLine(doc.id, i, "description", e.target.value)}
-                                          className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-black"
-                                        />
-                                      </td>
-                                      <td className="px-2 py-1.5">
-                                        <input
-                                          type="number"
-                                          value={line.quantity}
-                                          onChange={(e) => updateLine(doc.id, i, "quantity", e.target.value)}
-                                          step="0.01"
-                                          className="w-full border border-gray-300 rounded px-2 py-1 text-sm text-right tabular-nums focus:outline-none focus:ring-2 focus:ring-black"
-                                        />
-                                      </td>
-                                      <td className="px-2 py-1.5">
-                                        <input
-                                          type="number"
-                                          value={line.unitPrice}
-                                          onChange={(e) => updateLine(doc.id, i, "unitPrice", e.target.value)}
-                                          step="0.01"
-                                          className="w-full border border-gray-300 rounded px-2 py-1 text-sm text-right tabular-nums focus:outline-none focus:ring-2 focus:ring-black"
-                                        />
-                                      </td>
-                                      <td className="px-2 py-1.5">
-                                        <input
-                                          type="number"
-                                          value={line.amount}
-                                          onChange={(e) => updateLine(doc.id, i, "amount", e.target.value)}
-                                          step="0.01"
-                                          className="w-full border border-gray-300 rounded px-2 py-1 text-sm text-right tabular-nums focus:outline-none focus:ring-2 focus:ring-black"
-                                        />
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
+                            <div className="space-y-3">
+                              {edit.lines.map((line, i) => (
+                                <div key={i} className="border border-gray-200 rounded-lg p-3">
+                                  {/* Row 1: Description (full width) */}
+                                  <div className="mb-2">
+                                    <label className="block text-xs font-medium text-gray-400 mb-1">Description (from invoice)</label>
+                                    <p className="text-sm text-gray-700">{line.description}</p>
+                                  </div>
+                                  {/* Row 2: Item dropdown + Qty + Unit Price + Amount */}
+                                  <div className="grid grid-cols-4 gap-3">
+                                    <div>
+                                      <label className="block text-xs font-medium text-gray-500 mb-1">Item</label>
+                                      <select
+                                        value={line.itemId}
+                                        onChange={(e) => updateLine(doc.id, i, "itemId", e.target.value)}
+                                        className={`w-full border rounded-md px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-black ${
+                                          line.itemId ? "border-gray-300" : "border-amber-400 bg-amber-50"
+                                        }`}
+                                      >
+                                        <option value="">Select item...</option>
+                                        {items.map((item) => (
+                                          <option key={item.id} value={item.id}>
+                                            {item.sku}{item.name ? ` — ${item.name}` : ""}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                    <div>
+                                      <label className="block text-xs font-medium text-gray-500 mb-1">Qty</label>
+                                      <input
+                                        type="number"
+                                        value={line.quantity}
+                                        onChange={(e) => updateLine(doc.id, i, "quantity", e.target.value)}
+                                        step="0.01"
+                                        className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm text-right tabular-nums focus:outline-none focus:ring-2 focus:ring-black"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="block text-xs font-medium text-gray-500 mb-1">Unit Price</label>
+                                      <input
+                                        type="number"
+                                        value={line.unitPrice}
+                                        onChange={(e) => updateLine(doc.id, i, "unitPrice", e.target.value)}
+                                        step="0.01"
+                                        className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm text-right tabular-nums focus:outline-none focus:ring-2 focus:ring-black"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="block text-xs font-medium text-gray-500 mb-1">Amount</label>
+                                      <input
+                                        type="number"
+                                        value={line.amount}
+                                        onChange={(e) => updateLine(doc.id, i, "amount", e.target.value)}
+                                        step="0.01"
+                                        className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm text-right tabular-nums focus:outline-none focus:ring-2 focus:ring-black"
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
                             </div>
                           </div>
                         )}
