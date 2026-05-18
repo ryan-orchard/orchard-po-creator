@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
     const { data: receiptLines, error: rlErr } = await db
       .schema("orchard_calcs")
       .from("receipt_lines")
-      .select("id, item_id, qty_received, po_id, source_doc_no, external_ref")
+      .select("id, item_id, qty_received, po_id, source_doc_no")
       .in("id", receiptLineIds);
     if (rlErr) throw rlErr;
 
@@ -74,13 +74,12 @@ export async function GET(request: NextRequest) {
         receiptLines.map((rl) => rl.po_id as string).filter(Boolean)
       ),
     ];
-    // Both source_doc_no (Stord order# / BMC document#) and external_ref (Stord BOL / BMC external_doc_no)
-    // are candidate references to match against invoice.po_reference
+    // source_doc_no = Stord Order Number / BMC document_no.
+    // Used as a candidate reference to match against invoice.po_reference.
     const externalIds = [
-      ...new Set([
-        ...receiptLines.map((rl) => rl.source_doc_no as string).filter(Boolean),
-        ...receiptLines.map((rl) => rl.external_ref as string).filter(Boolean),
-      ]),
+      ...new Set(
+        receiptLines.map((rl) => rl.source_doc_no as string).filter(Boolean)
+      ),
     ];
 
     // 3. POs → po_numbers + supplier_ids (for ranking, not filtering)

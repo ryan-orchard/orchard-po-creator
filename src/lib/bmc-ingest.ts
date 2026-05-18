@@ -3,17 +3,14 @@
  *
  * - Inventory snapshots: upsert (replace per warehouse+date+item)
  * - Transactions: insert with ON CONFLICT skip (idempotent via entry_no)
- * - Silver receipt_lines: Purchase entries also flow to orchard_calcs.receipt_lines
+ *
+ * Silver receipt_lines are populated by a Postgres trigger on
+ * orchard.bmc_transactions (mig 021). Purchase entries flow to silver
+ * via UPSERT-with-sum on the aggregation grain. This file never writes
+ * to orchard_calcs directly.
  */
-import crypto from "crypto";
 import { db } from "./supabase";
 import type { BmcReportResult } from "./bmc-parser";
-
-// Deterministic UUID from a stable string (so re-runs are idempotent).
-function uuidFromText(s: string): string {
-  const h = crypto.createHash("sha1").update(s).digest("hex");
-  return `${h.slice(0, 8)}-${h.slice(8, 12)}-5${h.slice(13, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
-}
 
 interface ProcessResult {
   snapshotRows: number;
@@ -155,59 +152,12 @@ export async function processBmcReport(
     skippedDuplicates = report.transactions.length - newTransactions;
   }
 
-  // ── Mirror Purchase entries to Silver (orchard_calcs.receipt_lines) ──
-  // BMC "Purchase" entries are inbound receipts. Other entry types
-  // (Consumption, Output, Adjustments) stay in bmc_transactions only.
-  const purchases = report.transactions.filter((t) => t.entryType === "Purchase");
-  if (purchases.length > 0) {
-    const silverRows = purchases.map((t) => {
-      const id = uuidFromText(`bmc:txn:${t.entryNo}`);
-      return {
-        id,
-        source: "bmc",
-        bronze_table: "orchard.bmc_transactions",
-        bronze_id: String(t.entryNo),
-        source_doc_no: t.documentNo,
-        received_date: t.postingDate,
-        warehouse_code: "BMC",
-        po_id: null,
-        external_ref: t.externalDocNo,
-        item_id: t.standardSku ? itemIdMap.get(t.standardSku) || null : null,
-        qty_received: Number(t.baseQuantity ?? t.quantity ?? 0),
-        three_pl_sku: t.bmcItemNo,
-        lot_number: t.lotNo,
-      };
-    });
-
-    const { error: silverErr } = await db
-      .schema("orchard_calcs")
-      .from("receipt_lines")
-      .upsert(silverRows, { onConflict: "source,bronze_id", ignoreDuplicates: true });
-
-    if (silverErr) {
-      console.error("Failed to write Silver receipt_lines:", silverErr);
-      throw new Error(`Silver receipt_lines write failed: ${silverErr.message}`);
-    }
-
-    const statusRows = purchases.map((t) => ({
-      receipt_line_id: uuidFromText(`bmc:txn:${t.entryNo}`),
-      status: "Open",
-    }));
-    const { error: statusErr } = await db
-      .schema("orchard_calcs")
-      .from("receipt_line_statuses")
-      .upsert(statusRows, { onConflict: "receipt_line_id", ignoreDuplicates: true });
-
-    if (statusErr) {
-      console.error("Failed to write Silver receipt_line_statuses:", statusErr);
-      throw new Error(`Silver status write failed: ${statusErr.message}`);
-    }
-  }
+  // Silver receipt_lines is populated by trigger on orchard.bmc_transactions
+  // (sync_bmc_purchase_trg). No app-code write needed.
 
   console.log(
     `BMC ingest: ${snapshotRows.length} snapshot rows, ` +
-    `${newTransactions} new txns, ${skippedDuplicates} dups skipped, ` +
-    `${purchases.length} Silver receipt lines`
+    `${newTransactions} new txns, ${skippedDuplicates} dups skipped`
   );
 
   return {
