@@ -76,9 +76,12 @@ export async function GET(
       if (wo) linkedWorkOrder = { id: wo.id, woNumber: wo.wo_number };
     }
 
-    // Fetch linked PO, receipts, and shipments via po_id
+    // Fetch linked PO, receipts, and shipments
     let purchaseOrder: { id: string; poNumber: string; status: string } | null = null;
-    let receipts: { id: string; receiptNumber: string; receivedDate: string; lines: { sku: string; qtyReceived: number }[] }[] = [];
+    const receiptsById = new Map<
+      string,
+      { id: string; receiptNumber: string; receivedDate: string }
+    >();
     let shipments: { id: string; shipmentNumber: string; shipDate: string; status: string }[] = [];
 
     if (inv.po_id) {
@@ -97,30 +100,12 @@ export async function GET(
         };
       }
 
-      // Receipts with their lines
-      const poReceiptIds = (receiptsResult.data ?? []).map((r) => r.id as string);
-      if (poReceiptIds.length > 0) {
-        const { data: receiptLinesData } = await db
-          .schema("orchard")
-          .from("receipt_lines")
-          .select("receipt_id, item_id, qty_received")
-          .in("receipt_id", poReceiptIds);
-
-        const linesByReceipt: Record<string, { sku: string; qtyReceived: number }[]> = {};
-        for (const rl of receiptLinesData ?? []) {
-          if (!linesByReceipt[rl.receipt_id]) linesByReceipt[rl.receipt_id] = [];
-          linesByReceipt[rl.receipt_id].push({
-            sku: rl.item_id ? (itemMap.get(rl.item_id as string) ?? "Unknown") : "Unknown",
-            qtyReceived: Number(rl.qty_received),
-          });
-        }
-
-        receipts = (receiptsResult.data ?? []).map((r) => ({
+      for (const r of receiptsResult.data ?? []) {
+        receiptsById.set(r.id, {
           id: r.id,
           receiptNumber: r.receipt_number,
           receivedDate: r.received_date ?? "",
-          lines: linesByReceipt[r.id] ?? [],
-        }));
+        });
       }
 
       shipments = (shipmentsResult.data ?? []).map((s) => ({
@@ -131,11 +116,118 @@ export async function GET(
       }));
     }
 
+    // Also pull receipts linked directly to this invoice's lines via the
+    // receipt_line ↔ invoice_line link table (the Link Invoice flow on the
+    // Receipts page). These won't necessarily share the invoice's po_id.
+    const invoiceLineIds = invLines.map((l) => l.id as string);
+    if (invoiceLineIds.length > 0) {
+      const { data: linkRows } = await db
+        .schema("orchard_calcs")
+        .from("receipt_line_invoice_line_links")
+        .select("receipt_line_id")
+        .in("invoice_line_id", invoiceLineIds);
+
+      const linkedReceiptLineIds = [
+        ...new Set((linkRows ?? []).map((r) => r.receipt_line_id as string)),
+      ];
+
+      if (linkedReceiptLineIds.length > 0) {
+        const { data: linkedReceiptLines } = await db
+          .schema("orchard")
+          .from("receipt_lines")
+          .select("receipt_id")
+          .in("id", linkedReceiptLineIds);
+
+        const linkedReceiptIds = [
+          ...new Set(
+            (linkedReceiptLines ?? [])
+              .map((l) => l.receipt_id as string | null)
+              .filter((id): id is string => Boolean(id))
+          ),
+        ];
+
+        const missingReceiptIds = linkedReceiptIds.filter(
+          (rid) => !receiptsById.has(rid)
+        );
+        if (missingReceiptIds.length > 0) {
+          const { data: extraReceipts } = await db
+            .schema("orchard")
+            .from("receipts")
+            .select("id, receipt_number, received_date")
+            .in("id", missingReceiptIds);
+          for (const r of extraReceipts ?? []) {
+            receiptsById.set(r.id, {
+              id: r.id,
+              receiptNumber: r.receipt_number,
+              receivedDate: r.received_date ?? "",
+            });
+          }
+        }
+      }
+    }
+
+    // Hydrate receipt lines for every receipt we ended up with
+    const allReceiptIds = [...receiptsById.keys()];
+    const linesByReceipt: Record<string, { sku: string; qtyReceived: number }[]> = {};
+    if (allReceiptIds.length > 0) {
+      const { data: receiptLinesData } = await db
+        .schema("orchard")
+        .from("receipt_lines")
+        .select("receipt_id, item_id, qty_received")
+        .in("receipt_id", allReceiptIds);
+
+      // Resolve any item ids we haven't seen yet (linked receipts may
+      // include SKUs that aren't on the invoice itself).
+      const extraItemIds = [
+        ...new Set(
+          (receiptLinesData ?? [])
+            .map((rl) => rl.item_id as string | null)
+            .filter((id): id is string => Boolean(id) && !itemMap.has(id))
+        ),
+      ];
+      if (extraItemIds.length > 0) {
+        const { data: extraItems } = await db
+          .schema("org_config")
+          .from("items")
+          .select("id, sku")
+          .in("id", extraItemIds);
+        for (const i of extraItems ?? []) {
+          itemMap.set(i.id, i.sku as string);
+        }
+      }
+
+      for (const rl of receiptLinesData ?? []) {
+        if (!linesByReceipt[rl.receipt_id]) linesByReceipt[rl.receipt_id] = [];
+        linesByReceipt[rl.receipt_id].push({
+          sku: rl.item_id ? (itemMap.get(rl.item_id as string) ?? "Unknown") : "Unknown",
+          qtyReceived: Number(rl.qty_received),
+        });
+      }
+    }
+
+    const receipts = [...receiptsById.values()]
+      .map((r) => ({
+        ...r,
+        lines: linesByReceipt[r.id] ?? [],
+      }))
+      .sort((a, b) => (b.receivedDate || "").localeCompare(a.receivedDate || ""));
+
+    // Look up source document (ingested_documents) for "View Original" link
+    const { data: sourceDoc } = await db
+      .schema("orchard")
+      .from("ingested_documents")
+      .select("id")
+      .eq("created_record_id", id)
+      .maybeSingle();
+
     return NextResponse.json({
       id: inv.id,
       invoiceNumber: inv.invoice_number,
       invoiceDate: inv.invoice_date,
+      dueDate: inv.due_date ?? "",
       supplier: supplierName,
+      supplierId: inv.supplier_id ?? null,
+      sourceDocumentId: sourceDoc?.id ?? null,
       salesOrder: inv.sales_order ?? "",
       poReference: inv.po_reference ?? "",
       paymentTerms: inv.payment_terms ?? "",
@@ -170,10 +262,33 @@ export async function PATCH(
   const { id } = await params;
   const body = await request.json();
 
+  const fieldMap: Record<string, string> = {
+    shipmentId: "shipment_id",
+    workOrderId: "wo_id",
+    status: "match_status",
+    invoiceNumber: "invoice_number",
+    invoiceDate: "invoice_date",
+    dueDate: "due_date",
+    poReference: "po_reference",
+    poId: "po_id",
+    paymentTerms: "payment_terms",
+    salesOrder: "sales_order",
+    trackingNumber: "tracking_number",
+    deliveryTerms: "delivery_terms",
+    shipTo: "ship_to_text",
+    notes: "notes",
+    invoiceType: "invoice_type",
+    supplierId: "supplier_id",
+    subtotal: "subtotal",
+    freight: "freight",
+    tax: "tax",
+    invoiceAmount: "total_amount",
+  };
+
   const updates: Record<string, unknown> = {};
-  if ("shipmentId" in body) updates.shipment_id = body.shipmentId || null;
-  if ("workOrderId" in body) updates.wo_id = body.workOrderId || null;
-  if ("status" in body) updates.match_status = body.status;
+  for (const [key, col] of Object.entries(fieldMap)) {
+    if (key in body) updates[col] = body[key] ?? null;
+  }
 
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: "No fields to update" }, { status: 400 });

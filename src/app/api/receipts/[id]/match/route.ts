@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/supabase";
 import { logActivity } from "@/lib/activity-log";
 import { recalcPoStatus } from "@/lib/po-status";
+import { setReceiptLineStatuses } from "@/lib/receipt-status";
 
 /**
  * PATCH /api/receipts/[id]/match
@@ -70,12 +71,8 @@ async function handlePOMatch(
       { onConflict: "po_line_id,receipt_line_id" }
     );
 
-    // Update receipt_lines status to Matched
-    await Promise.all(
-      validMatches.map((m) =>
-        db.schema("orchard").from("receipt_lines").update({ status: "Matched" }).eq("id", m.receiptLineId)
-      )
-    );
+    // Update receipt_lines status to Matched (Silver)
+    await setReceiptLineStatuses(validMatches.map((m) => m.receiptLineId), "Matched", "Ryan Belanger");
   }
 
   // Update receipt.po_id (denorm for display)
@@ -130,13 +127,9 @@ async function handleWOMatch(
     .from("wo_receipt_links")
     .upsert({ wo_id: workOrderId, receipt_id: receiptId }, { onConflict: "wo_id,receipt_id" });
 
-  // Update receipt line statuses to Matched
+  // Update receipt line statuses to Matched (Silver)
   const validMatches = lineMatches.filter((m) => m.receiptLineId);
-  await Promise.all(
-    validMatches.map((m) =>
-      db.schema("orchard").from("receipt_lines").update({ status: "Matched" }).eq("id", m.receiptLineId)
-    )
-  );
+  await setReceiptLineStatuses(validMatches.map((m) => m.receiptLineId), "Matched", "Ryan Belanger");
 
   // Log activity
   const { data: receiptLines } = await db

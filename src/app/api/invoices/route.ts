@@ -16,28 +16,55 @@ export async function GET() {
     const payStatusMap = new Map((statusesResult.data ?? []).map((s) => [s.invoice_id, s]));
     const supplierMap = new Map((suppliersResult.data ?? []).map((s) => [s.id, s.name as string]));
 
-    // Count lines per invoice
-    const { data: lineCountData } = await db
+    // Fetch all invoice lines with item info for SKU summary
+    const { data: allLines } = await db
       .schema("orchard")
       .from("invoice_lines")
-      .select("invoice_id");
-    const lineCountByInvoice: Record<string, number> = {};
-    for (const l of lineCountData ?? []) {
-      lineCountByInvoice[l.invoice_id] = (lineCountByInvoice[l.invoice_id] ?? 0) + 1;
+      .select("id, invoice_id, item_id, description, sku");
+
+    // Receipt link coverage: which invoice_line_ids have at least one linked receipt line?
+    const { data: rlLinks } = await db
+      .schema("orchard_calcs")
+      .from("receipt_line_invoice_line_links")
+      .select("invoice_line_id");
+    const linkedInvoiceLineIds = new Set((rlLinks ?? []).map((l) => l.invoice_line_id as string));
+
+    // Build item IDs to resolve names
+    const itemIds = [...new Set((allLines ?? []).map((l) => l.item_id as string).filter(Boolean))];
+    const { data: itemsData } = itemIds.length
+      ? await db.schema("org_config").from("items").select("id, sku").in("id", itemIds)
+      : { data: [] };
+    const itemMap = new Map((itemsData ?? []).map((i) => [i.id, i.sku as string]));
+
+    // Group lines by invoice — collect SKU names, count, and linked-line count
+    const linesByInvoice: Record<string, { skus: string[]; count: number; linkedCount: number }> = {};
+    for (const l of allLines ?? []) {
+      const invId = l.invoice_id as string;
+      if (!linesByInvoice[invId]) linesByInvoice[invId] = { skus: [], count: 0, linkedCount: 0 };
+      linesByInvoice[invId].count++;
+      if (linkedInvoiceLineIds.has(l.id as string)) linesByInvoice[invId].linkedCount++;
+      const skuName = l.item_id ? itemMap.get(l.item_id as string) : (l.sku as string | null);
+      if (skuName && !linesByInvoice[invId].skus.includes(skuName)) {
+        linesByInvoice[invId].skus.push(skuName);
+      }
     }
 
     type Invoice = {
-      id: string; invoice_number: string; invoice_date: string; supplier_id: string | null;
-      po_reference: string | null; sales_order: string | null; po_id: string | null;
-      total_amount: number; match_status: string | null;
+      id: string; invoice_number: string; invoice_date: string; due_date: string | null;
+      supplier_id: string | null; po_reference: string | null; sales_order: string | null;
+      po_id: string | null; total_amount: number; match_status: string | null;
+      invoice_type: string | null; payment_terms: string | null;
     };
 
     const invoices = (invoicesResult.data as Invoice[]).map((inv) => {
       const status = payStatusMap.get(inv.id);
+      const lineInfo = linesByInvoice[inv.id];
+      const dueDate = inv.due_date || computeDueDate(inv.invoice_date, inv.payment_terms || "");
       return {
         id: inv.id,
         invoiceNumber: inv.invoice_number,
         invoiceDate: inv.invoice_date,
+        dueDate,
         supplier: inv.supplier_id ? supplierMap.get(inv.supplier_id) ?? null : null,
         poReference: inv.po_reference ?? "",
         salesOrder: inv.sales_order ?? "",
@@ -45,7 +72,10 @@ export async function GET() {
         invoiceAmount: Number(inv.total_amount),
         matchStatus: status?.match_status ?? inv.match_status ?? "Open",
         paymentStatus: status?.payment_status ?? "Unpaid",
-        lineCount: lineCountByInvoice[inv.id] ?? 0,
+        invoiceType: inv.invoice_type ?? "Supplier",
+        lineCount: lineInfo?.count ?? 0,
+        linkedLineCount: lineInfo?.linkedCount ?? 0,
+        skuSummary: lineInfo?.skus.join(", ") ?? "",
       };
     });
 
@@ -53,6 +83,16 @@ export async function GET() {
   } catch (error) {
     return NextResponse.json({ error: "Failed to fetch invoices" }, { status: 500 });
   }
+}
+
+function computeDueDate(invoiceDate: string, paymentTerms: string): string {
+  if (!invoiceDate) return "";
+  const netMatch = paymentTerms.match(/^Net\s+(\d+)$/i);
+  if (!netMatch) return "";
+  const days = parseInt(netMatch[1], 10);
+  const date = new Date(invoiceDate + "T00:00:00");
+  date.setDate(date.getDate() + days);
+  return date.toISOString().split("T")[0];
 }
 
 export async function POST(request: NextRequest) {
@@ -155,7 +195,7 @@ export async function POST(request: NextRequest) {
         quantity: number; unit: string; unitPrice: number; amount: number; batchNumber: string | null;
       }[]).map((line, idx) => ({
         invoice_id: invoice.id,
-        item_id: line.airtableSkuId || null, // may be Supabase UUID from new items
+        item_id: line.airtableSkuId || null,
         qty: line.quantity,
         unit_price: line.unitPrice,
         total: line.amount,

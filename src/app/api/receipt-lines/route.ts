@@ -1,87 +1,131 @@
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
 import { db } from "@/lib/supabase";
+
+// Synthetic per-document receipt id for BMC rows (Bronze has no receipt header for BMC).
+function syntheticReceiptId(source: string, sourceDocNo: string | null, fallback: string): string {
+  const key = `hdr:${source}:${sourceDocNo ?? fallback}`;
+  const h = crypto.createHash("sha1").update(key).digest("hex");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-5${h.slice(13, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
+}
 
 /**
  * GET /api/receipt-lines
  *
- * Returns all receipt lines joined with receipt headers, items, and locations.
- * Query params: status (optional) — filter by Unmatched, Matched, Excluded
+ * Returns all receipt lines from Silver (orchard_calcs.receipt_lines) joined with
+ * statuses, items, POs, and invoice links. Includes both Stord and BMC sources.
+ * Query params: status (optional) — filter by Open, Unmatched, Matched, Excluded, Review
  */
 export async function GET(request: NextRequest) {
   try {
     const status = request.nextUrl.searchParams.get("status");
 
-    // Fetch all tables in parallel
-    const [linesRes, receiptsRes, itemsRes, locationsRes, posRes] =
-      await Promise.all([
-        db.schema("orchard").from("receipt_lines").select("*"),
-        db.schema("orchard").from("receipts").select("*"),
-        db.schema("org_config").from("items").select("id, sku"),
-        db.schema("org_config").from("locations").select("id, code"),
-        db.schema("orchard").from("purchase_orders").select("id, po_number"),
-      ]);
+    const [
+      silverLinesRes,
+      statusesRes,
+      itemsRes,
+      posRes,
+      linksRes,
+      invoiceLinesRes,
+      invoicesRes,
+    ] = await Promise.all([
+      db.schema("orchard_calcs").from("receipt_lines").select("*"),
+      db.schema("orchard_calcs").from("receipt_line_statuses").select("receipt_line_id, status"),
+      db.schema("org_config").from("items").select("id, sku"),
+      db.schema("orchard").from("purchase_orders").select("id, po_number"),
+      db.schema("orchard_calcs").from("receipt_line_invoice_line_links").select("receipt_line_id, invoice_line_id"),
+      db.schema("orchard").from("invoice_lines").select("id, invoice_id"),
+      db.schema("orchard").from("invoices").select("id, invoice_number"),
+    ]);
 
-    if (linesRes.error) throw linesRes.error;
-    if (receiptsRes.error) throw receiptsRes.error;
+    if (silverLinesRes.error) throw silverLinesRes.error;
+    if (statusesRes.error) throw statusesRes.error;
     if (itemsRes.error) throw itemsRes.error;
-    if (locationsRes.error) throw locationsRes.error;
     if (posRes.error) throw posRes.error;
+    if (linksRes.error) throw linksRes.error;
+    if (invoiceLinesRes.error) throw invoiceLinesRes.error;
+    if (invoicesRes.error) throw invoicesRes.error;
 
-    // Build lookup maps
-    const receiptsById = new Map(
-      receiptsRes.data.map((r) => [r.id, r])
-    );
-    const itemsById = new Map(
-      itemsRes.data.map((i) => [i.id, i])
-    );
-    const locationsById = new Map(
-      locationsRes.data.map((l) => [l.id, l])
-    );
-    const posById = new Map(
-      posRes.data.map((p) => [p.id, p])
-    );
+    const silverLines = silverLinesRes.data ?? [];
+    const statusByLineId = new Map((statusesRes.data ?? []).map((s) => [s.receipt_line_id, s.status as string]));
+    const itemsById = new Map((itemsRes.data ?? []).map((i) => [i.id, i]));
+    const posById = new Map((posRes.data ?? []).map((p) => [p.id, p]));
 
-    // Count all statuses before filtering
+    // Stord click-through still expects the Bronze receipt id. Look it up.
+    const stordLineIds = silverLines.filter((l) => l.source === "stord").map((l) => l.id as string);
+    const bronzeReceiptByLineId = new Map<string, string>();
+    if (stordLineIds.length > 0) {
+      const { data: bronzeLines } = await db.schema("orchard").from("receipt_lines")
+        .select("id, receipt_id").in("id", stordLineIds);
+      for (const b of bronzeLines ?? []) bronzeReceiptByLineId.set(b.id as string, b.receipt_id as string);
+    }
+
+    // receipt_line_id → first linked invoice
+    const invoiceLineToInvoiceId = new Map((invoiceLinesRes.data ?? []).map((il) => [il.id, il.invoice_id]));
+    const invoicesById = new Map((invoicesRes.data ?? []).map((i) => [i.id, i]));
+    const invoiceByReceiptLineId = new Map<string, { id: string; number: string }>();
+    for (const link of linksRes.data ?? []) {
+      if (invoiceByReceiptLineId.has(link.receipt_line_id)) continue;
+      const invoiceId = invoiceLineToInvoiceId.get(link.invoice_line_id);
+      if (!invoiceId) continue;
+      const invoice = invoicesById.get(invoiceId);
+      if (!invoice) continue;
+      invoiceByReceiptLineId.set(link.receipt_line_id, {
+        id: invoice.id as string,
+        number: invoice.invoice_number as string,
+      });
+    }
+
+    // Counts (over all lines, before filter)
     const counts = { unmatched: 0, matched: 0, excluded: 0 };
-    for (const line of linesRes.data) {
-      const s = (line.status || "Unmatched").toLowerCase();
-      if (s in counts) counts[s as keyof typeof counts]++;
+    for (const line of silverLines) {
+      const s = (statusByLineId.get(line.id as string) ?? "Open").toLowerCase();
+      // Treat Open and Unmatched as "unmatched" for the badge
+      if (s === "matched") counts.matched++;
+      else if (s === "excluded") counts.excluded++;
+      else counts.unmatched++;
     }
 
-    // Filter by status if requested
-    let filtered = linesRes.data;
+    // Filter by status
+    let filtered = silverLines;
     if (status) {
-      filtered = filtered.filter(
-        (l) => (l.status || "Unmatched").toLowerCase() === status.toLowerCase()
-      );
+      filtered = filtered.filter((l) => {
+        const s = (statusByLineId.get(l.id as string) ?? "Open").toLowerCase();
+        if (status.toLowerCase() === "unmatched") return s === "open" || s === "unmatched";
+        return s === status.toLowerCase();
+      });
     }
 
-    // Join and shape
     const lines = filtered.map((line) => {
-      const receipt = receiptsById.get(line.receipt_id);
       const item = line.item_id ? itemsById.get(line.item_id) : null;
-      const location = receipt?.location_id
-        ? locationsById.get(receipt.location_id)
-        : null;
-      const po = receipt?.po_id ? posById.get(receipt.po_id) : null;
+      const po = line.po_id ? posById.get(line.po_id) : null;
+      const invoice = invoiceByReceiptLineId.get(line.id as string) ?? null;
+      const receiptId = line.source === "stord"
+        ? bronzeReceiptByLineId.get(line.id as string) ?? syntheticReceiptId(line.source, line.source_doc_no, line.id as string)
+        : syntheticReceiptId(line.source, line.source_doc_no, line.id as string);
+      const rawStatus = statusByLineId.get(line.id as string) ?? "Open";
+      // Frontend uses "Unmatched" terminology — Open is the new "Unmatched"
+      const displayStatus = rawStatus === "Open" ? "Unmatched" : rawStatus;
 
       return {
         id: line.id,
-        receiptId: line.receipt_id,
-        date: receipt?.received_date ?? null,
-        warehouse: location?.code ?? null,
+        receiptId,
+        date: line.received_date,
+        warehouse: line.warehouse_code,
         item: item?.sku ?? line.three_pl_sku ?? "Unknown",
         itemId: line.item_id ?? null,
         threePlSku: line.three_pl_sku ?? null,
         qty: line.qty_received,
-        orderRef: receipt?.external_id ?? null,
+        orderRef: line.source_doc_no,
         poNumber: po?.po_number ?? null,
-        stordReceiptId: receipt?.stord_receipt_id ?? null,
-        status: line.status || "Unmatched",
+        stordReceiptId: null, // Bronze-only field; not exposed via Silver
+        invoiceId: invoice?.id ?? null,
+        invoiceNumber: invoice?.number ?? null,
+        status: displayStatus,
+        source: line.source,
       };
     });
 
-    // Sort by date descending (nulls last)
     lines.sort((a, b) => {
       if (!a.date && !b.date) return 0;
       if (!a.date) return 1;
@@ -92,10 +136,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ lines, counts });
   } catch (error) {
     return NextResponse.json(
-      {
-        error: `Failed to fetch receipt lines: ${error instanceof Error ? error.message : "Unknown error"}`,
-      },
-      { status: 500 }
+      { error: `Failed to fetch receipt lines: ${error instanceof Error ? error.message : "Unknown error"}` },
+      { status: 500 },
     );
   }
 }

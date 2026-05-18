@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireOperator } from "@/lib/auth";
-import { db } from "@/lib/supabase";
+import { setReceiptLineStatus } from "@/lib/receipt-status";
 
 /**
  * POST /api/receipt-lines/[id]/exclude
@@ -17,12 +17,7 @@ export async function POST(
   try {
     const { id } = await params;
 
-    const { error } = await db
-      .schema("orchard")
-      .from("receipt_lines")
-      .update({ status: "Excluded" })
-      .eq("id", id);
-
+    const { error } = await setReceiptLineStatus(id, "Excluded");
     if (error) throw error;
 
     return NextResponse.json({ success: true });

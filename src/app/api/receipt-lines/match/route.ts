@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireOperator } from "@/lib/auth";
 import { db } from "@/lib/supabase";
+import { setReceiptLineStatuses } from "@/lib/receipt-status";
 
 /**
  * POST /api/receipt-lines/match
@@ -41,13 +42,8 @@ export async function POST(request: NextRequest) {
 
     if (insertError) throw insertError;
 
-    // Update receipt line statuses to Matched
-    const { error: updateError } = await db
-      .schema("orchard")
-      .from("receipt_lines")
-      .update({ status: "Matched" })
-      .in("id", receiptLineIds);
-
+    // Update receipt line statuses to Matched (Silver)
+    const { error: updateError } = await setReceiptLineStatuses(receiptLineIds, "Matched");
     if (updateError) throw updateError;
 
     return NextResponse.json({ success: true, matched: receiptLineIds.length });

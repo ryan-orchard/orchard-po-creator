@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireOperator } from "@/lib/auth";
 import { db } from "@/lib/supabase";
+import { setReceiptLineStatus, type ReceiptLineStatus } from "@/lib/receipt-status";
 
 /**
  * PATCH /api/receipt-lines/[id]
  *
  * Update a receipt line. Supports:
- * - { skuId: string } — Update item link
- * - { matchStatus: "Open" | "Matched" | "Excluded" | "Review" } — Update status
+ * - { skuId: string } — Update item link (Silver line item_id)
+ * - { matchStatus: "Open" | "Matched" | "Excluded" | "Review" } — Update Silver status
  */
 export async function PATCH(
   request: NextRequest,
@@ -18,11 +19,18 @@ export async function PATCH(
   try {
     const { id } = await params;
     const body = await request.json();
-    const updates: Record<string, unknown> = {};
+
+    let didSomething = false;
 
     if (body.skuId !== undefined) {
       if (!body.skuId) return NextResponse.json({ error: "skuId cannot be empty" }, { status: 400 });
-      updates.item_id = body.skuId;
+      const { error } = await db
+        .schema("orchard_calcs")
+        .from("receipt_lines")
+        .update({ item_id: body.skuId })
+        .eq("id", id);
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      didSomething = true;
     }
 
     if (body.matchStatus !== undefined) {
@@ -30,15 +38,14 @@ export async function PATCH(
       if (!valid.includes(body.matchStatus)) {
         return NextResponse.json({ error: `matchStatus must be one of: ${valid.join(", ")}` }, { status: 400 });
       }
-      updates.status = body.matchStatus;
+      const { error } = await setReceiptLineStatus(id, body.matchStatus as ReceiptLineStatus, "Ryan Belanger");
+      if (error) return NextResponse.json({ error: (error as { message?: string }).message ?? "status update failed" }, { status: 500 });
+      didSomething = true;
     }
 
-    if (Object.keys(updates).length === 0) {
+    if (!didSomething) {
       return NextResponse.json({ error: "No valid fields to update" }, { status: 400 });
     }
-
-    const { error } = await db.schema("orchard").from("receipt_lines").update(updates).eq("id", id);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
     return NextResponse.json({ success: true, id });
   } catch (error) {

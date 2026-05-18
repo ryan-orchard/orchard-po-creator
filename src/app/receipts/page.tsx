@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
+import Link from "next/link";
+import LinkInvoiceModal, { ReceiptLineSummary } from "@/components/LinkInvoiceModal";
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -20,6 +22,8 @@ interface ReceiptLine {
   orderRef: string | null;
   poNumber: string | null;
   stordReceiptId: string | null;
+  invoiceId: string | null;
+  invoiceNumber: string | null;
   status: Status;
 }
 
@@ -91,6 +95,8 @@ export default function ReceiptsPage() {
   const [search, setSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [actionLoading, setActionLoading] = useState(false);
+  const [linkModalOpen, setLinkModalOpen] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
   const [sortConfig, setSortConfig] = useState<{
     field: SortField;
     dir: SortDir;
@@ -141,7 +147,8 @@ export default function ReceiptsPage() {
           l.item?.toLowerCase().includes(q) ||
           l.orderRef?.toLowerCase().includes(q) ||
           l.poNumber?.toLowerCase().includes(q) ||
-          l.stordReceiptId?.toLowerCase().includes(q)
+          l.stordReceiptId?.toLowerCase().includes(q) ||
+          l.invoiceNumber?.toLowerCase().includes(q)
       );
     }
     return sortLines(result, sortConfig.field, sortConfig.dir);
@@ -211,8 +218,43 @@ export default function ReceiptsPage() {
   };
 
   const handleLinkInvoice = () => {
-    console.log("Link Invoice clicked for IDs:", Array.from(selectedIds));
+    if (selectedIds.size === 0) return;
+    setLinkModalOpen(true);
   };
+
+  const handleLinkSuccess = async (result: {
+    invoiceNumber: string;
+    linksCreated: number;
+    skippedCount: number;
+  }) => {
+    setLinkModalOpen(false);
+    const skippedNote =
+      result.skippedCount > 0
+        ? ` (${result.skippedCount} receipt line${
+            result.skippedCount === 1 ? "" : "s"
+          } skipped — no SKU match)`
+        : "";
+    setToast(
+      `Linked ${result.linksCreated} line${
+        result.linksCreated === 1 ? "" : "s"
+      } to invoice ${result.invoiceNumber}${skippedNote}`
+    );
+    setSelectedIds(new Set());
+    await fetchData();
+    setTimeout(() => setToast(null), 4000);
+  };
+
+  const selectedReceiptSummaries: ReceiptLineSummary[] = useMemo(
+    () =>
+      lines
+        .filter((l) => selectedIds.has(l.id))
+        .map((l) => ({
+          itemSku: l.item,
+          qty: l.qty,
+          ref: l.poNumber || l.orderRef || null,
+        })),
+    [lines, selectedIds]
+  );
 
   // ── Sort ───────────────────────────────────────────────────
 
@@ -388,7 +430,7 @@ export default function ReceiptsPage() {
                       <SortIcon field="orderRef" />
                     </th>
                     <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                      Stord ID
+                      {activeTab === "Matched" ? "Invoice #" : "Stord ID"}
                     </th>
                   </tr>
                 </thead>
@@ -428,8 +470,23 @@ export default function ReceiptsPage() {
                       <td className="px-4 py-3 text-gray-900">
                         {line.poNumber || line.orderRef || "\u2014"}
                       </td>
-                      <td className="px-4 py-3 text-gray-400 text-xs font-mono truncate max-w-32">
-                        {line.stordReceiptId || "\u2014"}
+                      <td className="px-4 py-3 text-xs truncate max-w-32">
+                        {activeTab === "Matched" ? (
+                          line.invoiceId && line.invoiceNumber ? (
+                            <Link
+                              href={`/invoices/${line.invoiceId}`}
+                              className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
+                            >
+                              {line.invoiceNumber}
+                            </Link>
+                          ) : (
+                            <span className="text-gray-400">—</span>
+                          )
+                        ) : (
+                          <span className="text-gray-400 font-mono">
+                            {line.stordReceiptId || "\u2014"}
+                          </span>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -454,6 +511,23 @@ export default function ReceiptsPage() {
           </>
         )}
       </div>
+
+      {/* Toast */}
+      {toast && (
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 bg-gray-900 text-white text-sm px-4 py-2 rounded-lg shadow-lg">
+          {toast}
+        </div>
+      )}
+
+      {/* Link Invoice modal */}
+      {linkModalOpen && (
+        <LinkInvoiceModal
+          receiptLineIds={Array.from(selectedIds)}
+          receiptSummaries={selectedReceiptSummaries}
+          onClose={() => setLinkModalOpen(false)}
+          onSuccess={handleLinkSuccess}
+        />
+      )}
 
       {/* Floating action bar */}
       {selectedIds.size > 0 && (

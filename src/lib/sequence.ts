@@ -52,15 +52,16 @@ export async function generateNextNumber(
   const { data, error } = await db
     .schema(seq.schema)
     .from(seq.table)
-    .select(seq.column)
-    .order(seq.column, { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .select(seq.column);
 
   if (error || !data) return `${prefix}-${startFrom + 1}`;
 
-  const value = ((data as unknown) as Record<string, string>)[seq.column] ?? "";
-  const match = value.match(new RegExp(`^${prefix}-(\\d+)$`));
-  const maxNum = match ? parseInt(match[1], 10) : startFrom;
+  // Numeric max — string ORDER BY would sort "PO-35" > "PO-10010".
+  const regex = new RegExp(`^${prefix}-(\\d+)$`);
+  let maxNum = startFrom;
+  for (const row of data as unknown as Array<Record<string, string>>) {
+    const match = row[seq.column]?.match(regex);
+    if (match) maxNum = Math.max(maxNum, parseInt(match[1], 10));
+  }
   return `${prefix}-${maxNum + 1}`;
 }

@@ -21,7 +21,7 @@ export async function GET() {
       suppliersResult,
       warehousesResult,
     ] = await Promise.all([
-      db.schema("orchard").from("receipt_lines").select("id, receipt_id, item_id, qty_received, three_pl_sku, lot_number, status"),
+      db.schema("orchard").from("receipt_lines").select("id, receipt_id, item_id, qty_received, three_pl_sku, lot_number"),
       db.schema("orchard").from("receipts").select("id, receipt_number, received_date, external_id, location_id, po_id"),
       db.schema("orchard_calcs").from("po_statuses").select("po_id, status"),
       db.schema("orchard").from("work_orders").select("id, wo_number, status, notes"),
@@ -31,6 +31,13 @@ export async function GET() {
     ]);
 
     const allReceiptLines = receiptLinesResult.data ?? [];
+
+    // Status now lives in Silver — load and join by receipt_line_id
+    const { data: silverStatuses } = await db
+      .schema("orchard_calcs")
+      .from("receipt_line_statuses")
+      .select("receipt_line_id, status");
+    const statusByLineId = new Map((silverStatuses ?? []).map((s) => [s.receipt_line_id as string, s.status as string]));
     const allReceipts = receiptsResult.data ?? [];
     const allWOs = woResult.data ?? [];
     const allItems = itemsResult.data ?? [];
@@ -290,7 +297,7 @@ export async function GET() {
 
       const rawItemId = rl.item_id as string | null;
       const threePlSku = (rl.three_pl_sku as string) || null;
-      const rlStatus = (rl.status as string) || "Open";
+      const rlStatus = statusByLineId.get(rl.id as string) ?? "Open";
 
       // Resolve item_id (fall back to SKU_MAPPING for 3PL SKUs)
       let itemId = rawItemId;

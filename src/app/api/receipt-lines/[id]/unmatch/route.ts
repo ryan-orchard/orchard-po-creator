@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireOperator } from "@/lib/auth";
 import { db } from "@/lib/supabase";
 import { recalcPoStatus } from "@/lib/po-status";
+import { setReceiptLineStatus } from "@/lib/receipt-status";
 
 /**
  * POST /api/receipt-lines/[id]/unmatch
@@ -82,12 +83,8 @@ export async function POST(
         .eq("receipt_id", receiptId);
     }
 
-    // Reset receipt line status to Open
-    await db
-      .schema("orchard")
-      .from("receipt_lines")
-      .update({ status: "Open" })
-      .eq("id", receiptLineId);
+    // Reset receipt line status to Open (Silver)
+    await setReceiptLineStatus(receiptLineId, "Open");
 
     // Recalculate PO status if we had a PO link
     if (poId) {

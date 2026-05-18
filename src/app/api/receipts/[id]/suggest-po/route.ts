@@ -32,7 +32,7 @@ export async function GET(
     const { data: receiptLinesRaw } = await db
       .schema("orchard")
       .from("receipt_lines")
-      .select("id, item_id, qty_received, three_pl_sku, lot_number, status")
+      .select("id, item_id, qty_received, three_pl_sku, lot_number")
       .eq("receipt_id", receiptId);
 
     // Fetch matchable POs (Issued, Accepted, Partially Received)

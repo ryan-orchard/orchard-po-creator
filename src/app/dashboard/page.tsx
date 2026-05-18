@@ -8,6 +8,16 @@ interface DashboardData {
   invoicesWithoutReceipt: number;
   readyToPay: number;
   posInProgress: number;
+  ap: {
+    totalUnpaid: number;
+    unpaidCount: number;
+    totalPastDue: number;
+    pastDueCount: number;
+  };
+}
+
+function formatCurrency(n: number): string {
+  return n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 }
 
 export default function DashboardPage() {
@@ -44,6 +54,32 @@ export default function DashboardPage() {
         ) : !data ? (
           <p className="text-gray-400 text-sm">Failed to load dashboard.</p>
         ) : (
+          <>
+          {/* Accounts Payable */}
+          <button
+            onClick={() => router.push("/invoices")}
+            className="w-full mb-6 rounded-xl border border-gray-200 bg-white px-6 py-5 text-left hover:bg-gray-50 transition-colors"
+          >
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Accounts Payable</p>
+              <svg className="w-4 h-4 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+              </svg>
+            </div>
+            <div className="flex items-end gap-8">
+              <div>
+                <p className="text-3xl font-bold text-gray-900">{formatCurrency(data.ap.totalUnpaid)}</p>
+                <p className="text-sm text-gray-500 mt-0.5">{data.ap.unpaidCount} unpaid invoice{data.ap.unpaidCount !== 1 ? "s" : ""}</p>
+              </div>
+              {data.ap.pastDueCount > 0 && (
+                <div className="pb-0.5">
+                  <p className="text-lg font-bold text-burgundy-600">{formatCurrency(data.ap.totalPastDue)}</p>
+                  <p className="text-sm text-burgundy-500">{data.ap.pastDueCount} past due</p>
+                </div>
+              )}
+            </div>
+          </button>
+
           <div className="grid grid-cols-2 gap-4">
             {/* New receipts at the warehouse */}
             <ActionCard
@@ -89,6 +125,7 @@ export default function DashboardPage() {
               urgent={data.readyToPay > 0}
             />
           </div>
+          </>
         )}
       </div>
     </div>

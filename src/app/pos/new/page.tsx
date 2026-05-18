@@ -30,12 +30,15 @@ interface SKU {
 interface ShipTo {
   id: string;
   name: string;
+  code: string;
   address: string;
   city: string;
   state: string;
   zip: string;
   isDefault: boolean;
 }
+
+const WAREHOUSE_CODES = ["STORD", "BMC", "RJW", "AMZN", "FBA"];
 
 interface LineItem {
   key: string;
@@ -315,7 +318,7 @@ export default function NewPOPage() {
                 <option value="">Select supplier...</option>
                 {suppliers.map((s) => (
                   <option key={s.id} value={s.id}>
-                    {s.name} ({s.type})
+                    {s.name}
                   </option>
                 ))}
               </select>
@@ -337,14 +340,15 @@ export default function NewPOPage() {
                 }}
                 className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
               >
-                <option value="">Select location...</option>
-                {shipTos.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                    {s.address ? ` — ${s.address}, ${s.city}, ${s.state}` : ""}
-                  </option>
-                ))}
-                <option value="__custom__">+ Add custom location...</option>
+                <option value="">Select warehouse...</option>
+                {shipTos
+                  .filter((s) => WAREHOUSE_CODES.includes(s.code))
+                  .map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                      {s.address ? ` — ${s.address}, ${s.city}, ${s.state}` : ""}
+                    </option>
+                  ))}
               </select>
               {showCustomShipTo && (
                 <div className="mt-2 p-3 border border-gray-200 rounded-md bg-gray-50 space-y-2">
