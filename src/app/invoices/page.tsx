@@ -21,9 +21,32 @@ interface Invoice {
   skuSummary: string;
 }
 
-type Tab = "all" | "unpaid" | "paid";
-type SortKey = "invoiceNumber" | "supplier" | "invoiceDate" | "dueDate" | "poReference" | "invoiceAmount" | "paymentStatus";
+type Tab = "all" | "pending" | "partial" | "ready" | "paid";
+type SortKey = "invoiceNumber" | "supplier" | "invoiceDate" | "dueDate" | "poReference" | "invoiceAmount" | "status";
 type SortDir = "asc" | "desc";
+
+type ReceiptStatus = "Pending Receipt" | "Partially Received" | "Ready to Pay" | "Paid";
+
+function computeReceiptStatus(invoice: Invoice): ReceiptStatus {
+  if (invoice.paymentStatus === "Paid") return "Paid";
+  if (invoice.lineCount === 0 || invoice.linkedLineCount === 0) return "Pending Receipt";
+  if (invoice.linkedLineCount === invoice.lineCount) return "Ready to Pay";
+  return "Partially Received";
+}
+
+const RECEIPT_STATUS_ORDER: Record<ReceiptStatus, number> = {
+  "Pending Receipt": 1,
+  "Partially Received": 2,
+  "Ready to Pay": 3,
+  "Paid": 4,
+};
+
+const receiptStatusColors: Record<ReceiptStatus, string> = {
+  "Pending Receipt": "bg-gray-100 text-gray-600",
+  "Partially Received": "bg-warm-100 text-warm-700",
+  "Ready to Pay": "bg-sage-100 text-sage-700",
+  "Paid": "bg-gray-50 text-gray-400",
+};
 
 // --- Helpers ---
 
@@ -97,12 +120,6 @@ const INVOICE_TYPE_COLORS: Record<string, string> = {
   "Work Order": "bg-gold-100 text-gold-700",
 };
 
-const paymentStatusColors: Record<string, string> = {
-  Unpaid: "bg-gray-100 text-gray-600",
-  Paid: "bg-sage-100 text-sage-700",
-  Disputed: "bg-burgundy-100 text-burgundy-700",
-};
-
 // --- Main Page ---
 
 export default function InvoicesPage() {
@@ -133,11 +150,14 @@ export default function InvoicesPage() {
   const filteredInvoices = useMemo(() => {
     let result = [...invoices];
 
-    // Tab filter
-    if (activeTab === "unpaid") {
-      result = result.filter((i) => i.paymentStatus !== "Paid");
-    } else if (activeTab === "paid") {
-      result = result.filter((i) => i.paymentStatus === "Paid");
+    // Tab filter — by derived receipt status
+    if (activeTab !== "all") {
+      const wanted: ReceiptStatus =
+        activeTab === "pending" ? "Pending Receipt"
+        : activeTab === "partial" ? "Partially Received"
+        : activeTab === "ready" ? "Ready to Pay"
+        : "Paid";
+      result = result.filter((i) => computeReceiptStatus(i) === wanted);
     }
 
     // Search
@@ -174,8 +194,8 @@ export default function InvoicesPage() {
         case "invoiceAmount":
           cmp = a.invoiceAmount - b.invoiceAmount;
           break;
-        case "paymentStatus":
-          cmp = (a.paymentStatus || "").localeCompare(b.paymentStatus || "");
+        case "status":
+          cmp = RECEIPT_STATUS_ORDER[computeReceiptStatus(a)] - RECEIPT_STATUS_ORDER[computeReceiptStatus(b)];
           break;
       }
       return sortDir === "asc" ? cmp : -cmp;
@@ -203,13 +223,26 @@ export default function InvoicesPage() {
     }
   };
 
-  const unpaidCount = useMemo(() => invoices.filter((i) => i.paymentStatus !== "Paid").length, [invoices]);
-  const paidCount = useMemo(() => invoices.filter((i) => i.paymentStatus === "Paid").length, [invoices]);
+  const statusCounts = useMemo(() => {
+    const c = { pending: 0, partial: 0, ready: 0, paid: 0 };
+    for (const inv of invoices) {
+      const s = computeReceiptStatus(inv);
+      if (s === "Pending Receipt") c.pending++;
+      else if (s === "Partially Received") c.partial++;
+      else if (s === "Ready to Pay") c.ready++;
+      else if (s === "Paid") c.paid++;
+    }
+    return c;
+  }, [invoices]);
+
+  const unpaidCount = invoices.length - statusCounts.paid;
 
   const tabs: { key: Tab; label: string; count: number }[] = [
-    { key: "all", label: "All", count: invoices.length },
-    { key: "unpaid", label: "Unpaid", count: unpaidCount },
-    { key: "paid", label: "Paid", count: paidCount },
+    { key: "all",     label: "All",                 count: invoices.length },
+    { key: "pending", label: "Pending Receipt",     count: statusCounts.pending },
+    { key: "partial", label: "Partially Received",  count: statusCounts.partial },
+    { key: "ready",   label: "Ready to Pay",        count: statusCounts.ready },
+    { key: "paid",    label: "Paid",                count: statusCounts.paid },
   ];
 
   return (
@@ -327,11 +360,10 @@ export default function InvoicesPage() {
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200">
                     <SortableHeader label="Invoice #" sortKey="invoiceNumber" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[11%]" />
-                    <SortableHeader label="Payment" sortKey="paymentStatus" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[8%]" />
-                    <SortableHeader label="Vendor" sortKey="supplier" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[11%]" />
+                    <SortableHeader label="Status" sortKey="status" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[14%]" />
+                    <SortableHeader label="Vendor" sortKey="supplier" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[12%]" />
                     <SortableHeader label="PO Ref" sortKey="poReference" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[8%]" />
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-[18%]">SKU</th>
-                    <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-[7%]">Receipt</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-[19%]">SKU</th>
                     <SortableHeader label="Date" sortKey="invoiceDate" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[8%]" />
                     <SortableHeader label="Due" sortKey="dueDate" currentKey={sortKey} dir={sortDir} onSort={handleSort} className="w-[8%]" />
                     <SortableHeader label="Amount" sortKey="invoiceAmount" currentKey={sortKey} dir={sortDir} onSort={handleSort} align="right" className="w-[10%]" />
@@ -358,11 +390,22 @@ export default function InvoicesPage() {
                         </div>
                       </td>
 
-                      {/* Payment Status */}
+                      {/* Status (derived from receipt links + payment) */}
                       <td className="px-4 py-3">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${paymentStatusColors[invoice.paymentStatus] || "bg-gray-100 text-gray-600"}`}>
-                          {invoice.paymentStatus}
-                        </span>
+                        {(() => {
+                          const s = computeReceiptStatus(invoice);
+                          const tooltip = invoice.lineCount > 0
+                            ? `${invoice.linkedLineCount} of ${invoice.lineCount} invoice lines linked to receipts`
+                            : "No invoice lines";
+                          return (
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${receiptStatusColors[s]}`}
+                              title={tooltip}
+                            >
+                              {s}
+                            </span>
+                          );
+                        })()}
                       </td>
 
                       {/* Vendor */}
@@ -381,29 +424,6 @@ export default function InvoicesPage() {
                           <span title={invoice.skuSummary}>{invoice.skuSummary}</span>
                         ) : (
                           <span className="text-gray-300">&mdash;</span>
-                        )}
-                      </td>
-
-                      {/* Receipt match coverage */}
-                      <td className="px-4 py-3 text-center text-sm">
-                        {invoice.lineCount === 0 ? (
-                          <span className="text-gray-300">&mdash;</span>
-                        ) : invoice.linkedLineCount === invoice.lineCount ? (
-                          <span
-                            className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-sage-100 text-sage-700"
-                            title={`All ${invoice.lineCount} lines linked to receipts`}
-                          >
-                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                            </svg>
-                          </span>
-                        ) : (
-                          <span
-                            className={`text-xs font-medium ${invoice.linkedLineCount === 0 ? "text-gray-400" : "text-gold-700"}`}
-                            title={`${invoice.linkedLineCount} of ${invoice.lineCount} invoice lines linked to receipts`}
-                          >
-                            {invoice.linkedLineCount}/{invoice.lineCount}
-                          </span>
                         )}
                       </td>
 
