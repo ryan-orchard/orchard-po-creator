@@ -125,46 +125,87 @@ function parseInventorySummary(ws: XLSX.WorkSheet): BmcSnapshotRow[] {
   return rows;
 }
 
+// Build a header-name → column-index map from a header row.
+// BMC has shipped column shuffles before (Apr 2026: one column inserted before
+// "Prod. Order No.", silently shifting AD-AG right). Looking up by name beats
+// hardcoding positions.
+function buildHeaderMap(ws: XLSX.WorkSheet, headerRow0Idx: number): Map<string, number> {
+  const range = XLSX.utils.decode_range(ws["!ref"] || "A1");
+  const map = new Map<string, number>();
+  for (let c = 0; c <= range.e.c; c++) {
+    const v = ws[XLSX.utils.encode_cell({ r: headerRow0Idx, c })]?.v;
+    if (typeof v === "string") {
+      const key = v.trim().toLowerCase();
+      if (key) map.set(key, c);
+    }
+  }
+  return map;
+}
+
 function parseProductionData(ws: XLSX.WorkSheet): BmcTransactionRow[] {
   const rows: BmcTransactionRow[] = [];
   const range = XLSX.utils.decode_range(ws["!ref"] || "A1");
 
   // Row 2 (0-indexed: 1) = headers, row 3+ = data
+  const headers = buildHeaderMap(ws, 1);
+  const col = (name: string): number => {
+    const idx = headers.get(name.toLowerCase());
+    if (idx === undefined) {
+      throw new Error(`BMC Production Data missing column "${name}"`);
+    }
+    return idx;
+  };
+
+  const cPostingDate    = col("Posting Date");
+  const cItemNo         = col("Item No.");
+  const cDescription    = col("Description");
+  const cQty            = col("Quantity");
+  const cBaseQty        = col("Quantity(Base)");
+  const cEntryType      = col("Entry Type");
+  const cUom            = col("Unit of Measure Code");
+  const cExternalDoc    = col("External Document No.");
+  const cLotNo          = col("Lot No.");
+  const cDocNo          = col("Document No.");
+  const cExpDate        = col("Expiration Date");
+  const cReasonCode     = col("Reason Code");
+  const cReasonDesc     = col("Reason Code Desc.");
+  const cProdOrderNo    = col("Prod. Order No.");
+  const cOrderNo        = col("Order No.");
+  const cProductionDate = col("Production Date");
+  const cEntryNo        = col("Entry No.");
+
   for (let r = 2; r <= range.e.r; r++) {
-    const entryType = String(ws[XLSX.utils.encode_cell({ r, c: 9 })]?.v ?? "").trim(); // Column J
-    const itemNo = ws[XLSX.utils.encode_cell({ r, c: 5 })]?.v; // Column F
+    const entryType = String(ws[XLSX.utils.encode_cell({ r, c: cEntryType })]?.v ?? "").trim();
+    const itemNo = ws[XLSX.utils.encode_cell({ r, c: cItemNo })]?.v;
 
-    // Skip rows with no item number
     if (!itemNo || typeof itemNo !== "string") continue;
-
-    // Skip blank entry type rows (pallet status changes — noise)
     if (!entryType) continue;
 
-    const entryNo = toNumber(ws[XLSX.utils.encode_cell({ r, c: 32 })]?.v); // Column AG
-    if (!entryNo) continue; // Must have entry number for idempotency
+    const entryNo = toNumber(ws[XLSX.utils.encode_cell({ r, c: cEntryNo })]?.v);
+    if (!entryNo) continue;
 
-    const postingDate = toDateString(ws[XLSX.utils.encode_cell({ r, c: 3 })]?.v); // Column D
+    const postingDate = toDateString(ws[XLSX.utils.encode_cell({ r, c: cPostingDate })]?.v);
     if (!postingDate) continue;
 
     rows.push({
       postingDate,
       bmcItemNo: itemNo.trim(),
-      description: String(ws[XLSX.utils.encode_cell({ r, c: 6 })]?.v ?? "").trim(), // Column G
+      description: String(ws[XLSX.utils.encode_cell({ r, c: cDescription })]?.v ?? "").trim(),
       standardSku: BMC_SKU_MAP[itemNo.trim()] ?? null,
-      quantity: toNumber(ws[XLSX.utils.encode_cell({ r, c: 7 })]?.v), // Column H
-      baseQuantity: toNumber(ws[XLSX.utils.encode_cell({ r, c: 8 })]?.v), // Column I
+      quantity: toNumber(ws[XLSX.utils.encode_cell({ r, c: cQty })]?.v),
+      baseQuantity: toNumber(ws[XLSX.utils.encode_cell({ r, c: cBaseQty })]?.v),
       entryType,
-      uom: String(ws[XLSX.utils.encode_cell({ r, c: 10 })]?.v ?? "").trim(), // Column K
-      externalDocNo: ws[XLSX.utils.encode_cell({ r, c: 11 })]?.v?.toString().trim() || null, // Column L
-      lotNo: ws[XLSX.utils.encode_cell({ r, c: 12 })]?.v?.toString().trim() || null, // Column M
-      documentNo: ws[XLSX.utils.encode_cell({ r, c: 15 })]?.v?.toString().trim() || null, // Column P
-      prodOrderNo: ws[XLSX.utils.encode_cell({ r, c: 29 })]?.v?.toString().trim() || null, // Column AD
-      orderNo: ws[XLSX.utils.encode_cell({ r, c: 30 })]?.v?.toString().trim() || null, // Column AE
-      reasonCode: ws[XLSX.utils.encode_cell({ r, c: 20 })]?.v?.toString().trim() || null, // Column U
-      reasonDesc: ws[XLSX.utils.encode_cell({ r, c: 21 })]?.v?.toString().trim() || null, // Column V
+      uom: String(ws[XLSX.utils.encode_cell({ r, c: cUom })]?.v ?? "").trim(),
+      externalDocNo: ws[XLSX.utils.encode_cell({ r, c: cExternalDoc })]?.v?.toString().trim() || null,
+      lotNo: ws[XLSX.utils.encode_cell({ r, c: cLotNo })]?.v?.toString().trim() || null,
+      documentNo: ws[XLSX.utils.encode_cell({ r, c: cDocNo })]?.v?.toString().trim() || null,
+      prodOrderNo: ws[XLSX.utils.encode_cell({ r, c: cProdOrderNo })]?.v?.toString().trim() || null,
+      orderNo: ws[XLSX.utils.encode_cell({ r, c: cOrderNo })]?.v?.toString().trim() || null,
+      reasonCode: ws[XLSX.utils.encode_cell({ r, c: cReasonCode })]?.v?.toString().trim() || null,
+      reasonDesc: ws[XLSX.utils.encode_cell({ r, c: cReasonDesc })]?.v?.toString().trim() || null,
       entryNo,
-      expirationDate: toDateString(ws[XLSX.utils.encode_cell({ r, c: 18 })]?.v), // Column S
-      productionDate: toDateString(ws[XLSX.utils.encode_cell({ r, c: 31 })]?.v), // Column AF
+      expirationDate: toDateString(ws[XLSX.utils.encode_cell({ r, c: cExpDate })]?.v),
+      productionDate: toDateString(ws[XLSX.utils.encode_cell({ r, c: cProductionDate })]?.v),
     });
   }
 
