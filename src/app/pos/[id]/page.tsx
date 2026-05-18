@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { Suspense, useState, useEffect, useCallback } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { MAGNA } from "@/config/magna";
 
@@ -184,6 +184,14 @@ const formatActivityTime = (dateStr: string) => {
 // ─── Component ───
 
 export default function PODetailPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-gray-500">Loading…</div>}>
+      <PODetailPageContent />
+    </Suspense>
+  );
+}
+
+function PODetailPageContent() {
   const router = useRouter();
   const params = useParams();
   const searchParams = useSearchParams();
