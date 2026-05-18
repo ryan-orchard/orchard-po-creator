@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# SQL migrations live in /Claude Agent/orchard-app/sql/ — not deployed,
+# applied manually to Supabase. Keep out of the repo so Cowork can see them.
+/sql/
