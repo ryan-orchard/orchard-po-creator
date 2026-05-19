@@ -44,7 +44,7 @@ const DATE_FMT_OPTIONS: Intl.DateTimeFormatOptions = {
 };
 
 function fmtDate(d: string | null): string {
-  if (!d) return "—";
+  if (!d) return "TBD";
   // d is YYYY-MM-DD; render as M/D/YY for log readability
   const [y, m, day] = d.split("-").map((n) => parseInt(n, 10));
   return new Date(Date.UTC(y, m - 1, day)).toLocaleDateString("en-US", DATE_FMT_OPTIONS);
@@ -211,32 +211,26 @@ export async function processAnsOnOrderReport(
           activityEvents += 1;
         }
       }
-      // Expected ship date shift — the headline signal Ryan cares about
+      // Expected ship date revision — the headline signal Ryan cares about
       if (prior.expected_ship_date !== r.parsed.estShipReadyDate) {
-        const from = fmtDate(prior.expected_ship_date);
-        const to = fmtDate(r.parsed.estShipReadyDate);
-        const direction =
-          prior.expected_ship_date && r.parsed.estShipReadyDate && r.parsed.estShipReadyDate > prior.expected_ship_date
-            ? "pushed"
-            : prior.expected_ship_date && r.parsed.estShipReadyDate && r.parsed.estShipReadyDate < prior.expected_ship_date
-            ? "pulled in"
-            : "updated";
+        const newStr = fmtDate(r.parsed.estShipReadyDate);
+        const oldStr = fmtDate(prior.expected_ship_date);
         logActivity({
           poId: r.poId,
           action: "ans_expected_ship_changed",
-          description: `${reportTag}: ${itemTag} expected ship ${direction} ${from} → ${to}${dispositionSuffix}`,
+          description: `${reportTag}: ${itemTag} — Expected Ship date revised to ${newStr} (was ${oldStr})${dispositionSuffix}`,
           actor: "Orchard AI",
         });
         activityEvents += 1;
       }
-      // Customer req ship date change (rarer)
+      // Customer req ship date revision (rarer)
       if (prior.expected_receive_date !== r.parsed.customerReqShipDate) {
-        const from = fmtDate(prior.expected_receive_date);
-        const to = fmtDate(r.parsed.customerReqShipDate);
+        const newStr = fmtDate(r.parsed.customerReqShipDate);
+        const oldStr = fmtDate(prior.expected_receive_date);
         logActivity({
           poId: r.poId,
           action: "ans_req_ship_changed",
-          description: `${reportTag}: ${itemTag} customer req ship ${from} → ${to}`,
+          description: `${reportTag}: ${itemTag} — Customer Req Ship date revised to ${newStr} (was ${oldStr})`,
           actor: "Orchard AI",
         });
         activityEvents += 1;
