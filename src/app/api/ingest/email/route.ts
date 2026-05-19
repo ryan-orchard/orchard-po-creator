@@ -13,6 +13,11 @@ import {
 import { logActivity } from "@/lib/activity-log";
 import { isBmcReport, parseBmcReport } from "@/lib/bmc-parser";
 import { processBmcReport } from "@/lib/bmc-ingest";
+import {
+  isAnsOnOrderReport,
+  parseAnsOnOrderReport,
+} from "@/lib/ans-on-order-parser";
+import { processAnsOnOrderReport } from "@/lib/ans-on-order-ingest";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // Allow up to 60s for AI parsing
@@ -375,6 +380,77 @@ export async function POST(request: NextRequest) {
           results.push({
             filename: att.Name,
             documentType: "transaction_export",
+            status: "parse_failed",
+          });
+          continue;
+        }
+      }
+
+      // ── ANS On Order Report auto-processing ──────────────────────
+      if (isAnsOnOrderReport(payload.Subject || "", att.Name)) {
+        try {
+          console.log(`Detected ANS On Order report: ${att.Name}`);
+          const buffer = Buffer.from(content, "base64");
+          const parsed = parseAnsOnOrderReport(buffer, att.Name, payload.Date);
+          const writeResult = await processAnsOnOrderReport(parsed);
+
+          await db
+            .schema("orchard")
+            .from("ingested_documents")
+            .insert({
+              email_id: emailId,
+              filename: att.Name,
+              content_type: att.ContentType,
+              storage_path: storagePath,
+              file_size_bytes: att.ContentLength,
+              document_type: "ans_on_order",
+              confidence: 1.0,
+              parsed_data: {
+                type: "ans_on_order",
+                reportDate: parsed.reportDate,
+                rows: parsed.rows,
+                malformed: parsed.malformed,
+                matchedLines: writeResult.matchedLines,
+                unmatchedRows: writeResult.unmatchedRows,
+                activityEvents: writeResult.activityEvents,
+              },
+              status: "approved",
+              reviewed_at: new Date().toISOString(),
+              reviewed_by: "Orchard AI (auto)",
+            });
+
+          console.log(
+            `ANS On Order processed: ${writeResult.matchedLines} matched lines, ` +
+              `${writeResult.unmatchedRows.length} unmatched, ` +
+              `${writeResult.activityEvents} activity events`
+          );
+
+          results.push({
+            filename: att.Name,
+            documentType: "ans_on_order",
+            status: "auto_approved",
+          });
+          continue;
+        } catch (ansError) {
+          console.error(`ANS On Order parse failed for ${att.Name}:`, ansError);
+          await db
+            .schema("orchard")
+            .from("ingested_documents")
+            .insert({
+              email_id: emailId,
+              filename: att.Name,
+              content_type: att.ContentType,
+              storage_path: storagePath,
+              file_size_bytes: att.ContentLength,
+              document_type: "ans_on_order",
+              confidence: 0.9,
+              parsed_data: { error: (ansError as Error).message, type: "ans_on_order_failed" },
+              status: "pending",
+            });
+
+          results.push({
+            filename: att.Name,
+            documentType: "ans_on_order",
             status: "parse_failed",
           });
           continue;
