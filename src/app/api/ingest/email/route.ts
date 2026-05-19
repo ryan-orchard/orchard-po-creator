@@ -18,6 +18,11 @@ import {
   parseAnsOnOrderReport,
 } from "@/lib/ans-on-order-parser";
 import { processAnsOnOrderReport } from "@/lib/ans-on-order-ingest";
+import {
+  isStordAdjustmentsReport,
+  parseStordAdjustmentsReport,
+} from "@/lib/stord-adjustments-parser";
+import { processStordAdjustmentsReport } from "@/lib/stord-adjustments-ingest";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // Allow up to 60s for AI parsing
@@ -268,6 +273,15 @@ export async function POST(request: NextRequest) {
 
   for (const att of attachments) {
     try {
+      // Skip inline images (signature logos, embedded graphics from forwarded
+      // emails). Always referenced via ContentID in HTML, never the intended
+      // document for an inventory/invoice workflow.
+      if (att.ContentType?.startsWith("image/")) {
+        console.log(`Skipping inline image: ${att.Name} (${att.ContentType}, ${att.ContentLength}B)`);
+        results.push({ filename: att.Name, documentType: "image", status: "skipped" });
+        continue;
+      }
+
       // Resolve content: prefer Postmark Content, fall back to RawEmail extraction
       let content = att.Content;
       if (!content && recoveredAttachments) {
@@ -451,6 +465,75 @@ export async function POST(request: NextRequest) {
           results.push({
             filename: att.Name,
             documentType: "ans_on_order",
+            status: "parse_failed",
+          });
+          continue;
+        }
+      }
+
+      // ── Stord Inventory Adjustments Report auto-processing ────────
+      if (isStordAdjustmentsReport(payload.Subject || "", att.Name)) {
+        try {
+          console.log(`Detected Stord adjustments report: ${att.Name}`);
+          const buffer = Buffer.from(content, "base64");
+          const parsed = parseStordAdjustmentsReport(buffer);
+          const writeResult = await processStordAdjustmentsReport(parsed);
+
+          await db
+            .schema("orchard")
+            .from("ingested_documents")
+            .insert({
+              email_id: emailId,
+              filename: att.Name,
+              content_type: att.ContentType,
+              storage_path: storagePath,
+              file_size_bytes: att.ContentLength,
+              document_type: "stord_adjustments",
+              confidence: 1.0,
+              parsed_data: {
+                type: "stord_adjustments",
+                totalRows: parsed.rows.length,
+                dateRange: parsed.dateRange,
+                newReceipts: writeResult.newReceipts,
+                skippedExisting: writeResult.skippedExisting,
+                totalReceiptRows: writeResult.totalReceiptRows,
+              },
+              status: "approved",
+              reviewed_at: new Date().toISOString(),
+              reviewed_by: "Orchard AI (auto)",
+            });
+
+          console.log(
+            `Stord adjustments processed: ${writeResult.newReceipts} new receipts, ` +
+              `${writeResult.skippedExisting} skipped, ${writeResult.totalReceiptRows} receipt rows`
+          );
+
+          results.push({
+            filename: att.Name,
+            documentType: "stord_adjustments",
+            status: "auto_approved",
+          });
+          continue;
+        } catch (stordError) {
+          console.error(`Stord adjustments parse failed for ${att.Name}:`, stordError);
+          await db
+            .schema("orchard")
+            .from("ingested_documents")
+            .insert({
+              email_id: emailId,
+              filename: att.Name,
+              content_type: att.ContentType,
+              storage_path: storagePath,
+              file_size_bytes: att.ContentLength,
+              document_type: "stord_adjustments",
+              confidence: 0.9,
+              parsed_data: { error: (stordError as Error).message, type: "stord_adjustments_failed" },
+              status: "pending",
+            });
+
+          results.push({
+            filename: att.Name,
+            documentType: "stord_adjustments",
             status: "parse_failed",
           });
           continue;

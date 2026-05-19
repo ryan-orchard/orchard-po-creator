@@ -36,8 +36,9 @@ export const BMC_SKU_MAP: Record<string, string> = {
 const FACILITY_MAP: Record<string, string> = {
   // UUID mapping (from webhooks)
   "7e59a430-ae3b-4915-8414-6c064d0b9876": "STORD",
-  // Alias mapping (from API sync)
+  // Alias mapping (from API sync / adjustments report)
   RNOs003: "STORD",
+  RNOs004: "STORD",
 };
 
 /**
