@@ -42,12 +42,10 @@ interface InvoiceDetail {
   notes: string;
   invoiceType: string;
   sourceDocumentId: string | null;
-  linkedShipment: { id: string; shipmentNumber: string } | null;
   linkedWorkOrder: { id: string; woNumber: string } | null;
   lines: InvoiceLine[];
   purchaseOrder: { id: string; poNumber: string; status: string } | null;
   receipts: { id: string; receiptNumber: string; receivedDate: string; lines: { sku: string; qtyReceived: number }[] }[];
-  shipments: { id: string; shipmentNumber: string; shipDate: string; status: string }[];
 }
 
 interface Supplier {
@@ -371,14 +369,6 @@ export default function InvoiceDetailPage() {
         : "Linked via PO",
       href: receiptCount > 0 && invoice.purchaseOrder ? `/pos/${invoice.purchaseOrder.id}` : null,
       empty: receiptCount === 0,
-    });
-  } else if (invoice.invoiceType === "Freight" || invoice.invoiceType === "Customs") {
-    timelineNodes.push({
-      icon: "shipment",
-      label: invoice.linkedShipment?.shipmentNumber ?? "Shipment Match",
-      sub: invoice.linkedShipment ? "Linked" : "Not linked",
-      href: invoice.linkedShipment ? `/shipments/${invoice.linkedShipment.id}` : null,
-      empty: !invoice.linkedShipment,
     });
   } else if (invoice.invoiceType === "Work Order") {
     timelineNodes.push({

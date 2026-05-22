@@ -5,17 +5,26 @@ import { generateNextNumber } from "@/lib/sequence";
 import { logActivity } from "@/lib/activity-log";
 import { deriveCostBasis } from "@/lib/po-calc";
 
+// A PO's status is a roll-up of its line statuses (ordered < confirmed < complete).
+function rollUpStatus(states: string[]): string {
+  const active = states.filter((s) => s !== "cancelled");
+  if (active.length === 0) return states.length > 0 ? "cancelled" : "ordered";
+  if (active.every((s) => s === "complete")) return "complete";
+  if (active.every((s) => s === "complete" || s === "confirmed")) return "confirmed";
+  return "ordered";
+}
+
 export async function GET() {
-  const [posResult, statusesResult, linesResult, itemsResult] = await Promise.all([
+  const [posResult, lineStatusesResult, linesResult, itemsResult] = await Promise.all([
     db.schema("orchard").from("purchase_orders").select("*").order("order_date", { ascending: false }),
-    db.schema("orchard_calcs").from("po_statuses").select("po_id, status"),
+    db.schema("orchard").from("po_line_statuses").select("po_line_id, state"),
     db.schema("orchard").from("po_lines").select("id, po_id, qty, unit_cost, item_id"),
     db.schema("org_config").from("items").select("id, sku"),
   ]);
 
   if (posResult.error) return NextResponse.json({ error: posResult.error.message }, { status: 500 });
 
-  const statuses = new Map((statusesResult.data ?? []).map((s) => [s.po_id, s.status]));
+  const lineState = new Map((lineStatusesResult.data ?? []).map((s) => [s.po_line_id, s.state]));
   const items = new Map((itemsResult.data ?? []).map((i) => [i.id, i.sku]));
 
   // Grand total, line IDs, SKU list, and total units per PO — one pass over lines
@@ -52,7 +61,7 @@ export async function GET() {
     id: po.id,
     poNumber: po.po_number,
     date: po.order_date,
-    status: statuses.get(po.id) ?? "Draft",
+    status: rollUpStatus((lineIdsByPO[po.id] ?? []).map((lid) => lineState.get(lid) ?? "ordered")),
     supplier: [po.supplier_id],
     shipTo: [po.location_id],
     deliveryDate: po.delivery_date,
@@ -110,14 +119,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: poError?.message ?? "Failed to create PO" }, { status: 500 });
   }
 
-  // Insert status
-  await db.schema("orchard_calcs").from("po_statuses").insert({
-    po_id: po.id,
-    status: "Draft",
-    updated_by: "Ryan Belanger",
-  });
-
-  // Insert line items
+  // Insert line items. New lines have no po_line_statuses row — they roll up
+  // as 'ordered' until the status is advanced.
   if (lineItems.length > 0) {
     const lineRows = lineItems.map((item) => ({
       po_id: po.id,

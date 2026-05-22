@@ -1,6 +1,6 @@
 import { db } from "./supabase";
 
-type SequencePrefix = "PO" | "WO" | "RCP" | "SH";
+type SequencePrefix = "PO" | "WO" | "RCP" | "SH" | "TR";
 
 /**
  * Generate the next sequence number for a given prefix.

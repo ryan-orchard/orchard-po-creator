@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/supabase";
 
+// A PO's status is a roll-up of its line statuses (ordered < confirmed < complete).
+function rollUpStatus(states: string[]): string {
+  const active = states.filter((s) => s !== "cancelled");
+  if (active.length === 0) return states.length > 0 ? "cancelled" : "ordered";
+  if (active.every((s) => s === "complete")) return "complete";
+  if (active.every((s) => s === "complete" || s === "confirmed")) return "confirmed";
+  return "ordered";
+}
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -53,18 +62,7 @@ export async function GET(
       batchNumber: l.batch_number ?? "",
     }));
 
-    // Fetch linked shipment and work order
-    let linkedShipment: { id: string; shipmentNumber: string } | null = null;
-    if (inv.shipment_id) {
-      const { data: shipment } = await db
-        .schema("orchard")
-        .from("shipments")
-        .select("id, shipment_number")
-        .eq("id", inv.shipment_id as string)
-        .single();
-      if (shipment) linkedShipment = { id: shipment.id, shipmentNumber: shipment.shipment_number };
-    }
-
+    // Fetch linked work order
     let linkedWorkOrder: { id: string; woNumber: string } | null = null;
     if (inv.wo_id) {
       const { data: wo } = await db
@@ -76,27 +74,38 @@ export async function GET(
       if (wo) linkedWorkOrder = { id: wo.id, woNumber: wo.wo_number };
     }
 
-    // Fetch linked PO, receipts, and shipments
+    // Fetch linked PO and receipts
     let purchaseOrder: { id: string; poNumber: string; status: string } | null = null;
     const receiptsById = new Map<
       string,
       { id: string; receiptNumber: string; receivedDate: string }
     >();
-    let shipments: { id: string; shipmentNumber: string; shipDate: string; status: string }[] = [];
 
     if (inv.po_id) {
-      const [poResult, poStatusResult, receiptsResult, shipmentsResult] = await Promise.all([
+      const [poResult, receiptsResult, poLinesResult] = await Promise.all([
         db.schema("orchard").from("purchase_orders").select("id, po_number").eq("id", inv.po_id as string).single(),
-        db.schema("orchard_calcs").from("po_statuses").select("status").eq("po_id", inv.po_id as string).maybeSingle(),
         db.schema("orchard").from("receipts").select("id, receipt_number, received_date").eq("po_id", inv.po_id as string),
-        db.schema("orchard").from("shipments").select("id, shipment_number, shipped_date, status").eq("po_id", inv.po_id as string),
+        db.schema("orchard").from("po_lines").select("id").eq("po_id", inv.po_id as string),
       ]);
+
+      // Roll the PO status up from its line statuses.
+      const poLineIds = (poLinesResult.data ?? []).map((l) => l.id as string);
+      let poStatus = "ordered";
+      if (poLineIds.length > 0) {
+        const { data: ls } = await db
+          .schema("orchard")
+          .from("po_line_statuses")
+          .select("po_line_id, state")
+          .in("po_line_id", poLineIds);
+        const stateByLine = new Map((ls ?? []).map((s) => [s.po_line_id, s.state]));
+        poStatus = rollUpStatus(poLineIds.map((lid) => stateByLine.get(lid) ?? "ordered"));
+      }
 
       if (poResult.data) {
         purchaseOrder = {
           id: poResult.data.id,
           poNumber: poResult.data.po_number,
-          status: poStatusResult.data?.status ?? "Draft",
+          status: poStatus,
         };
       }
 
@@ -107,13 +116,6 @@ export async function GET(
           receivedDate: r.received_date ?? "",
         });
       }
-
-      shipments = (shipmentsResult.data ?? []).map((s) => ({
-        id: s.id,
-        shipmentNumber: s.shipment_number,
-        shipDate: s.shipped_date ?? "",
-        status: s.status ?? "",
-      }));
     }
 
     // Also pull receipts linked directly to this invoice's lines via the
@@ -243,12 +245,10 @@ export async function GET(
       classification: inv.classification ?? "",
       notes: inv.notes ?? "",
       invoiceType: inv.invoice_type ?? "Supplier",
-      linkedShipment,
       linkedWorkOrder,
       lines,
       purchaseOrder,
       receipts,
-      shipments,
     });
   } catch (error) {
     return NextResponse.json({ error: "Failed to fetch invoice" }, { status: 500 });
@@ -263,7 +263,6 @@ export async function PATCH(
   const body = await request.json();
 
   const fieldMap: Record<string, string> = {
-    shipmentId: "shipment_id",
     workOrderId: "wo_id",
     status: "match_status",
     invoiceNumber: "invoice_number",

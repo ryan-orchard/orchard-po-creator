@@ -28,32 +28,25 @@ interface POLine {
 const stateColors: Record<string, string> = {
   ordered: "bg-warm-100 text-warm-800",
   confirmed: "bg-gold-100 text-gold-800",
-  in_transit: "bg-blue-100 text-blue-800",
-  received: "bg-sage-100 text-sage-800",
-  invoiced: "bg-blue-100 text-blue-800",
-  costed: "bg-sage-100 text-sage-800",
-  paid: "bg-sage-100 text-sage-800",
+  complete: "bg-sage-100 text-sage-800",
   cancelled: "bg-gray-100 text-gray-600",
 };
 
 const stateLabels: Record<string, string> = {
   ordered: "Ordered",
   confirmed: "Confirmed",
-  in_transit: "In Transit",
-  received: "Received",
-  invoiced: "Invoiced",
-  costed: "Costed",
-  paid: "Paid",
+  complete: "Complete",
   cancelled: "Cancelled",
 };
 
-type TabKey = "open" | "in_transit" | "landed" | "all";
+type TabKey = "ordered" | "confirmed" | "complete" | "all";
 
+// PO line statuses. "All" includes complete.
 const TABS: { key: TabKey; label: string; states: string[] }[] = [
-  { key: "open", label: "Open", states: ["ordered", "confirmed"] },
-  { key: "in_transit", label: "In Transit", states: ["in_transit"] },
-  { key: "landed", label: "Landed", states: ["received", "invoiced", "costed", "paid"] },
-  { key: "all", label: "All", states: [] },
+  { key: "ordered", label: "Ordered", states: ["ordered"] },
+  { key: "confirmed", label: "Confirmed", states: ["confirmed"] },
+  { key: "complete", label: "Complete", states: ["complete"] },
+  { key: "all", label: "All", states: ["ordered", "confirmed", "complete"] },
 ];
 
 const OPEN_STATES = ["ordered", "confirmed"];
@@ -296,7 +289,7 @@ export default function POLinesPage() {
   const router = useRouter();
   const [lines, setLines] = useState<POLine[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<TabKey>("open");
+  const [activeTab, setActiveTab] = useState<TabKey>("all");
 
   const [search, setSearch] = useState("");
   const [activeFilters, setActiveFilters] = useState<FilterField[]>([]);
@@ -442,13 +435,13 @@ export default function POLinesPage() {
   }, [lines, openPOIds]);
 
   const tabCounts = useMemo(() => {
-    const counts: Record<TabKey, number> = { open: 0, in_transit: 0, landed: 0, all: lines.length };
+    const counts: Record<TabKey, number> = { ordered: 0, confirmed: 0, complete: 0, all: 0 };
     for (const l of lines) {
-      for (const t of TABS) {
-        if (t.key === "all") continue;
-        if (t.states.includes(l.lineState)) counts[t.key]++;
-      }
+      if (l.lineState === "ordered") counts.ordered++;
+      else if (l.lineState === "confirmed") counts.confirmed++;
+      else if (l.lineState === "complete") counts.complete++;
     }
+    counts.all = counts.ordered + counts.confirmed + counts.complete;
     return counts;
   }, [lines]);
 
@@ -479,23 +472,16 @@ export default function POLinesPage() {
     { field: "poShipDate",   label: "PO Ship",     align: "text-left",  width: "w-24" },
   ];
 
-  const cols: Col[] = useMemo(() => {
-    if (activeTab === "in_transit")
-      return [...baseCols, { field: "actualShipDate", label: "Actual Ship", align: "text-left", width: "w-24" }];
-    if (activeTab === "landed")
-      return [...baseCols, { field: "receivedDate", label: "Received", align: "text-left", width: "w-24" }];
-    return [...baseCols, { field: "xShipDate", label: "X-Ship", align: "text-left", width: "w-24" }];
-  }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
+  const cols: Col[] = [
+    ...baseCols,
+    { field: "xShipDate", label: "X-Ship", align: "text-left", width: "w-24" },
+  ];
 
   // X-Ship falls back to PO Ship Date when expected_ship_date is blank
   // (e.g. ANS "TBD" lines, or non-ANS suppliers)
   const xShipFor = (l: POLine) => l.expectedShipDate || l.poShipDate;
 
-  const dateCellFor = (l: POLine) => {
-    if (activeTab === "in_transit") return fmtDate(l.actualShipDate);
-    if (activeTab === "landed") return fmtDate(l.receivedDate);
-    return fmtDate(xShipFor(l));
-  };
+  const dateCellFor = (l: POLine) => fmtDate(xShipFor(l));
 
   const exportCsv = () => {
     const escape = (v: string | number | null | undefined) => {
@@ -581,8 +567,7 @@ export default function POLinesPage() {
               <div className="space-y-2.5">
                 {TABS.filter((t) => t.key !== "all").map((tab) => {
                   const count = tabCounts[tab.key];
-                  const dot =
-                    tab.key === "open" ? "bg-gold-500" : tab.key === "in_transit" ? "bg-blue-500" : "bg-sage-500";
+                  const dot = tab.key === "ordered" ? "bg-warm-500" : "bg-gold-500";
                   return (
                     <div key={tab.key} className="flex items-center justify-between px-2 py-1.5">
                       <span className="flex items-center gap-2.5">

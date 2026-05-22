@@ -20,13 +20,6 @@ interface LineItem {
   qty: number;
 }
 
-interface LinkedShipment {
-  id: string;
-  shipmentNumber: string;
-  shipDate: string | null;
-  status: string | null;
-}
-
 interface LinkedReceipt {
   id: string;
   receiptNumber: string;
@@ -55,7 +48,6 @@ interface WODetail {
   inputs: LineItem[];
   outputs: LineItem[];
   lineItems: LineItem[];
-  shipments: LinkedShipment[];
   receipts: LinkedReceipt[];
   invoices: LinkedInvoice[];
 }
@@ -313,26 +305,12 @@ export default function WorkOrderDetailPage({
         </div>
 
         {/* Linked Records */}
-        {(wo.shipments.length > 0 || wo.receipts.length > 0 || wo.invoices.length > 0) && (
+        {(wo.receipts.length > 0 || wo.invoices.length > 0) && (
           <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
             <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
               Linked Records
             </h2>
             <div className="flex flex-wrap gap-2">
-              {wo.shipments.map((s) => (
-                <Link
-                  key={s.id}
-                  href={`/shipments/${s.id}`}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 border border-blue-200 text-blue-800 rounded-full text-xs font-medium hover:bg-blue-100 transition-colors"
-                >
-                  <span>{s.shipmentNumber}</span>
-                  {s.shipDate && (
-                    <span className="text-blue-500">
-                      {new Date(s.shipDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                    </span>
-                  )}
-                </Link>
-              ))}
               {wo.receipts.map((r) => (
                 <Link
                   key={r.id}

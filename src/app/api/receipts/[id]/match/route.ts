@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/supabase";
 import { logActivity } from "@/lib/activity-log";
-import { recalcPoStatus } from "@/lib/po-status";
 import { setReceiptLineStatuses } from "@/lib/receipt-status";
 
 /**
@@ -9,7 +8,7 @@ import { setReceiptLineStatuses } from "@/lib/receipt-status";
  *
  * Links a receipt to a PO or WO:
  *
- * PO match: insert into po_line_receipt_line_links per line, update receipt.po_id, recalc PO status
+ * PO match: insert into po_line_receipt_line_links per line, update receipt.po_id
  * Body: { purchaseOrderId, lineMatches: [{ receiptLineId, poLineItemId }] }
  *
  * WO match: insert into wo_receipt_links (header-level), update receipt line statuses
@@ -78,9 +77,6 @@ async function handlePOMatch(
   // Update receipt.po_id (denorm for display)
   await db.schema("orchard").from("receipts").update({ po_id: purchaseOrderId }).eq("id", receiptId);
 
-  // Recalculate PO status
-  const newPoStatus = await recalcPoStatus(purchaseOrderId);
-
   // Log activity
   const { data: receiptLines } = await db
     .schema("orchard")
@@ -102,7 +98,6 @@ async function handlePOMatch(
     success: true,
     receiptId,
     purchaseOrderId,
-    poStatus: newPoStatus,
     linesMatched: validMatches.length,
   });
 }

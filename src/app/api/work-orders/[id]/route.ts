@@ -84,20 +84,6 @@ export async function GET(
       }));
     }
 
-    // Fetch linked shipments (via wo_id FK)
-    const { data: shipmentsData } = await db
-      .schema("orchard")
-      .from("shipments")
-      .select("id, shipment_number, shipped_date, status")
-      .eq("wo_id", id);
-
-    const shipments = (shipmentsData ?? []).map((s) => ({
-      id: s.id,
-      shipmentNumber: s.shipment_number,
-      shipDate: s.shipped_date ?? null,
-      status: s.status ?? null,
-    }));
-
     const warehouse = warehouseResult.data;
 
     return NextResponse.json({
@@ -112,7 +98,6 @@ export async function GET(
       inputs,
       outputs,
       lineItems: lineItemsWithSkus,
-      shipments,
       receipts,
       invoices: [], // WO → invoice linking not yet in Silver layer
     });

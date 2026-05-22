@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireOperator } from "@/lib/auth";
 import { db } from "@/lib/supabase";
-import { recalcPoStatus } from "@/lib/po-status";
 import { setReceiptLineStatus } from "@/lib/receipt-status";
 
 /**
  * POST /api/receipt-lines/[id]/unmatch
  *
  * Clears the PO or WO link on a receipt line:
- * - PO match: delete from po_line_receipt_line_links, reset status to Open, recalc PO status
+ * - PO match: delete from po_line_receipt_line_links, reset status to Open
  * - WO match: delete from wo_receipt_links (header-level), reset status to Open
  */
 export async function POST(
@@ -54,18 +53,7 @@ export async function POST(
       return NextResponse.json({ error: "Receipt line is not matched" }, { status: 400 });
     }
 
-    let poId: string | null = null;
-
     if (poLink) {
-      // Find which PO owns this po_line
-      const { data: poLine } = await db
-        .schema("orchard")
-        .from("po_lines")
-        .select("po_id")
-        .eq("id", poLink.po_line_id as string)
-        .maybeSingle();
-      poId = (poLine?.po_id as string) ?? null;
-
       // Delete the line-level link
       await db
         .schema("orchard_calcs")
@@ -85,11 +73,6 @@ export async function POST(
 
     // Reset receipt line status to Open (Silver)
     await setReceiptLineStatus(receiptLineId, "Open");
-
-    // Recalculate PO status if we had a PO link
-    if (poId) {
-      await recalcPoStatus(poId);
-    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

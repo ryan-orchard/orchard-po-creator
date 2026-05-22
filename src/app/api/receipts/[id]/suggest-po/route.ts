@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/supabase";
 import { SKU_MAPPING } from "@/lib/client-config";
 import { attemptPOMatch } from "@/lib/po-matching";
+import { rollUpPoStatus } from "@/lib/po-status";
 
 /**
  * GET /api/receipts/[id]/suggest-po
@@ -35,14 +36,13 @@ export async function GET(
       .select("id, item_id, qty_received, three_pl_sku, lot_number")
       .eq("receipt_id", receiptId);
 
-    // Fetch matchable POs (Issued, Accepted, Partially Received)
-    const { data: poStatusRows } = await db
-      .schema("orchard_calcs")
-      .from("po_statuses")
-      .select("po_id, status")
-      .in("status", ["Issued", "Accepted", "Partially Received"]);
+    // All POs are matchable candidates — SKU-overlap scoring ranks them below.
+    const { data: allPoRows } = await db
+      .schema("orchard")
+      .from("purchase_orders")
+      .select("id");
 
-    const matchablePoIds = (poStatusRows ?? []).map((r) => r.po_id as string);
+    const matchablePoIds = (allPoRows ?? []).map((r) => r.id as string);
 
     const { data: posRaw } = matchablePoIds.length > 0
       ? await db.schema("orchard").from("purchase_orders").select("id, po_number").in("id", matchablePoIds)
@@ -52,6 +52,25 @@ export async function GET(
     const { data: poLinesRaw } = matchablePoIds.length > 0
       ? await db.schema("orchard").from("po_lines").select("id, po_id, item_id, qty").in("po_id", matchablePoIds)
       : { data: [] };
+
+    // Roll each PO's status up from its line statuses.
+    const { data: poLineStatusRows } = (poLinesRaw ?? []).length > 0
+      ? await db
+          .schema("orchard")
+          .from("po_line_statuses")
+          .select("po_line_id, state")
+          .in("po_line_id", (poLinesRaw ?? []).map((pl) => pl.id as string))
+      : { data: [] };
+    const lineStateById = new Map(
+      (poLineStatusRows ?? []).map((s) => [s.po_line_id as string, s.state as string])
+    );
+    const poStatusMap = new Map<string, string>();
+    for (const pid of matchablePoIds) {
+      const states = (poLinesRaw ?? [])
+        .filter((pl) => pl.po_id === pid)
+        .map((pl) => lineStateById.get(pl.id as string) ?? "ordered");
+      poStatusMap.set(pid, rollUpPoStatus(states));
+    }
 
     // Fetch all items referenced
     const allItemIds = [
@@ -142,7 +161,6 @@ export async function GET(
 
     // PO candidates list
     const poMap = new Map((posRaw ?? []).map((po) => [po.id as string, po.po_number as string]));
-    const poStatusMap = new Map((poStatusRows ?? []).map((r) => [r.po_id as string, r.status as string]));
     type POLineRow = { id: unknown; po_id: unknown; item_id: unknown; qty: unknown };
     const poLinesByPO = new Map<string, POLineRow[]>();
     for (const pl of poLinesRaw ?? []) {

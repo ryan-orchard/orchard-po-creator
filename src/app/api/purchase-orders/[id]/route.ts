@@ -4,6 +4,15 @@ import { db } from "@/lib/supabase";
 import { logActivity } from "@/lib/activity-log";
 import { deriveCostBasis } from "@/lib/po-calc";
 
+// A PO's status is a roll-up of its line statuses (ordered < confirmed < complete).
+function rollUpStatus(states: string[]): string {
+  const active = states.filter((s) => s !== "cancelled");
+  if (active.length === 0) return states.length > 0 ? "cancelled" : "ordered";
+  if (active.every((s) => s === "complete")) return "complete";
+  if (active.every((s) => s === "complete" || s === "confirmed")) return "confirmed";
+  return "ordered";
+}
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -11,10 +20,9 @@ export async function GET(
   const { id } = await params;
 
   try {
-    // PO header + status + lines (with items) in parallel
-    const [poResult, statusResult, linesResult] = await Promise.all([
+    // PO header + lines (with items) in parallel
+    const [poResult, linesResult] = await Promise.all([
       db.schema("orchard").from("purchase_orders").select("*").eq("id", id).single(),
-      db.schema("orchard_calcs").from("po_statuses").select("status, issued_at, accepted_at, shipped_at, received_at").eq("po_id", id).maybeSingle(),
       db.schema("orchard").from("po_lines").select("*").eq("po_id", id),
     ]);
 
@@ -25,6 +33,17 @@ export async function GET(
     const po = poResult.data as Record<string, unknown>;
     const poLines = linesResult.data ?? [];
     const poLineIds = poLines.map((l) => l.id as string);
+
+    // Roll the PO status up from its line statuses.
+    const { data: lineStatuses } = poLineIds.length
+      ? await db
+          .schema("orchard")
+          .from("po_line_statuses")
+          .select("po_line_id, state")
+          .in("po_line_id", poLineIds)
+      : { data: [] };
+    const stateByLine = new Map((lineStatuses ?? []).map((s) => [s.po_line_id, s.state]));
+    const poStatus = rollUpStatus(poLineIds.map((lid) => stateByLine.get(lid) ?? "ordered"));
 
     // Fetch supplier and location (ship-to) in parallel
     const [supplierResult, locationResult] = await Promise.all([
@@ -156,13 +175,7 @@ export async function GET(
       id: po.id,
       poNumber: po.po_number,
       date: po.order_date,
-      status: statusResult.data?.status ?? "Draft",
-      milestones: {
-        issuedAt: statusResult.data?.issued_at ?? null,
-        acceptedAt: statusResult.data?.accepted_at ?? null,
-        shippedAt: statusResult.data?.shipped_at ?? null,
-        receivedAt: statusResult.data?.received_at ?? null,
-      },
+      status: poStatus,
       deliveryDate: po.delivery_date ?? null,
       shippingTerms: po.shipping_terms ?? null,
       paymentTerms: po.payment_terms ?? null,
@@ -253,20 +266,6 @@ export async function PUT(
       }
     }
 
-    // Update status if provided
-    if (body.status) {
-      const milestoneField: Record<string, string> = {
-        Issued: "issued_at", Accepted: "accepted_at",
-        Shipped: "shipped_at", Received: "received_at", "Partially Received": "received_at",
-      };
-      const now = new Date().toISOString();
-      const upsertData: Record<string, unknown> = {
-        po_id: id, status: body.status, updated_at: now, updated_by: "Ryan Belanger",
-      };
-      if (milestoneField[body.status]) upsertData[milestoneField[body.status]] = now;
-      await db.schema("orchard_calcs").from("po_statuses").upsert(upsertData, { onConflict: "po_id" });
-    }
-
     // Fetch PO number for activity log
     const { data: poData } = await db.schema("orchard").from("purchase_orders").select("po_number").eq("id", id).single();
     const poNumber = poData?.po_number ?? id;
@@ -308,9 +307,6 @@ export async function DELETE(
         { status: 409 }
       );
     }
-
-    // Delete status row
-    await db.schema("orchard_calcs").from("po_statuses").delete().eq("po_id", id);
 
     // Delete PO
     const { error: delPoError } = await db

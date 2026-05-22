@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/supabase";
 import { SKU_MAPPING } from "@/lib/client-config";
 import { attemptPOMatch } from "@/lib/po-matching";
+import { rollUpPoStatus } from "@/lib/po-status";
 
 /**
  * GET /api/receipt-lines/matching
@@ -15,7 +16,7 @@ export async function GET() {
     const [
       receiptLinesResult,
       receiptsResult,
-      poStatusesResult,
+      poLineStatusesResult,
       woResult,
       itemsResult,
       suppliersResult,
@@ -23,7 +24,7 @@ export async function GET() {
     ] = await Promise.all([
       db.schema("orchard").from("receipt_lines").select("id, receipt_id, item_id, qty_received, three_pl_sku, lot_number"),
       db.schema("orchard").from("receipts").select("id, receipt_number, received_date, external_id, location_id, po_id"),
-      db.schema("orchard_calcs").from("po_statuses").select("po_id, status"),
+      db.schema("orchard").from("po_line_statuses").select("po_line_id, state"),
       db.schema("orchard").from("work_orders").select("id, wo_number, status, notes"),
       db.schema("org_config").from("items").select("id, sku, unit_of_measure"),
       db.schema("org_config").from("suppliers").select("id, name"),
@@ -71,26 +72,29 @@ export async function GET() {
       })
     );
 
-    // Matchable POs
-    const matchableStatuses = new Set(["Issued", "Accepted", "Partially Received"]);
-    const matchablePoIds = (poStatusesResult.data ?? [])
-      .filter((r) => matchableStatuses.has(r.status as string))
-      .map((r) => r.po_id as string);
-
-    const poStatusMap = new Map((poStatusesResult.data ?? []).map((r) => [r.po_id as string, r.status as string]));
-
-    // Fetch POs and their lines
+    // All POs are matchable candidates — SKU overlap drives the suggestions.
     const [posResult, poLinesResult] = await Promise.all([
-      matchablePoIds.length > 0
-        ? db.schema("orchard").from("purchase_orders").select("id, po_number, supplier_id, order_date").in("id", matchablePoIds)
-        : Promise.resolve({ data: [] }),
-      matchablePoIds.length > 0
-        ? db.schema("orchard").from("po_lines").select("id, po_id, item_id, qty").in("po_id", matchablePoIds)
-        : Promise.resolve({ data: [] }),
+      db.schema("orchard").from("purchase_orders").select("id, po_number, supplier_id, order_date"),
+      db.schema("orchard").from("po_lines").select("id, po_id, item_id, qty"),
     ]);
 
     const allPOs = posResult.data ?? [];
     const allPOLines = poLinesResult.data ?? [];
+
+    // Roll each PO's status up from its line statuses.
+    const lineStateById = new Map(
+      (poLineStatusesResult.data ?? []).map((s) => [s.po_line_id as string, s.state as string])
+    );
+    const lineStatesByPo = new Map<string, string[]>();
+    for (const pl of allPOLines) {
+      const k = pl.po_id as string;
+      const arr = lineStatesByPo.get(k) ?? [];
+      arr.push(lineStateById.get(pl.id as string) ?? "ordered");
+      lineStatesByPo.set(k, arr);
+    }
+    const poStatusMap = new Map<string, string>(
+      allPOs.map((po) => [po.id as string, rollUpPoStatus(lineStatesByPo.get(po.id as string) ?? [])])
+    );
 
     const poMap = new Map(
       allPOs.map((po) => [

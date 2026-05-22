@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/supabase";
+import { rollUpPoStatus } from "@/lib/po-status";
 
 export async function GET() {
   const today = new Date().toISOString().split("T")[0];
@@ -7,7 +8,8 @@ export async function GET() {
   const [
     unmatchedReceiptLinesResult,
     openInvoicesResult,
-    posInProgressResult,
+    poLinesResult,
+    poLineStatusesResult,
     allInvoicesResult,
     invoiceStatusesResult,
   ] = await Promise.all([
@@ -15,13 +17,28 @@ export async function GET() {
     db.schema("orchard_calcs").from("receipt_line_statuses").select("receipt_line_id", { count: "exact", head: true }).eq("status", "Open"),
     // Invoices that are Open and not Paid
     db.schema("orchard").from("invoices").select("id, match_status").neq("match_status", "Matched"),
-    // POs actively in progress
-    db.schema("orchard_calcs").from("po_statuses").select("status").in("status", ["Draft", "Issued", "Accepted"]),
+    // PO lines + their statuses — POs in progress roll up from these
+    db.schema("orchard").from("po_lines").select("id, po_id"),
+    db.schema("orchard").from("po_line_statuses").select("po_line_id, state"),
     // All invoices for AP summary
     db.schema("orchard").from("invoices").select("id, total_amount, due_date, payment_terms, invoice_date"),
     // Payment statuses
     db.schema("orchard_calcs").from("invoice_statuses").select("invoice_id, payment_status"),
   ]);
+
+  // POs in progress = rolled-up status of ordered or confirmed (not complete).
+  const lineStateById = new Map((poLineStatusesResult.data ?? []).map((s) => [s.po_line_id, s.state]));
+  const lineStatesByPo = new Map<string, string[]>();
+  for (const l of poLinesResult.data ?? []) {
+    const arr = lineStatesByPo.get(l.po_id as string) ?? [];
+    arr.push((lineStateById.get(l.id as string) as string) ?? "ordered");
+    lineStatesByPo.set(l.po_id as string, arr);
+  }
+  let posInProgress = 0;
+  for (const states of lineStatesByPo.values()) {
+    const rolled = rollUpPoStatus(states);
+    if (rolled === "ordered" || rolled === "confirmed") posInProgress++;
+  }
 
   const openInvoices = openInvoicesResult.data ?? [];
   const invoicesWithoutReceipt = openInvoices.filter((inv) => inv.match_status === "Open").length;
@@ -64,7 +81,7 @@ export async function GET() {
     unmatchedReceiptLines: unmatchedReceiptLinesResult.count ?? 0,
     invoicesWithoutReceipt,
     readyToPay: 0,
-    posInProgress: posInProgressResult.data?.length ?? 0,
+    posInProgress,
     ap: {
       totalUnpaid,
       unpaidCount,

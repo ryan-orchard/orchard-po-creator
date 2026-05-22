@@ -22,13 +22,6 @@ interface LinkedInvoice {
   totalAmount: number | null;
 }
 
-interface Milestones {
-  issuedAt: string | null;
-  acceptedAt: string | null;
-  shippedAt: string | null;
-  receivedAt: string | null;
-}
-
 interface PODetail {
   id: string;
   poNumber: string;
@@ -40,7 +33,6 @@ interface PODetail {
   paymentTerms: string;
   notes: string;
   grandTotal: number;
-  milestones: Milestones;
   supplierId: string | null;
   shipToId: string | null;
   supplier: {
@@ -134,18 +126,21 @@ interface EditLineItem {
 
 // ─── Constants ───
 
-const ANS_SUPPLIER_CODE = "ANS";
-const STATUSES = ["Draft", "Issued", "Accepted", "Shipped", "Partially Received", "Received", "Closed"] as const;
+const STATUSES = ["ordered", "confirmed", "complete"] as const;
 type Tab = "details" | "receipts" | "invoices";
 
 const statusColors: Record<string, string> = {
-  Draft: "bg-warm-100 text-warm-800",
-  Issued: "bg-gold-100 text-gold-800",
-  Accepted: "bg-blue-100 text-blue-800",
-  Shipped: "bg-blue-100 text-blue-800",
-  "Partially Received": "bg-gold-100 text-gold-800",
-  Received: "bg-sage-100 text-sage-800",
-  Closed: "bg-gray-100 text-gray-600",
+  ordered: "bg-warm-100 text-warm-800",
+  confirmed: "bg-gold-100 text-gold-800",
+  complete: "bg-sage-100 text-sage-800",
+  cancelled: "bg-gray-100 text-gray-600",
+};
+
+const statusLabels: Record<string, string> = {
+  ordered: "Ordered",
+  confirmed: "Confirmed",
+  complete: "Complete",
+  cancelled: "Cancelled",
 };
 
 // ─── Helpers ───
@@ -157,15 +152,6 @@ const fmtDate = (d: string | null) => {
     day: "numeric",
     year: "numeric",
   });
-};
-
-const fmtDateShort = (d: string | null) => {
-  if (!d) return null;
-  const date = new Date(d.includes("T") ? d : d + "T00:00:00");
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
-  const yy = String(date.getFullYear()).slice(-2);
-  return `${mm}/${dd}/${yy}`;
 };
 
 const fmtCurrency = (n: number) =>
@@ -290,26 +276,57 @@ function PODetailPageContent() {
 
   // ─── Status handlers ───
 
+  const refreshPO = async () => {
+    const poRes = await fetch(`/api/purchase-orders/${params.id}`);
+    if (poRes.ok) setPO(await poRes.json());
+  };
+
   const updateStatus = async (newStatus: string) => {
-    if (!po) return;
+    if (!po || newStatus === po.status) return;
     setShowStatusMenu(false);
-    if (newStatus === "Accepted" && (po.supplier?.code === ANS_SUPPLIER_CODE || po.supplier?.name === ANS_SUPPLIER_CODE)) {
-      setSoInput("");
+
+    // Confirmed → prompt for the supplier SO number.
+    if (newStatus === "confirmed") {
+      setSoInput(po.soNumber || "");
       setShowSoModal(true);
       return;
     }
+
+    // Complete → post an Acquisition movement for every line.
+    if (newStatus === "complete") {
+      if (!confirm("Mark this PO complete? This posts an Acquisition movement for each line.")) return;
+      setUpdatingStatus(true);
+      try {
+        for (const li of po.lineItems) {
+          const res = await fetch(`/api/po-lines/${li.id}/complete`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+          });
+          if (!res.ok) {
+            const e = await res.json();
+            throw new Error(e.error || "Failed");
+          }
+        }
+        await refreshPO();
+      } catch {
+        alert("Error marking the PO complete.");
+      } finally {
+        setUpdatingStatus(false);
+      }
+      return;
+    }
+
+    // Ordered
     setUpdatingStatus(true);
     try {
       const res = await fetch(`/api/purchase-orders/${params.id}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: newStatus }),
+        body: JSON.stringify({ state: newStatus }),
       });
       if (!res.ok) throw new Error("Failed");
-      // Refresh PO to get updated milestones
-      const poRes = await fetch(`/api/purchase-orders/${params.id}`);
-      if (poRes.ok) setPO(await poRes.json());
-      else setPO({ ...po, status: newStatus });
+      await refreshPO();
     } catch {
       alert("Error updating status.");
     } finally {
@@ -317,7 +334,7 @@ function PODetailPageContent() {
     }
   };
 
-  const confirmAccepted = async () => {
+  const confirmConfirmed = async () => {
     if (!po) return;
     setShowSoModal(false);
     setUpdatingStatus(true);
@@ -325,12 +342,10 @@ function PODetailPageContent() {
       const res = await fetch(`/api/purchase-orders/${params.id}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "Accepted", soNumber: soInput || null }),
+        body: JSON.stringify({ state: "confirmed", soNumber: soInput || null }),
       });
       if (!res.ok) throw new Error("Failed");
-      const poRes = await fetch(`/api/purchase-orders/${params.id}`);
-      if (poRes.ok) setPO(await poRes.json());
-      else setPO({ ...po, status: "Accepted", soNumber: soInput || null });
+      await refreshPO();
       setSoInput("");
     } catch {
       alert("Error updating status.");
@@ -560,15 +575,6 @@ function PODetailPageContent() {
   const isSimpleMode = po.lineItems.length > 0 && !po.lineItems.some((li) => li.sku?.uom === "Carton");
   const showReceived = receiptStatus && receiptStatus.totalReceived > 0;
 
-  // ─── Milestone timeline data ───
-  const milestoneSteps = [
-    { label: "Created", date: po.date, reached: true },
-    { label: "Issued", date: po.milestones?.issuedAt, reached: !!po.milestones?.issuedAt || ["Issued", "Accepted", "Shipped", "Partially Received", "Received", "Closed"].includes(po.status) },
-    { label: "Accepted", date: po.milestones?.acceptedAt, reached: !!po.milestones?.acceptedAt || ["Accepted", "Shipped", "Partially Received", "Received", "Closed"].includes(po.status) },
-    { label: "Shipped", date: po.milestones?.shippedAt, reached: !!po.milestones?.shippedAt || ["Shipped", "Partially Received", "Received", "Closed"].includes(po.status) },
-    { label: "Received", date: po.milestones?.receivedAt, reached: !!po.milestones?.receivedAt || ["Received", "Closed"].includes(po.status) },
-  ];
-
   // Activity event styling
   const isLifecycleEvent = (action: string) =>
     action === "status_changed" || action === "po_created" || action === "receipt_linked" || action === "invoice_linked";
@@ -581,12 +587,6 @@ function PODetailPageContent() {
           {justCreated && (
             <div className="print:hidden mb-6 bg-sage-50 border border-sage-200 rounded-lg px-4 py-3 text-sm text-sage-800">
               PO <span className="font-semibold">{po.poNumber}</span> created successfully.
-            </div>
-          )}
-          {po.status === "Draft" && (
-            <div className="print:hidden mb-6 bg-yellow-50 border border-yellow-300 rounded-lg px-4 py-3 flex items-center gap-3">
-              <span className="inline-block bg-yellow-200 text-yellow-900 text-xs font-bold uppercase tracking-widest px-2 py-0.5 rounded">Draft</span>
-              <span className="text-sm text-yellow-800">This PO has not been issued. Change status to <strong>Issued</strong> when ready to send.</span>
             </div>
           )}
 
@@ -603,7 +603,7 @@ function PODetailPageContent() {
                       showStatusMenu ? "ring-2 ring-gray-300" : "hover:ring-1 hover:ring-gray-200"
                     } ${statusColors[po.status] || "bg-gray-100 text-gray-600"} border-current/20`}
                   >
-                    {updatingStatus ? "..." : po.status}
+                    {updatingStatus ? "..." : statusLabels[po.status] || po.status}
                     <svg className={`w-3 h-3 opacity-60 transition-transform ${showStatusMenu ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
                     </svg>
@@ -617,7 +617,7 @@ function PODetailPageContent() {
                           className={`block w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 ${po.status === s ? "font-semibold" : ""}`}
                         >
                           <span className={`inline-block w-2 h-2 rounded-full mr-2 ${statusColors[s]?.split(" ")[0] || "bg-gray-200"}`} />
-                          {s}
+                          {statusLabels[s] || s}
                         </button>
                       ))}
                     </div>
@@ -628,7 +628,7 @@ function PODetailPageContent() {
                 {po.supplier?.name || "No supplier"} &middot; {fmtDate(po.date) || "No date"}
               </p>
               {/* Receipt progress bar */}
-              {receiptStatus && receiptStatus.totalOrdered > 0 && ["Issued", "Accepted", "Shipped", "Partially Received", "Received"].includes(po.status) && (
+              {receiptStatus && receiptStatus.totalOrdered > 0 && ["confirmed", "complete"].includes(po.status) && (
                 <div className="flex items-center gap-3 mt-2 print:hidden">
                   <div className="w-36 h-2 bg-gray-200 rounded-full overflow-hidden">
                     <div
@@ -689,10 +689,8 @@ function PODetailPageContent() {
           {/* ─── DETAILS TAB ─── */}
           {activeTab === "details" && (
             <>
-              {/* Two-column: Order Details + Lifecycle */}
-              <div className="grid grid-cols-5 gap-6 mb-6">
-                {/* Order Details — left, wider */}
-                <div className="col-span-3 bg-white rounded-lg border border-gray-200 p-6">
+              {/* Order Details */}
+              <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
                   <div className="flex items-center justify-between mb-4">
                     <h2 className="text-base font-semibold text-gray-900">Order Details</h2>
                     {!editingHeader && (
@@ -793,44 +791,6 @@ function PODetailPageContent() {
                     </div>
                   )}
                 </div>
-
-                {/* Order Lifecycle — right, narrower */}
-                <div className="col-span-2 bg-white rounded-lg border border-gray-200 p-6">
-                  <h2 className="text-base font-semibold text-gray-900 mb-5">Lifecycle</h2>
-                  <div className="space-y-0">
-                    {milestoneSteps.map((step, idx) => {
-                      const isLast = idx === milestoneSteps.length - 1;
-                      const nextReached = !isLast && milestoneSteps[idx + 1].reached;
-                      return (
-                        <div key={step.label} className="flex items-start gap-3">
-                          {/* Dot + line */}
-                          <div className="flex flex-col items-center">
-                            <div className={`w-3 h-3 rounded-full border-2 flex-shrink-0 ${
-                              step.reached
-                                ? "bg-sage-500 border-sage-500"
-                                : "bg-white border-gray-300"
-                            }`} />
-                            {!isLast && (
-                              <div className={`w-0.5 h-8 ${
-                                nextReached ? "bg-sage-300" : "bg-gray-200"
-                              }`} />
-                            )}
-                          </div>
-                          {/* Label + date */}
-                          <div className="-mt-0.5">
-                            <p className={`text-sm font-medium ${step.reached ? "text-gray-900" : "text-gray-400"}`}>
-                              {step.label}
-                            </p>
-                            {step.date && (
-                              <p className="text-xs text-gray-400">{fmtDateShort(step.date)}</p>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
 
               {/* Line Items */}
               <div className="bg-white rounded-lg border border-gray-200 overflow-hidden mb-6">
@@ -1140,16 +1100,16 @@ function PODetailPageContent() {
               type="text"
               value={soInput}
               onChange={(e) => setSoInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && confirmAccepted()}
+              onKeyDown={(e) => e.key === "Enter" && confirmConfirmed()}
               placeholder="e.g. SO570645"
               autoFocus
               className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black mb-4"
             />
             <div className="flex gap-2 justify-end">
-              <button onClick={() => { setSoInput(""); confirmAccepted(); }} className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-700">
+              <button onClick={() => { setSoInput(""); confirmConfirmed(); }} className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-700">
                 Skip
               </button>
-              <button onClick={confirmAccepted} className="px-4 py-1.5 text-sm font-medium bg-gray-900 text-white rounded-md hover:bg-gray-800">
+              <button onClick={confirmConfirmed} className="px-4 py-1.5 text-sm font-medium bg-gray-900 text-white rounded-md hover:bg-gray-800">
                 Confirm Accepted
               </button>
             </div>

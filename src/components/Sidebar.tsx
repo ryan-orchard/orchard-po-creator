@@ -15,7 +15,7 @@ const NAV_SECTIONS = [
     label: "PURCHASING",
     items: [
       { name: "Purchase Orders", href: "/pos", icon: ClipboardIcon },
-      { name: "Shipments", href: "/shipments", icon: TruckIcon },
+      { name: "Transfers", href: "/transfers", icon: TruckIcon },
       { name: "Receipts", href: "/receipts", icon: InboxIcon },
       { name: "Invoices", href: "/invoices", icon: DocumentIcon },
     ],
