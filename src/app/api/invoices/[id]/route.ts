@@ -93,7 +93,7 @@ export async function GET(
       let poStatus = "ordered";
       if (poLineIds.length > 0) {
         const { data: ls } = await db
-          .schema("orchard")
+          .schema("orchard_calcs")
           .from("po_line_statuses")
           .select("po_line_id, state")
           .in("po_line_id", poLineIds);

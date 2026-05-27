@@ -3,14 +3,15 @@
  *
  * For each parsed row:
  *   1. Resolve to a PO line via ('PO-' || customer_po) + ans_item_number.
- *   2. Diff against the existing orchard.po_line_statuses row.
+ *   2. Diff against the existing orchard_calcs.po_line_statuses row.
  *   3. Emit activity-log entries for meaningful changes (state transition,
  *      expected ship date shift, customer req ship date shift, new confirmation).
  *      Notes changes are skipped — they rewrite every week and would be noise.
- *   4. Upsert into orchard.po_line_statuses with state='confirmed'.
+ *   4. Upsert into orchard_calcs.po_line_statuses with state='confirmed'.
  *
- * Raw report rows live in ingested_documents.parsed_data so we never need
- * a separate bronze table for audit / history.
+ * Bronze rows for each report live in orchard.ans_on_order_reports.
+ * This function currently writes directly to silver; a follow-up should
+ * write bronze first and derive silver from it.
  */
 import { db } from "./supabase";
 import { logActivity } from "./activity-log";
@@ -158,7 +159,7 @@ export async function processAnsOnOrderReport(
   // ── Load existing statuses for the resolved po_line_ids ────────────────
   const poLineIds = resolved.map((r) => r.poLineId);
   const { data: existingRows, error: existingErr } = await db
-    .schema("orchard")
+    .schema("orchard_calcs")
     .from("po_line_statuses")
     .select("po_line_id, state, expected_ship_date, expected_receive_date, notes")
     .in("po_line_id", poLineIds);
@@ -255,7 +256,7 @@ export async function processAnsOnOrderReport(
   for (let i = 0; i < upsertRows.length; i += batchSize) {
     const batch = upsertRows.slice(i, i + batchSize);
     const { error: upErr } = await db
-      .schema("orchard")
+      .schema("orchard_calcs")
       .from("po_line_statuses")
       .upsert(batch, { onConflict: "po_line_id" });
     if (upErr) throw new Error(`Failed to upsert po_line_statuses: ${upErr.message}`);

@@ -35,7 +35,7 @@ export async function POST(
 
   // Mark the line complete.
   const { error: stError } = await db
-    .schema("orchard")
+    .schema("orchard_calcs")
     .from("po_line_statuses")
     .upsert(
       {

@@ -17,7 +17,7 @@ function rollUpStatus(states: string[]): string {
 export async function GET() {
   const [posResult, lineStatusesResult, linesResult, itemsResult] = await Promise.all([
     db.schema("orchard").from("purchase_orders").select("*").order("order_date", { ascending: false }),
-    db.schema("orchard").from("po_line_statuses").select("po_line_id, state"),
+    db.schema("orchard_calcs").from("po_line_statuses").select("po_line_id, state"),
     db.schema("orchard").from("po_lines").select("id, po_id, qty, unit_cost, item_id"),
     db.schema("org_config").from("items").select("id, sku"),
   ]);

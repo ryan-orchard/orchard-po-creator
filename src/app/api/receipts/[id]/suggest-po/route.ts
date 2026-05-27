@@ -56,7 +56,7 @@ export async function GET(
     // Roll each PO's status up from its line statuses.
     const { data: poLineStatusRows } = (poLinesRaw ?? []).length > 0
       ? await db
-          .schema("orchard")
+          .schema("orchard_calcs")
           .from("po_line_statuses")
           .select("po_line_id, state")
           .in("po_line_id", (poLinesRaw ?? []).map((pl) => pl.id as string))

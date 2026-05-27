@@ -34,7 +34,7 @@ export async function PATCH(
   // Don't disturb lines that have been cancelled.
   const { data: existing } = lineIds.length
     ? await db
-        .schema("orchard")
+        .schema("orchard_calcs")
         .from("po_line_statuses")
         .select("po_line_id, state")
         .in("po_line_id", lineIds)
@@ -57,7 +57,7 @@ export async function PATCH(
 
   if (rows.length > 0) {
     const { error } = await db
-      .schema("orchard")
+      .schema("orchard_calcs")
       .from("po_line_statuses")
       .upsert(rows, { onConflict: "po_line_id" });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });

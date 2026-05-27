@@ -24,7 +24,7 @@ export async function GET() {
     ] = await Promise.all([
       db.schema("orchard").from("receipt_lines").select("id, receipt_id, item_id, qty_received, three_pl_sku, lot_number"),
       db.schema("orchard").from("receipts").select("id, receipt_number, received_date, external_id, location_id, po_id"),
-      db.schema("orchard").from("po_line_statuses").select("po_line_id, state"),
+      db.schema("orchard_calcs").from("po_line_statuses").select("po_line_id, state"),
       db.schema("orchard").from("work_orders").select("id, wo_number, status, notes"),
       db.schema("org_config").from("items").select("id, sku, unit_of_measure"),
       db.schema("org_config").from("suppliers").select("id, name"),

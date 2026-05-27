@@ -19,7 +19,7 @@ export async function GET() {
     db.schema("orchard").from("invoices").select("id, match_status").neq("match_status", "Matched"),
     // PO lines + their statuses — POs in progress roll up from these
     db.schema("orchard").from("po_lines").select("id, po_id"),
-    db.schema("orchard").from("po_line_statuses").select("po_line_id, state"),
+    db.schema("orchard_calcs").from("po_line_statuses").select("po_line_id, state"),
     // All invoices for AP summary
     db.schema("orchard").from("invoices").select("id, total_amount, due_date, payment_terms, invoice_date"),
     // Payment statuses

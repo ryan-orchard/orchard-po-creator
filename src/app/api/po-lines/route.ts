@@ -8,7 +8,7 @@ export async function GET() {
     db.schema("org_config").from("items").select("id, sku, name"),
     db.schema("org_config").from("suppliers").select("id, name, code"),
     db
-      .schema("orchard")
+      .schema("orchard_calcs")
       .from("po_line_statuses")
       .select(
         "po_line_id, state, expected_ship_date, expected_receive_date, actual_ship_date, cancelled_qty, notes"
