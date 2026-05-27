@@ -289,7 +289,7 @@ export default function POLinesPage() {
   const router = useRouter();
   const [lines, setLines] = useState<POLine[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<TabKey>("all");
+  const [activeTab, setActiveTab] = useState<TabKey>("confirmed");
 
   const [search, setSearch] = useState("");
   const [activeFilters, setActiveFilters] = useState<FilterField[]>([]);
@@ -301,7 +301,7 @@ export default function POLinesPage() {
   const [addFilterOpen, setAddFilterOpen] = useState(false);
   const addFilterAnchorRef = useRef<HTMLDivElement>(null);
 
-  const [sortField, setSortField] = useState<SortField>("xShipDate");
+  const [sortField, setSortField] = useState<SortField>("poNumber");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
   useEffect(() => {
