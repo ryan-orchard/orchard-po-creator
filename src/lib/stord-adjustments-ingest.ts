@@ -10,6 +10,7 @@ interface ProcessResult {
   newReceipts: number;
   skippedExisting: number;
   totalReceiptRows: number;
+  failedOrders: { orderNumber: string; error: string }[];
 }
 
 export async function processStordAdjustmentsReport(
@@ -23,7 +24,7 @@ export async function processStordAdjustmentsReport(
   );
 
   if (receiptRows.length === 0) {
-    return { newReceipts: 0, skippedExisting: 0, totalReceiptRows: 0 };
+    return { newReceipts: 0, skippedExisting: 0, totalReceiptRows: 0, failedOrders: [] };
   }
 
   // Group by order number
@@ -36,15 +37,18 @@ export async function processStordAdjustmentsReport(
 
   const orderNumbers = Object.keys(groups);
 
-  // Check which order numbers already exist in bronze
+  // Dedup by (external_id, received_date) — Stord reuses order numbers across
+  // multiple inbound events on different dates. Deduping by order number alone
+  // would silently skip subsequent shipments under the same order.
   const { data: existing } = await db
     .schema("orchard")
     .from("receipts")
-    .select("external_id")
+    .select("external_id, received_date")
     .in("external_id", orderNumbers);
 
+  // Key: "external_id::received_date"
   const existingSet = new Set(
-    (existing ?? []).map((r) => r.external_id as string)
+    (existing ?? []).map((r) => `${r.external_id as string}::${r.received_date as string}`)
   );
 
   // Resolve location IDs for facilities
@@ -81,29 +85,37 @@ export async function processStordAdjustmentsReport(
 
   let newReceipts = 0;
   let skippedExisting = 0;
+  const failedOrders: { orderNumber: string; error: string }[] = [];
 
   for (const [orderNumber, orderRows] of Object.entries(groups)) {
-    if (existingSet.has(orderNumber)) {
-      skippedExisting++;
-      continue;
-    }
+    try {
 
     // Find earliest date for receipt header
     let earliestDate = orderRows[0].adjustmentDate;
     for (const row of orderRows) {
       if (row.adjustmentDate < earliestDate) earliestDate = row.adjustmentDate;
     }
+    const receiptDate = earliestDate.slice(0, 10);
+
+    if (existingSet.has(`${orderNumber}::${receiptDate}`)) {
+      skippedExisting++;
+      continue;
+    }
 
     const facilityCode = resolveFacilityCode(orderRows[0].facility);
     const locationId = locationMap.get(facilityCode) ?? null;
     const receiptNumber = await generateNextNumber("RCP");
+    // receiptDate already computed above for dedup check
 
-    // Aggregate by SKU + lot number
+    // Aggregate by SKU + lot number.
+    // Only count positive adjustments — negative rows under "Receipt Confirmation"
+    // are Stord's internal lot/location corrections, not physical returns.
     const lineAgg: Record<
       string,
       { qty: number; stordSku: string; lotNumber: string }
     > = {};
     for (const row of orderRows) {
+      if (row.adjustedQuantity <= 0) continue;
       const key = `${row.sku}||${row.lotNumber}`;
       if (!lineAgg[key]) {
         lineAgg[key] = {
@@ -115,14 +127,20 @@ export async function processStordAdjustmentsReport(
       lineAgg[key].qty += row.adjustedQuantity;
     }
 
+    const positiveLines = Object.values(lineAgg).filter((agg) => agg.qty > 0);
+    if (positiveLines.length === 0) {
+      console.log(`Skipping "${orderNumber}" — all lines net to zero after correction rows excluded`);
+      continue;
+    }
+
     const { data: receipt, error: receiptError } = await db
       .schema("orchard")
       .from("receipts")
       .insert({
         receipt_number: receiptNumber,
-        received_date: earliestDate.slice(0, 10),
+        received_date: receiptDate,
         location_id: locationId,
-        source: "Stord Adjustments Report",
+        source: "Stord",
         external_id: orderNumber,
         notes: null,
         po_id: null,
@@ -131,14 +149,13 @@ export async function processStordAdjustmentsReport(
       .single();
 
     if (receiptError || !receipt) {
-      console.error(
-        `Failed to create receipt for ${orderNumber}:`,
-        receiptError
-      );
+      const msg = receiptError?.message ?? "unknown error";
+      console.error(`Failed to create receipt for ${orderNumber}: ${msg}`);
+      failedOrders.push({ orderNumber, error: `receipt insert: ${msg}` });
       continue;
     }
 
-    const lineRows = Object.values(lineAgg).map((agg) => {
+    const lineRows = positiveLines.map((agg) => {
       const mapping = SKU_MAPPING[agg.stordSku];
       const itemId = mapping?.standardSku
         ? itemMap.get(mapping.standardSku) ?? null
@@ -160,22 +177,32 @@ export async function processStordAdjustmentsReport(
       .insert(lineRows);
 
     if (lineError) {
-      console.error(
-        `Failed to create receipt lines for ${orderNumber}:`,
-        lineError
-      );
+      console.error(`Failed to create receipt lines for ${orderNumber}: ${lineError.message}`);
+      failedOrders.push({ orderNumber, error: `lines insert: ${lineError.message}` });
     }
 
+    // Silver promotion handled by database trigger on orchard.receipt_lines
+
     newReceipts++;
+
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`Unexpected error processing order "${orderNumber}": ${msg}`);
+      failedOrders.push({ orderNumber, error: `unexpected: ${msg}` });
+    }
   }
 
   console.log(
-    `Stord adjustments ingest: ${newReceipts} new receipts, ${skippedExisting} skipped (existing), ${receiptRows.length} total rows`
+    `Stord adjustments ingest: ${newReceipts} new, ${skippedExisting} skipped (existing), ${failedOrders.length} failed, ${receiptRows.length} total rows`
   );
+  if (failedOrders.length > 0) {
+    console.error(`Failed orders: ${JSON.stringify(failedOrders)}`);
+  }
 
   return {
     newReceipts,
     skippedExisting,
     totalReceiptRows: receiptRows.length,
+    failedOrders,
   };
 }
