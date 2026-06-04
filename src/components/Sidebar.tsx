@@ -25,6 +25,7 @@ const NAV_SECTIONS = [
     items: [
       { name: "Inventory", href: "/warehouse/on-hand", icon: CubeIcon },
       { name: "Work Orders", href: "/work-orders", icon: WrenchIcon },
+      { name: "BOMs", href: "/boms", icon: ClipboardIcon },
       { name: "Invoice Audit", href: "/invoice-audit", icon: ClipboardIcon, soon: true },
     ],
   },

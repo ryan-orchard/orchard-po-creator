@@ -2,12 +2,14 @@ import { NextResponse } from "next/server";
 import { requireOperator } from "@/lib/auth";
 import { db } from "@/lib/supabase";
 
-export async function GET() {
-  const { data, error } = await db
-    .schema("org_config")
-    .from("items")
-    .select("*")
-    .order("sku");
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const accountingCategory = searchParams.get("accountingCategory");
+
+  let query = db.schema("org_config").from("items").select("*").order("sku");
+  if (accountingCategory) query = query.eq("accounting_category", accountingCategory);
+
+  const { data, error } = await query;
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 

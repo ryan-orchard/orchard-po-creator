@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect, use } from "react";
+import { useState, useEffect, use, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { downloadWOPdf } from "./document/WorkOrderPdf";
 
 interface SKUDetail {
   standardSku: string;
@@ -74,6 +75,7 @@ export default function WorkOrderDetailPage({
   const [error, setError] = useState(false);
   const [showStatusMenu, setShowStatusMenu] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
 
   useEffect(() => {
     fetch(`/api/work-orders/${id}`)
@@ -108,6 +110,36 @@ export default function WorkOrderDetailPage({
       setUpdatingStatus(false);
     }
   };
+
+  const handleDownloadPdf = useCallback(async () => {
+    if (!wo) return;
+    setDownloadingPdf(true);
+    try {
+      await downloadWOPdf({
+        woNumber: wo.woNumber,
+        issuedDate: wo.issuedDate
+          ? new Date(wo.issuedDate + "T00:00:00").toLocaleDateString("en-US")
+          : "—",
+        warehouse: wo.warehouse ? `${wo.warehouse.name} (${wo.warehouse.code})` : "—",
+        status: wo.status,
+        notes: wo.notes ?? null,
+        outputs: wo.outputs.map((li) => ({
+          sku: li.sku?.standardSku ?? "—",
+          name: li.sku?.flavor ?? "",
+          qty: li.qty,
+          uom: li.sku?.uom ?? "",
+        })),
+        inputs: wo.inputs.map((li) => ({
+          sku: li.sku?.standardSku ?? "—",
+          name: li.sku?.flavor ?? "",
+          qty: li.qty,
+          uom: li.sku?.uom ?? "",
+        })),
+      });
+    } finally {
+      setDownloadingPdf(false);
+    }
+  }, [wo]);
 
   if (loading) {
     return (
@@ -171,6 +203,13 @@ export default function WorkOrderDetailPage({
             </div>
           </div>
           <div className="flex items-center gap-3">
+            <button
+              onClick={handleDownloadPdf}
+              disabled={downloadingPdf}
+              className="px-4 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
+            >
+              {downloadingPdf ? "Generating…" : "Download PDF"}
+            </button>
             {wo.status === "Draft" && (
               <button
                 onClick={() => router.push(`/work-orders/${id}/edit`)}
