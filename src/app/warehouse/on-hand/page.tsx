@@ -41,6 +41,7 @@ interface PivotRow {
   stordSku: string | null;
   category: string | null;
   productName: string;
+  ans: number;
   stord: number;
   bmc: number;
   total: number;
@@ -49,10 +50,11 @@ interface PivotRow {
   totalValue: number | null;
 }
 
-type WarehouseTab = "ALL" | "STORD" | "BMC";
+type WarehouseTab = "ALL" | "ANS" | "STORD" | "BMC";
 
 const TABS: { key: WarehouseTab; label: string }[] = [
   { key: "ALL", label: "All Locations" },
+  { key: "ANS", label: "ANS" },
   { key: "STORD", label: "Stord" },
   { key: "BMC", label: "BMC" },
 ];
@@ -109,6 +111,7 @@ export default function OnHandInventoryPage() {
           stordSku: item.stordSku,
           category: item.category,
           productName: item.productName || item.standardSku,
+          ans: 0,
           stord: 0,
           bmc: 0,
           total: 0,
@@ -119,7 +122,8 @@ export default function OnHandInventoryPage() {
         bySkuMap.set(key, row);
       }
 
-      if (item.warehouse === "STORD") row.stord += item.totalOnHand;
+      if (item.warehouse === "ANS") row.ans += item.totalOnHand;
+      else if (item.warehouse === "STORD") row.stord += item.totalOnHand;
       else if (item.warehouse === "BMC") row.bmc += item.totalOnHand;
       row.incoming += item.incoming;
 
@@ -129,7 +133,7 @@ export default function OnHandInventoryPage() {
 
     // Calculate totals
     for (const row of bySkuMap.values()) {
-      row.total = row.stord + row.bmc;
+      row.total = row.ans + row.stord + row.bmc;
       row.totalValue =
         row.unitCost !== null && row.total > 0
           ? Math.round(row.unitCost * row.total * 100) / 100
@@ -424,7 +428,10 @@ export default function OnHandInventoryPage() {
                     Name
                   </th>
                   <SortHeader field="category" label="Type" />
-                  <SortHeader field="totalOnHand" label="On Hand" align="right" />
+                  <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">ANS</th>
+                  <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Stord</th>
+                  <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">BMC</th>
+                  <SortHeader field="totalOnHand" label="Total" align="right" />
                   <SortHeader field="unitCost" label="Unit Cost" align="right" />
                   <SortHeader field="totalValue" label="Value" align="right" />
                 </tr>
@@ -449,6 +456,15 @@ export default function OnHandInventoryPage() {
                       </td>
                       <td className="px-4 py-3 text-gray-500 text-xs">
                         {row.category || "\u2014"}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-gray-700">
+                        {row.ans > 0 ? row.ans.toLocaleString() : <span className="text-gray-300">{"\u2014"}</span>}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-gray-700">
+                        {row.stord > 0 ? row.stord.toLocaleString() : <span className="text-gray-300">{"\u2014"}</span>}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-gray-700">
+                        {row.bmc > 0 ? row.bmc.toLocaleString() : <span className="text-gray-300">{"\u2014"}</span>}
                       </td>
                       <td className="px-4 py-3 text-right text-gray-900 font-semibold tabular-nums">
                         {row.total.toLocaleString()}
@@ -477,6 +493,15 @@ export default function OnHandInventoryPage() {
                 <tr className="bg-gray-50 border-t-2 border-gray-300">
                   <td colSpan={3} className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">
                     Totals
+                  </td>
+                  <td className="px-4 py-3 text-right font-bold text-gray-900 tabular-nums">
+                    {filteredPivot.reduce((s, r) => s + r.ans, 0).toLocaleString()}
+                  </td>
+                  <td className="px-4 py-3 text-right font-bold text-gray-900 tabular-nums">
+                    {filteredPivot.reduce((s, r) => s + r.stord, 0).toLocaleString()}
+                  </td>
+                  <td className="px-4 py-3 text-right font-bold text-gray-900 tabular-nums">
+                    {filteredPivot.reduce((s, r) => s + r.bmc, 0).toLocaleString()}
                   </td>
                   <td className="px-4 py-3 text-right font-bold text-gray-900 tabular-nums">
                     {viewSummary.totalOnHand.toLocaleString()}

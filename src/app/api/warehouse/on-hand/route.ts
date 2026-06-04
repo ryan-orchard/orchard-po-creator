@@ -133,6 +133,70 @@ const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 let stordCachedItems: OnHandItem[] | null = null;
 let stordCachedAt = 0;
 
+const ANS_LOCATION_ID = "c5941ef8-bedb-43f6-827e-9eb1038422ba";
+
+// Compute ANS on-hand from the movements ledger.
+// ANS inventory = confirmed inflows TO ANS minus confirmed outflows FROM ANS.
+async function fetchAnsInventory(
+  categoryByStandardSku: Map<string, string>,
+  nameByStandardSku: Map<string, string>,
+  unitCostBySku: Map<string, number>,
+  itemSkuById: Map<string, string>
+): Promise<{ items: OnHandItem[]; asOf: string | null }> {
+  const [inflowsResult, outflowsResult] = await Promise.all([
+    db
+      .schema("orchard_calcs")
+      .from("movements")
+      .select("item_id, qty, occurred_at")
+      .eq("to_location_id", ANS_LOCATION_ID)
+      .eq("state", "confirmed"),
+    db
+      .schema("orchard_calcs")
+      .from("movements")
+      .select("item_id, qty")
+      .eq("from_location_id", ANS_LOCATION_ID)
+      .eq("state", "confirmed")
+      // Exclude the bill-and-hold self-loop from outflows
+      .neq("to_location_id", ANS_LOCATION_ID),
+  ]);
+
+  const netByItemId = new Map<string, number>();
+  let latestDate: string | null = null;
+
+  for (const row of inflowsResult.data ?? []) {
+    const id = row.item_id as string;
+    netByItemId.set(id, (netByItemId.get(id) ?? 0) + (Number(row.qty) || 0));
+    const d = row.occurred_at as string | null;
+    if (d && (!latestDate || d > latestDate)) latestDate = d;
+  }
+  for (const row of outflowsResult.data ?? []) {
+    const id = row.item_id as string;
+    netByItemId.set(id, (netByItemId.get(id) ?? 0) - (Number(row.qty) || 0));
+  }
+
+  const items: OnHandItem[] = [];
+  for (const [itemId, qty] of netByItemId) {
+    if (qty <= 0) continue;
+    const sku = itemSkuById.get(itemId);
+    if (!sku) continue;
+    const unitCost = unitCostBySku.get(sku) ?? null;
+    items.push({
+      standardSku: sku,
+      stordSku: null,
+      category: categoryByStandardSku.get(sku) ?? null,
+      productName: nameByStandardSku.get(sku) || sku,
+      warehouse: "ANS",
+      totalOnHand: qty,
+      incoming: 0,
+      unitCost,
+      extendedValue: unitCost != null ? Math.round(unitCost * qty * 100) / 100 : null,
+    });
+  }
+
+  const asOf = latestDate ? latestDate.slice(0, 10) : null;
+  return { items, asOf };
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const forceRefresh = searchParams.get("refresh") === "1";
@@ -148,11 +212,13 @@ export async function GET(request: Request) {
     const categoryByStandardSku = new Map<string, string>();
     const nameByStandardSku = new Map<string, string>();
     const itemIdBySku = new Map<string, string>();
+    const itemSkuById = new Map<string, string>();
     for (const item of allItemsRaw ?? []) {
       const sku = item.sku as string;
       if (item.category) categoryByStandardSku.set(sku, item.category as string);
       if (item.name) nameByStandardSku.set(sku, item.name as string);
       itemIdBySku.set(sku, item.id as string);
+      itemSkuById.set(item.id as string, sku);
     }
 
     // Fetch latest unit cost per item from item_costs table
@@ -180,10 +246,13 @@ export async function GET(request: Request) {
 
     const includeStord = warehouseFilter === "ALL" || warehouseFilter === "STORD";
     const includeBMC = warehouseFilter === "ALL" || warehouseFilter === "BMC";
+    const includeAns = warehouseFilter === "ALL" || warehouseFilter === "ANS";
 
     let stordItems: OnHandItem[] = [];
     let bmcItems: OnHandItem[] = [];
+    let ansItems: OnHandItem[] = [];
     let bmcSnapshotDate: string | null = null;
+    let ansAsOf: string | null = null;
 
     const fetches: Promise<void>[] = [];
 
@@ -250,10 +319,21 @@ export async function GET(request: Request) {
       );
     }
 
+    if (includeAns) {
+      fetches.push(
+        fetchAnsInventory(categoryByStandardSku, nameByStandardSku, unitCostBySku, itemSkuById).then(
+          (result) => {
+            ansItems = result.items;
+            ansAsOf = result.asOf;
+          }
+        )
+      );
+    }
+
     await Promise.all(fetches);
 
     // Enrich all items with category/name from items table
-    const allRaw = [...stordItems, ...bmcItems];
+    const allRaw = [...stordItems, ...bmcItems, ...ansItems];
     for (const item of allRaw) {
       if (!item.category) item.category = categoryByStandardSku.get(item.standardSku) ?? null;
       if (!item.productName || item.productName === item.standardSku) {
@@ -273,6 +353,15 @@ export async function GET(request: Request) {
     };
 
     const warehouses: WarehouseInfo[] = [];
+    if (includeAns) {
+      warehouses.push({
+        code: "ANS",
+        name: "ANS",
+        sourceType: "calculated",
+        sourceLabel: ansAsOf ? `Movements ledger as of ${ansAsOf}` : "Movements ledger",
+        asOf: ansAsOf,
+      });
+    }
     if (includeStord) {
       warehouses.push({
         code: "STORD",
