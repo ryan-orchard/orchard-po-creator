@@ -24,7 +24,7 @@ export async function GET() {
     ] = await Promise.all([
       db.schema("orchard").from("receipt_lines").select("id, receipt_id, item_id, qty_received, three_pl_sku, lot_number"),
       db.schema("orchard").from("receipts").select("id, receipt_number, received_date, external_id, location_id, po_id"),
-      db.schema("orchard_calcs").from("po_line_statuses").select("po_line_id, state"),
+      db.schema("orchard_calcs").from("po_line_statuses").select("po_line_id, status"),
       db.schema("orchard").from("work_orders").select("id, wo_number, status, notes"),
       db.schema("org_config").from("items").select("id, sku, unit_of_measure"),
       db.schema("org_config").from("suppliers").select("id, name"),
@@ -83,7 +83,7 @@ export async function GET() {
 
     // Roll each PO's status up from its line statuses.
     const lineStateById = new Map(
-      (poLineStatusesResult.data ?? []).map((s) => [s.po_line_id as string, s.state as string])
+      (poLineStatusesResult.data ?? []).map((s) => [s.po_line_id as string, s.status as string])
     );
     const lineStatesByPo = new Map<string, string[]>();
     for (const pl of allPOLines) {

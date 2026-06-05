@@ -95,9 +95,9 @@ export async function GET(
         const { data: ls } = await db
           .schema("orchard_calcs")
           .from("po_line_statuses")
-          .select("po_line_id, state")
+          .select("po_line_id, status")
           .in("po_line_id", poLineIds);
-        const stateByLine = new Map((ls ?? []).map((s) => [s.po_line_id, s.state]));
+        const stateByLine = new Map((ls ?? []).map((s) => [s.po_line_id, s.status]));
         poStatus = rollUpStatus(poLineIds.map((lid) => stateByLine.get(lid) ?? "ordered"));
       }
 
@@ -240,7 +240,7 @@ export async function GET(
       freight: Number(inv.freight) || 0,
       tax: Number(inv.tax) || 0,
       invoiceAmount: Number(inv.total_amount) || 0,
-      matchStatus: statusResult.data?.match_status ?? "Unmatched",
+      matchStatus: statusResult.data?.match_status ?? "unmatched",
       paymentStatus: statusResult.data?.payment_status ?? "Unpaid",
       classification: inv.classification ?? "",
       notes: inv.notes ?? "",

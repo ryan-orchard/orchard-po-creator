@@ -150,7 +150,7 @@ export default function ReceiptDetailPage() {
                     : "bg-warm-100 text-warm-800"
                 }`}
               >
-                {isMatched ? "Matched" : "Unmatched"}
+                {isMatched ? "matched" : "unmatched"}
               </span>
             </div>
             {receipt.externalReceiptId && (

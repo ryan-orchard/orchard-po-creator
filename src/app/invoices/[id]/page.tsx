@@ -426,13 +426,13 @@ export default function InvoiceDetailPage() {
                   value={invoice.matchStatus}
                   onChange={(e) => patchStatus({ matchStatus: e.target.value })}
                   className={`appearance-none cursor-pointer text-xs font-semibold pl-2.5 pr-6 py-1 rounded-full border-0 focus:ring-0 focus:outline-none ${
-                    invoice.matchStatus === "Matched" ? "bg-sage-100 text-sage-700" :
+                    invoice.matchStatus === "matched" ? "bg-sage-100 text-sage-700" :
                     invoice.matchStatus === "Discrepancy" ? "bg-warm-100 text-warm-700" :
                     "bg-gray-100 text-gray-600"
                   }`}
                 >
                   <option value="Open">Open</option>
-                  <option value="Matched">Matched</option>
+                  <option value="matched">Matched</option>
                   <option value="Discrepancy">Discrepancy</option>
                 </select>
                 <svg className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 text-current opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>

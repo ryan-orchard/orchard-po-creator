@@ -4,10 +4,10 @@
  * For each parsed row:
  *   1. Resolve to a PO line via ('PO-' || customer_po) + ans_item_number.
  *   2. Diff against the existing orchard_calcs.po_line_statuses row.
- *   3. Emit activity-log entries for meaningful changes (state transition,
+ *   3. Emit activity-log entries for meaningful changes (status transition,
  *      expected ship date shift, customer req ship date shift, new confirmation).
  *      Notes changes are skipped — they rewrite every week and would be noise.
- *   4. Upsert into orchard_calcs.po_line_statuses with state='confirmed'.
+ *   4. Upsert into orchard_calcs.po_line_statuses with status='confirmed'.
  *
  * Bronze rows for each report live in orchard.ans_on_order_reports.
  * This function currently writes directly to silver; a follow-up should
@@ -31,7 +31,7 @@ interface ResolvedRow {
 }
 
 interface ExistingStatus {
-  state: string | null;
+  status: string | null;
   expected_ship_date: string | null;
   expected_receive_date: string | null;
   notes: string | null;
@@ -161,7 +161,7 @@ export async function processAnsOnOrderReport(
   const { data: existingRows, error: existingErr } = await db
     .schema("orchard_calcs")
     .from("po_line_statuses")
-    .select("po_line_id, state, expected_ship_date, expected_receive_date, notes")
+    .select("po_line_id, status, expected_ship_date, expected_receive_date, notes")
     .in("po_line_id", poLineIds);
 
   if (existingErr) throw new Error(`Failed to load existing statuses: ${existingErr.message}`);
@@ -170,7 +170,7 @@ export async function processAnsOnOrderReport(
     (existingRows ?? []).map((r) => [
       r.po_line_id as string,
       {
-        state: (r.state as string | null) ?? null,
+        status: (r.status as string | null) ?? null,
         expected_ship_date: (r.expected_ship_date as string | null) ?? null,
         expected_receive_date: (r.expected_receive_date as string | null) ?? null,
         notes: (r.notes as string | null) ?? null,
@@ -200,13 +200,13 @@ export async function processAnsOnOrderReport(
       activityEvents += 1;
     } else {
       // State transition
-      if (prior.state && prior.state !== "confirmed" && prior.state !== "in_transit" && prior.state !== "received") {
+      if (prior.status && prior.status !== "confirmed" && prior.status !== "in_transit" && prior.status !== "received") {
         // Going from ordered/draft → confirmed is a real signal; from confirmed → confirmed is not
-        if (prior.state !== "confirmed") {
+        if (prior.status !== "confirmed") {
           logActivity({
             poId: r.poId,
-            action: "ans_line_state_change",
-            description: `${reportTag}: ${itemTag} state ${prior.state} → confirmed${dispositionSuffix}`,
+            action: "ans_line_status_change",
+            description: `${reportTag}: ${itemTag} status ${prior.status} → confirmed${dispositionSuffix}`,
             actor: "Orchard AI",
           });
           activityEvents += 1;
@@ -242,7 +242,7 @@ export async function processAnsOnOrderReport(
   // ── Upsert po_line_statuses ────────────────────────────────────────────
   const upsertRows = resolved.map((r) => ({
     po_line_id: r.poLineId,
-    state: "confirmed",
+    status: "confirmed",
     expected_ship_date: r.parsed.estShipReadyDate,
     expected_receive_date: r.parsed.customerReqShipDate,
     source_report_date: report.reportDate,

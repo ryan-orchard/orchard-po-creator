@@ -17,14 +17,14 @@ function rollUpStatus(states: string[]): string {
 export async function GET() {
   const [posResult, lineStatusesResult, linesResult, itemsResult] = await Promise.all([
     db.schema("orchard").from("purchase_orders").select("*").order("order_date", { ascending: false }),
-    db.schema("orchard_calcs").from("po_line_statuses").select("po_line_id, state"),
+    db.schema("orchard_calcs").from("po_line_statuses").select("po_line_id, status"),
     db.schema("orchard").from("po_lines").select("id, po_id, qty, unit_cost, item_id"),
     db.schema("org_config").from("items").select("id, sku"),
   ]);
 
   if (posResult.error) return NextResponse.json({ error: posResult.error.message }, { status: 500 });
 
-  const lineState = new Map((lineStatusesResult.data ?? []).map((s) => [s.po_line_id, s.state]));
+  const lineState = new Map((lineStatusesResult.data ?? []).map((s) => [s.po_line_id, s.status]));
   const items = new Map((itemsResult.data ?? []).map((i) => [i.id, i.sku]));
 
   // Grand total, line IDs, SKU list, and total units per PO — one pass over lines

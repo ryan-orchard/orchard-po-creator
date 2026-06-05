@@ -323,7 +323,7 @@ function PODetailPageContent() {
       const res = await fetch(`/api/purchase-orders/${params.id}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ state: newStatus }),
+        body: JSON.stringify({ status: newStatus }),
       });
       if (!res.ok) throw new Error("Failed");
       await refreshPO();
@@ -342,7 +342,7 @@ function PODetailPageContent() {
       const res = await fetch(`/api/purchase-orders/${params.id}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ state: "confirmed", soNumber: soInput || null }),
+        body: JSON.stringify({ status: "confirmed", soNumber: soInput || null }),
       });
       if (!res.ok) throw new Error("Failed");
       await refreshPO();

@@ -16,10 +16,10 @@ export async function GET() {
     // Receipt lines not yet linked (Silver status = Open)
     db.schema("orchard_calcs").from("receipt_line_statuses").select("receipt_line_id", { count: "exact", head: true }).eq("transfer_status", "unmatched").is("flag", null),
     // Invoices that are Open or unmatched — read from authoritative invoice_statuses
-    db.schema("orchard_calcs").from("invoice_statuses").select("invoice_id, match_status").neq("match_status", "Matched"),
+    db.schema("orchard_calcs").from("invoice_statuses").select("invoice_id, match_status").neq("match_status", "matched"),
     // PO lines + their statuses — POs in progress roll up from these
     db.schema("orchard").from("po_lines").select("id, po_id"),
-    db.schema("orchard_calcs").from("po_line_statuses").select("po_line_id, state"),
+    db.schema("orchard_calcs").from("po_line_statuses").select("po_line_id, status"),
     // All invoices for AP summary
     db.schema("orchard").from("invoices").select("id, total_amount, due_date, payment_terms, invoice_date"),
     // Payment statuses
@@ -27,7 +27,7 @@ export async function GET() {
   ]);
 
   // POs in progress = rolled-up status of ordered or confirmed (not complete).
-  const lineStateById = new Map((poLineStatusesResult.data ?? []).map((s) => [s.po_line_id, s.state]));
+  const lineStateById = new Map((poLineStatusesResult.data ?? []).map((s) => [s.po_line_id, s.status]));
   const lineStatesByPo = new Map<string, string[]>();
   for (const l of poLinesResult.data ?? []) {
     const arr = lineStatesByPo.get(l.po_id as string) ?? [];
@@ -41,7 +41,7 @@ export async function GET() {
   }
 
   const openInvoices = openInvoicesResult.data ?? [];
-  const invoicesWithoutReceipt = openInvoices.filter((inv) => inv.match_status === "Unmatched" || !inv.match_status).length;
+  const invoicesWithoutReceipt = openInvoices.filter((inv) => inv.match_status === "unmatched" || !inv.match_status).length;
 
   // Compute AP summary
   const payStatusMap = new Map((invoiceStatusesResult.data ?? []).map((s) => [s.invoice_id, s.payment_status as string]));

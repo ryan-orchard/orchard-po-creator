@@ -53,7 +53,7 @@ export async function POST(
     await db
       .schema("orchard_calcs")
       .from("invoice_statuses")
-      .upsert({ invoice_id: invoiceId, match_status: "Unmatched", updated_by: "Ryan Belanger" }, { onConflict: "invoice_id" });
+      .upsert({ invoice_id: invoiceId, match_status: "unmatched", updated_by: "Ryan Belanger" }, { onConflict: "invoice_id" });
 
     return NextResponse.json({ success: true, invoiceId, linesCleared });
   } catch (error) {

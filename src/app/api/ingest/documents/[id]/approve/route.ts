@@ -161,7 +161,7 @@ export async function POST(
     // Create invoice status
     await db.schema("orchard_calcs").from("invoice_statuses").insert({
       invoice_id: invoice.id,
-      match_status: "Unmatched",
+      match_status: "unmatched",
       payment_status: "Unpaid",
       updated_by: "Orchard AI",
     });

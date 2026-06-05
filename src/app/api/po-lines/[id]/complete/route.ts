@@ -40,7 +40,7 @@ export async function POST(
     .upsert(
       {
         po_line_id: id,
-        state: "complete",
+        status: "complete",
         updated_at: new Date().toISOString(),
         updated_by: "Ryan Belanger",
       },

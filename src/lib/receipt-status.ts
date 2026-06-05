@@ -90,10 +90,15 @@ export async function setReceiptLineFlag(
     );
 }
 
-export function rollUpReceiptStatus(transferStatuses: string[]): string {
-  if (transferStatuses.length === 0) return "open";
-  const active = transferStatuses.filter((s) => s !== null);
-  if (active.every((s) => s === "matched")) return "matched";
-  if (active.some((s) => s === "matched" || s === "partial")) return "partial";
-  return "open";
+export function rollUpReceiptTransferStatus(transferStatuses: string[]): "unmatched" | "partial" | "matched" {
+  if (transferStatuses.length === 0) return "unmatched";
+  if (transferStatuses.every((s) => s === "matched")) return "matched";
+  if (transferStatuses.some((s) => s === "matched" || s === "partial")) return "partial";
+  return "unmatched";
+}
+
+export function rollUpReceiptInvoiceStatus(invoiceStatuses: string[]): "unmatched" | "matched" {
+  if (invoiceStatuses.length === 0) return "unmatched";
+  if (invoiceStatuses.every((s) => s === "matched")) return "matched";
+  return "unmatched";
 }

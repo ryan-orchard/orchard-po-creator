@@ -8,7 +8,7 @@ import LinkInvoiceModal, { ReceiptLineSummary } from "@/components/LinkInvoiceMo
 // Types
 // ─────────────────────────────────────────────────────────────
 
-type Status = "Unmatched" | "Matched" | "Excluded";
+type Status = "unmatched" | "matched" | "excluded";
 
 interface ReceiptLine {
   id: string;
@@ -91,7 +91,7 @@ export default function ReceiptsPage() {
   const [lines, setLines] = useState<ReceiptLine[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<Status>("Unmatched");
+  const [activeTab, setActiveTab] = useState<Status>("unmatched");
   const [search, setSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [actionLoading, setActionLoading] = useState(false);
@@ -129,7 +129,7 @@ export default function ReceiptsPage() {
   // ── Tab counts ─────────────────────────────────────────────
 
   const counts = useMemo(() => {
-    const c = { Unmatched: 0, Matched: 0, Excluded: 0 };
+    const c = { unmatched: 0, matched: 0, excluded: 0 };
     for (const l of lines) {
       if (l.status in c) c[l.status]++;
     }
@@ -279,9 +279,9 @@ export default function ReceiptsPage() {
   // ── Tabs config ────────────────────────────────────────────
 
   const tabs: { key: Status; label: string; count: number }[] = [
-    { key: "Unmatched", label: "Unmatched", count: counts.Unmatched },
-    { key: "Matched", label: "Matched", count: counts.Matched },
-    { key: "Excluded", label: "Excluded", count: counts.Excluded },
+    { key: "unmatched", label: "unmatched", count: counts.unmatched },
+    { key: "matched", label: "matched", count: counts.matched },
+    { key: "excluded", label: "excluded", count: counts.excluded },
   ];
 
   // ── Render ─────────────────────────────────────────────────
@@ -430,7 +430,7 @@ export default function ReceiptsPage() {
                       <SortIcon field="orderRef" />
                     </th>
                     <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                      {activeTab === "Matched" ? "Invoice #" : "Stord ID"}
+                      {activeTab === "matched" ? "Invoice #" : "Stord ID"}
                     </th>
                   </tr>
                 </thead>
@@ -471,7 +471,7 @@ export default function ReceiptsPage() {
                         {line.poNumber || line.orderRef || "\u2014"}
                       </td>
                       <td className="px-4 py-3 text-xs truncate max-w-32">
-                        {activeTab === "Matched" ? (
+                        {activeTab === "matched" ? (
                           line.invoiceId && line.invoiceNumber ? (
                             <Link
                               href={`/invoices/${line.invoiceId}`}
@@ -498,9 +498,9 @@ export default function ReceiptsPage() {
                 <div className="p-12 text-center text-gray-400 text-sm">
                   {search ? (
                     `No results matching "${search}"`
-                  ) : activeTab === "Unmatched" ? (
+                  ) : activeTab === "unmatched" ? (
                     "All caught up \u2014 no unmatched receipts."
-                  ) : activeTab === "Matched" ? (
+                  ) : activeTab === "matched" ? (
                     "No matched receipts yet."
                   ) : (
                     "No excluded receipts."
@@ -537,7 +537,7 @@ export default function ReceiptsPage() {
               {selectedIds.size} selected
             </span>
             <div className="w-px h-5 bg-gray-200" />
-            {activeTab === "Excluded" ? (
+            {activeTab === "excluded" ? (
               <button
                 onClick={handleRestore}
                 disabled={actionLoading}

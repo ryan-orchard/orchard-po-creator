@@ -6,7 +6,7 @@ export async function GET() {
     .schema("orchard_calcs")
     .from("invoice_statuses")
     .select("invoice_id", { count: "exact", head: true })
-    .eq("match_status", "Unmatched");
+    .eq("match_status", "unmatched");
 
   return NextResponse.json({ unmatched: count ?? 0 });
 }

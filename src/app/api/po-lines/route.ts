@@ -11,7 +11,7 @@ export async function GET() {
       .schema("orchard_calcs")
       .from("po_line_statuses")
       .select(
-        "po_line_id, state, expected_ship_date, expected_receive_date, actual_ship_date, cancelled_qty, notes"
+        "po_line_id, status, expected_ship_date, expected_receive_date, actual_ship_date, cancelled_qty, notes"
       ),
   ]);
 
@@ -95,7 +95,7 @@ export async function GET() {
       qty,
       unitCost,
       lineTotal: qty * unitCost,
-      lineState: (status?.state as string) ?? "ordered",
+      lineState: (status?.status as string) ?? "ordered",
       expectedShipDate: (status?.expected_ship_date as string | null) ?? null,
       expectedReceiveDate: (status?.expected_receive_date as string | null) ?? null,
       actualShipDate: (status?.actual_ship_date as string | null) ?? null,

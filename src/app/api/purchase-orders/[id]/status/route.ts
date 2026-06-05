@@ -15,11 +15,11 @@ export async function PATCH(
   if (authError) return authError;
 
   const { id } = await params;
-  const { state, soNumber } = await request.json();
+  const { status: lineStatus, soNumber } = await request.json();
 
-  if (state !== "ordered" && state !== "confirmed") {
+  if (lineStatus !== "ordered" && lineStatus !== "confirmed") {
     return NextResponse.json(
-      { error: "state must be 'ordered' or 'confirmed'" },
+      { error: "status must be 'ordered' or 'confirmed'" },
       { status: 400 }
     );
   }
@@ -36,12 +36,12 @@ export async function PATCH(
     ? await db
         .schema("orchard_calcs")
         .from("po_line_statuses")
-        .select("po_line_id, state")
+        .select("po_line_id, status")
         .in("po_line_id", lineIds)
     : { data: [] };
   const cancelled = new Set(
     (existing ?? [])
-      .filter((s) => s.state === "cancelled")
+      .filter((s) => s.status === "cancelled")
       .map((s) => s.po_line_id as string)
   );
 
@@ -50,7 +50,7 @@ export async function PATCH(
     .filter((lid) => !cancelled.has(lid))
     .map((lid) => ({
       po_line_id: lid,
-      state,
+      status: lineStatus,
       updated_at: now,
       updated_by: "Ryan Belanger",
     }));
@@ -75,8 +75,8 @@ export async function PATCH(
     poId: id,
     action: "status_changed",
     description: soNumber
-      ? `Status set to ${state} — SO# ${soNumber}`
-      : `Status set to ${state}`,
+      ? `Status set to ${lineStatus} — SO# ${soNumber}`
+      : `Status set to ${lineStatus}`,
     actor: "Ryan Belanger",
   });
 

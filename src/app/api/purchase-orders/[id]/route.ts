@@ -39,10 +39,10 @@ export async function GET(
       ? await db
           .schema("orchard_calcs")
           .from("po_line_statuses")
-          .select("po_line_id, state")
+          .select("po_line_id, status")
           .in("po_line_id", poLineIds)
       : { data: [] };
-    const stateByLine = new Map((lineStatuses ?? []).map((s) => [s.po_line_id, s.state]));
+    const stateByLine = new Map((lineStatuses ?? []).map((s) => [s.po_line_id, s.status]));
     const poStatus = rollUpStatus(poLineIds.map((lid) => stateByLine.get(lid) ?? "ordered"));
 
     // Fetch supplier and location (ship-to) in parallel

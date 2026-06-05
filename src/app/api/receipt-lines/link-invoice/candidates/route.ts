@@ -150,7 +150,7 @@ export async function GET(request: NextRequest) {
       (invoiceStatusRows ?? []).map((s) => [s.invoice_id as string, s.match_status as string])
     );
     const unmatchedInvoices = (invoices ?? []).filter(
-      (inv) => (invoiceMatchStatusMap.get(inv.id as string) ?? "Unmatched") !== "Matched"
+      (inv) => (invoiceMatchStatusMap.get(inv.id as string) ?? "unmatched") !== "matched"
     );
 
     if (!unmatchedInvoices || unmatchedInvoices.length === 0) {
@@ -265,7 +265,7 @@ export async function GET(request: NextRequest) {
         poReference: (inv.po_reference as string) ?? "",
         shipTo: (inv.ship_to_text as string) ?? "",
         invoiceType: (inv.invoice_type as string) ?? "Supplier",
-        matchStatus: invoiceMatchStatusMap.get(inv.id as string) ?? "Unmatched",
+        matchStatus: invoiceMatchStatusMap.get(inv.id as string) ?? "unmatched",
         skuOverlap: overlapItemIds.size,
         poRefMatches,
         supplierMatches,
