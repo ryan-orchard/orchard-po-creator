@@ -22,7 +22,7 @@ export async function GET(
     // 1. Invoice header + all lines (parallel)
     const [invoiceRes, allLinesRes] = await Promise.all([
       db.schema("orchard").from("invoices")
-        .select("id, invoice_number, supplier_id, po_reference, invoice_date, freight, tax, total_amount, ship_to")
+        .select("id, invoice_number, supplier_id, po_reference, invoice_date, freight, tax, total_amount, ship_to_text")
         .eq("id", id)
         .single(),
       db.schema("orchard").from("invoice_lines")
@@ -101,7 +101,7 @@ export async function GET(
         supplier: supplierName,
         invoiceDate: invoice.invoice_date ?? null,
         poReference: invoice.po_reference ?? null,
-        shipTo: (invoice.ship_to as string) ?? null,
+        shipTo: (invoice.ship_to_text as string) ?? null,
         freight,
         tax,
         totalAmount: Number(invoice.total_amount) || null,
