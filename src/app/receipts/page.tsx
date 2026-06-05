@@ -429,94 +429,89 @@ export default function ReceiptsPage() {
           <div className="fixed inset-0 bg-black/20 z-30" onClick={closePanel} />
 
           {/* Panel */}
-          <div className="fixed right-0 top-0 bottom-0 w-[540px] bg-white shadow-2xl z-40 flex flex-col overflow-hidden border-l border-gray-200">
+          <div className="fixed right-0 top-0 bottom-0 w-[520px] bg-white shadow-2xl z-40 flex flex-col overflow-hidden border-l border-gray-200">
 
             {/* Close */}
             <button
               onClick={closePanel}
-              className="absolute top-4 right-4 z-10 text-gray-400 hover:text-gray-600 p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+              className="absolute top-5 right-5 z-10 text-gray-400 hover:text-gray-600 p-1 rounded transition-colors"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
 
-            {/* Invoice header — styled like the invoice page */}
-            <div className="px-8 pt-7 pb-6 border-b border-gray-100 flex-shrink-0">
-              <div className="flex items-start justify-between pr-8">
+            {/* Header — supplier name left, invoice number right */}
+            <div className="px-8 pt-8 pb-6 flex-shrink-0">
+              <div className="flex items-start justify-between pr-6">
                 <div>
-                  <div className="text-xl font-bold text-gray-900 leading-tight">
-                    {panelCtx?.invoice.supplier ?? (panelLoading ? "Loading…" : "—")}
+                  <div className="text-xl font-bold text-gray-900">
+                    {panelCtx?.invoice.supplier ?? (panelLoading ? "" : "—")}
                   </div>
                   <div className="text-sm text-gray-400 mt-0.5">Supplier</div>
                 </div>
-                <div className="text-right flex-shrink-0 ml-6">
-                  <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Invoice #</div>
-                  <div className="text-2xl font-bold text-gray-900 mt-0.5 tabular-nums">
+                <div className="text-right">
+                  <div className="text-xs text-gray-400 font-medium uppercase tracking-wider">Invoice #</div>
+                  <div className="text-2xl font-bold text-gray-900 tabular-nums mt-0.5">
                     {panelCtx?.invoice.invoiceNumber ?? "—"}
                   </div>
                 </div>
               </div>
-
-              {/* Details row */}
-              {panelCtx && (
-                <div className="mt-4 flex flex-wrap gap-x-6 gap-y-1 text-sm">
-                  {panelCtx.invoice.invoiceDate && (
-                    <div>
-                      <span className="text-gray-400">Invoice Date </span>
-                      <span className="text-gray-700">{formatDateLong(panelCtx.invoice.invoiceDate)}</span>
-                    </div>
-                  )}
-                  {panelCtx.invoice.poReference && (
-                    <div>
-                      <span className="text-gray-400">PO Ref </span>
-                      <span className="text-gray-700">{panelCtx.invoice.poReference}</span>
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
 
             {panelLoading ? (
-              <div className="flex-1 flex items-center justify-center text-sm text-gray-400">
-                Loading invoice…
-              </div>
+              <div className="flex-1 flex items-center justify-center text-sm text-gray-400">Loading…</div>
             ) : panelCtx ? (
               <div className="flex-1 overflow-y-auto">
 
-                {/* Line items table */}
+                {/* Details */}
+                <div className="px-8 pb-5 border-b border-gray-100">
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+                    {panelCtx.invoice.invoiceDate && (
+                      <>
+                        <div className="text-gray-400">Invoice Date</div>
+                        <div className="text-gray-800">{formatDateLong(panelCtx.invoice.invoiceDate)}</div>
+                      </>
+                    )}
+                    {panelCtx.invoice.poReference && (
+                      <>
+                        <div className="text-gray-400">PO Reference</div>
+                        <div className="text-gray-800">{panelCtx.invoice.poReference}</div>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Line items */}
                 <div className="px-8 py-5 border-b border-gray-100">
-                  <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
+                  <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">
                     Line Items ({panelCtx.invoice.lines.length})
                   </div>
-                  <table className="w-full text-sm">
+                  <table className="w-full">
                     <thead>
-                      <tr className="border-b border-gray-100">
-                        <th className="text-left pb-2 text-xs text-gray-400 font-medium">Description / SKU</th>
-                        <th className="text-right pb-2 text-xs text-gray-400 font-medium w-16">Qty</th>
-                        <th className="text-right pb-2 text-xs text-gray-400 font-medium w-20">Unit Cost</th>
-                        <th className="text-right pb-2 text-xs text-gray-400 font-medium w-24">Amount</th>
+                      <tr className="border-b border-gray-200">
+                        <th className="text-left pb-2 text-xs font-semibold text-gray-400 uppercase tracking-wide">Description</th>
+                        <th className="text-right pb-2 text-xs font-semibold text-gray-400 uppercase tracking-wide w-16">Qty</th>
+                        <th className="text-right pb-2 text-xs font-semibold text-gray-400 uppercase tracking-wide w-20">Unit Cost</th>
+                        <th className="text-right pb-2 text-xs font-semibold text-gray-400 uppercase tracking-wide w-24">Amount</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-50">
+                    <tbody>
                       {panelCtx.invoice.lines.map(l => (
-                        <tr
-                          key={l.id}
-                          className={l.isTarget ? "bg-amber-50" : ""}
-                        >
-                          <td className={`py-2.5 pr-4 ${l.isTarget ? "font-medium text-gray-900" : "text-gray-500"}`}>
-                            <div>{l.sku || l.description || l.ansItemNumber || "—"}</div>
-                            {l.sku && l.description && (
-                              <div className="text-xs text-gray-400 mt-0.5">{l.description}</div>
+                        <tr key={l.id} className={`border-b border-gray-50 ${l.isTarget ? "bg-amber-50" : ""}`}>
+                          <td className={`py-3 pr-3 text-sm ${l.isTarget ? "font-medium text-gray-900" : "text-gray-600"}`}>
+                            <div>{l.description || l.sku || l.ansItemNumber || "—"}</div>
+                            {l.description && l.sku && (
+                              <div className="text-xs text-gray-400 mt-0.5">{l.sku}</div>
                             )}
                           </td>
-                          <td className={`py-2.5 text-right tabular-nums ${l.isTarget ? "font-medium text-gray-900" : "text-gray-500"}`}>
+                          <td className={`py-3 text-right text-sm tabular-nums ${l.isTarget ? "font-medium text-gray-900" : "text-gray-600"}`}>
                             {l.qty.toLocaleString()}
                           </td>
-                          <td className={`py-2.5 text-right tabular-nums ${l.isTarget ? "font-medium text-gray-900" : "text-gray-500"}`}>
+                          <td className={`py-3 text-right text-sm tabular-nums ${l.isTarget ? "font-medium text-gray-900" : "text-gray-600"}`}>
                             {l.unitPrice > 0 ? `$${l.unitPrice.toFixed(2)}` : "—"}
                           </td>
-                          <td className={`py-2.5 text-right tabular-nums ${l.isTarget ? "font-medium text-gray-900" : "text-gray-500"}`}>
+                          <td className={`py-3 text-right text-sm tabular-nums ${l.isTarget ? "font-medium text-gray-900" : "text-gray-600"}`}>
                             {l.unitPrice > 0
                               ? `$${(l.qty * l.unitPrice).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                               : "—"}
@@ -526,92 +521,74 @@ export default function ReceiptsPage() {
                     </tbody>
                   </table>
 
-                  {/* Invoice totals */}
-                  <div className="mt-3 pt-3 border-t border-gray-100 space-y-1.5 text-sm">
+                  {/* Totals */}
+                  <div className="mt-2 space-y-1.5 text-sm">
                     {panelCtx.invoice.freight > 0 && (
                       <div className="flex justify-between text-gray-500">
                         <span>Freight</span>
-                        <span className="tabular-nums">${panelCtx.invoice.freight.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        <span className="tabular-nums">${panelCtx.invoice.freight.toLocaleString("en-US", { minimumFractionDigits: 2 })}</span>
                       </div>
                     )}
                     {panelCtx.invoice.tax > 0 && (
                       <div className="flex justify-between text-gray-500">
                         <span>Tax</span>
-                        <span className="tabular-nums">${panelCtx.invoice.tax.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        <span className="tabular-nums">${panelCtx.invoice.tax.toLocaleString("en-US", { minimumFractionDigits: 2 })}</span>
                       </div>
                     )}
                     {panelCtx.invoice.totalAmount != null && (
-                      <div className="flex justify-between font-semibold text-gray-900 pt-1.5 border-t border-gray-200">
+                      <div className="flex justify-between font-bold text-gray-900 text-base pt-2 border-t border-gray-200">
                         <span>Total</span>
-                        <span className="tabular-nums">${panelCtx.invoice.totalAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        <span className="tabular-nums">${panelCtx.invoice.totalAmount.toLocaleString("en-US", { minimumFractionDigits: 2 })}</span>
                       </div>
                     )}
                   </div>
                 </div>
 
-                {/* Matching section */}
-                <div className="px-8 py-5 bg-gray-50 border-b border-gray-100">
+                {/* Receipt matching context */}
+                <div className="px-8 py-5">
                   <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">
-                    Matching this receipt
+                    Receipt Being Matched
                   </div>
 
-                  {/* Receipt being matched */}
-                  <div className="flex items-start justify-between mb-5 pb-5 border-b border-gray-200">
+                  <div className="flex justify-between items-baseline mb-4">
                     <div>
-                      <div className="font-semibold text-gray-900">{panel.group.sku || "Unknown"}</div>
-                      <div className="text-xs text-gray-500 mt-1 space-x-1">
-                        <span>{panel.group.warehouse || panel.group.source.toUpperCase()}</span>
-                        {panel.group.orderRef && <><span>·</span><span>{panel.group.orderRef}</span></>}
-                        <span>·</span>
-                        <span>{formatDateLong(panel.group.date)}</span>
+                      <div className="font-semibold text-gray-900 text-sm">{panel.group.sku || "Unknown"}</div>
+                      <div className="text-xs text-gray-400 mt-0.5">
+                        {[
+                          panel.group.warehouse || panel.group.source.toUpperCase(),
+                          panel.group.orderRef,
+                          formatDateLong(panel.group.date),
+                        ].filter(Boolean).join(" · ")}
                       </div>
                     </div>
-                    <div className="text-xl font-bold text-gray-900 tabular-nums ml-4 flex-shrink-0">
-                      {panel.group.totalQty.toLocaleString()}
-                    </div>
+                    <div className="text-lg font-bold text-gray-900 tabular-nums">{panel.group.totalQty.toLocaleString()}</div>
                   </div>
 
-                  {/* Qty comparison */}
-                  <div className="space-y-2.5 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">Invoice line qty</span>
-                      <span className="font-medium text-gray-900 tabular-nums">
-                        {panelCtx.targetLine.qty.toLocaleString()}
-                      </span>
+                  <div className="space-y-2 text-sm border-t border-gray-100 pt-4">
+                    <div className="flex justify-between text-gray-500">
+                      <span>Invoice line qty</span>
+                      <span className="tabular-nums text-gray-800">{panelCtx.targetLine.qty.toLocaleString()}</span>
                     </div>
                     {panelCtx.targetLine.alreadyMatchedQty > 0 && (
-                      <div className="flex justify-between">
-                        <span className="text-gray-500">Already matched</span>
-                        <span className="text-gray-700 tabular-nums">
-                          {panelCtx.targetLine.alreadyMatchedQty.toLocaleString()}
-                        </span>
+                      <div className="flex justify-between text-gray-500">
+                        <span>Already matched</span>
+                        <span className="tabular-nums">{panelCtx.targetLine.alreadyMatchedQty.toLocaleString()}</span>
                       </div>
                     )}
-                    <div className="flex justify-between pt-2.5 border-t border-gray-200">
-                      <span className="text-gray-500">Remaining after this</span>
+                    <div className="flex justify-between font-medium pt-1 border-t border-gray-100">
+                      <span className="text-gray-500">Remaining after</span>
                       {(() => {
-                        const remaining = Math.max(0, panelCtx.targetLine.remainingQty - panel.group.totalQty);
+                        const r = Math.max(0, panelCtx.targetLine.remainingQty - panel.group.totalQty);
                         return (
-                          <span className={`font-semibold tabular-nums ${remaining === 0 ? "text-green-600" : "text-gray-900"}`}>
-                            {remaining.toLocaleString()}
-                            {remaining === 0 && <span className="ml-1.5 font-normal text-xs">✓ exact</span>}
+                          <span className={`tabular-nums ${r === 0 ? "text-green-600" : "text-gray-900"}`}>
+                            {r.toLocaleString()}{r === 0 && " ✓"}
                           </span>
                         );
                       })()}
                     </div>
-                    {panelCtx.targetLine.landedUnitCost > 0 && (
-                      <div className="flex justify-between text-xs text-gray-400 pt-1">
-                        <span>Landed cost</span>
-                        <span className="tabular-nums">${panelCtx.targetLine.landedUnitCost.toFixed(4)}/unit</span>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Other matched receipts */}
-                  {panelCtx.targetLine.matchedReceiptLines.length > 0 && (
-                    <div className="mt-4 pt-4 border-t border-gray-200">
-                      <div className="text-xs text-gray-400 font-medium mb-2">Other receipts on this line</div>
-                      <div className="space-y-1">
+                    {panelCtx.targetLine.matchedReceiptLines.length > 0 && (
+                      <div className="pt-3 border-t border-gray-100 space-y-1">
+                        <div className="text-xs text-gray-400 mb-1">Other receipts on this line</div>
                         {panelCtx.targetLine.matchedReceiptLines.map(r => (
                           <div key={r.receiptLineId} className="flex justify-between text-xs text-gray-500">
                             <span>{r.orderRef || r.source.toUpperCase()} · {formatDate(r.date)}</span>
@@ -619,19 +596,19 @@ export default function ReceiptsPage() {
                           </div>
                         ))}
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
               </div>
             ) : (
               <div className="flex-1 flex items-center justify-center text-sm text-gray-400">
-                Could not load invoice details.
+                Could not load invoice.
               </div>
             )}
 
-            {/* Confirm button */}
+            {/* Confirm */}
             {panel.invoiceLineId && panel.group.invoiceStatus !== "matched" && (
-              <div className="px-8 py-5 border-t border-gray-200 flex-shrink-0 bg-white">
+              <div className="px-8 py-5 border-t border-gray-100 flex-shrink-0">
                 <button
                   onClick={() => handleConfirm(panel.group, panel.invoiceLineId)}
                   disabled={confirmingKeys.has(panel.group.groupKey)}
