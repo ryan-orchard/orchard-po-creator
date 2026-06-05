@@ -67,54 +67,123 @@ function computeOverheadPerUnit(
 // ─── GET /api/receipts/[id] ──────────────────────────────────────────────────
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+  const sourceParam = request.nextUrl.searchParams.get("source");
+  const docParam = request.nextUrl.searchParams.get("doc");
 
   try {
-    // 1. Bronze receipt header
-    const { data: receipt, error: rErr } = await db
-      .schema("orchard")
-      .from("receipts")
-      .select("id, receipt_number, received_date, external_id, location_id, notes")
-      .eq("id", id)
-      .single();
-    if (rErr || !receipt) {
-      return NextResponse.json({ error: "Receipt not found" }, { status: 404 });
+    // Receipt metadata and silver lines — two paths:
+    //   1. Non-bronze source (BMC etc): use ?source=X&doc=Y query params
+    //   2. Stord: look up bronze header by ID, then fetch silver by source_doc_no
+
+    type SilverLineRow = {
+      id: string;
+      item_id: string | null;
+      qty_received: number;
+      lot_number: string | null;
+      three_pl_sku: string | null;
+      po_id: string | null;
+    };
+
+    let receiptMeta: {
+      id: string;
+      receiptNumber: string | null;
+      receivedDate: string | null;
+      externalReceiptId: string | null;
+      warehouse: string | null;
+      notes: string | null;
+    };
+    let lines: SilverLineRow[];
+
+    if (sourceParam && docParam) {
+      // ── Non-bronze path (BMC, etc.) ──────────────────────────
+      const { data: silverLines } = await db
+        .schema("orchard_calcs")
+        .from("receipt_lines")
+        .select("id, item_id, qty_received, lot_number, three_pl_sku, po_id, received_date, warehouse_code")
+        .eq("source", sourceParam)
+        .eq("source_doc_no", docParam);
+
+      lines = (silverLines ?? []).map(l => ({
+        id: l.id as string,
+        item_id: (l.item_id as string) ?? null,
+        qty_received: Number(l.qty_received) || 0,
+        lot_number: (l.lot_number as string) ?? null,
+        three_pl_sku: (l.three_pl_sku as string) ?? null,
+        po_id: (l.po_id as string) ?? null,
+      }));
+
+      const firstLine = silverLines?.[0];
+      receiptMeta = {
+        id,
+        receiptNumber: null,
+        receivedDate: (firstLine?.received_date as string) ?? null,
+        externalReceiptId: docParam,
+        warehouse: (firstLine?.warehouse_code as string) ?? sourceParam.toUpperCase(),
+        notes: null,
+      };
+    } else {
+      // ── Bronze/Stord path ────────────────────────────────────
+      const { data: receipt, error: rErr } = await db
+        .schema("orchard")
+        .from("receipts")
+        .select("id, receipt_number, received_date, external_id, location_id, notes")
+        .eq("id", id)
+        .single();
+      if (rErr || !receipt) {
+        return NextResponse.json({ error: "Receipt not found" }, { status: 404 });
+      }
+
+      const { data: loc } = receipt.location_id
+        ? await db
+            .schema("org_config")
+            .from("locations")
+            .select("code, name")
+            .eq("id", receipt.location_id as string)
+            .single()
+        : { data: null };
+
+      receiptMeta = {
+        id: receipt.id as string,
+        receiptNumber: receipt.receipt_number as string,
+        receivedDate: receipt.received_date as string,
+        externalReceiptId: (receipt.external_id as string) ?? null,
+        warehouse: loc ? ((loc.code ?? loc.name) as string) : null,
+        notes: (receipt.notes as string) ?? null,
+      };
+
+      const { data: silverLines } = receipt.external_id
+        ? await db
+            .schema("orchard_calcs")
+            .from("receipt_lines")
+            .select("id, item_id, qty_received, lot_number, three_pl_sku, po_id")
+            .eq("source_doc_no", receipt.external_id as string)
+            .eq("source", "stord")
+        : { data: [] };
+
+      lines = (silverLines ?? []).map(l => ({
+        id: l.id as string,
+        item_id: (l.item_id as string) ?? null,
+        qty_received: Number(l.qty_received) || 0,
+        lot_number: (l.lot_number as string) ?? null,
+        three_pl_sku: (l.three_pl_sku as string) ?? null,
+        po_id: (l.po_id as string) ?? null,
+      }));
     }
 
-    // 2. Warehouse name
-    const { data: loc } = receipt.location_id
-      ? await db
-          .schema("org_config")
-          .from("locations")
-          .select("code, name")
-          .eq("id", receipt.location_id as string)
-          .single()
-      : { data: null };
-
-    // 3. Silver receipt lines (source_doc_no = receipt.external_id)
-    const { data: silverLines } = receipt.external_id
-      ? await db
-          .schema("orchard_calcs")
-          .from("receipt_lines")
-          .select("id, item_id, qty_received, lot_number, three_pl_sku, po_id")
-          .eq("source_doc_no", receipt.external_id as string)
-          .eq("source", "stord")
-      : { data: [] };
-
-    const lines = silverLines ?? [];
-    const lineIds = lines.map((l) => l.id as string);
+    const lineIds = lines.map((l) => l.id);
 
     if (lineIds.length === 0) {
       return NextResponse.json({
-        id: receipt.id,
-        receiptNumber: receipt.receipt_number,
-        receivedDate: receipt.received_date,
-        externalReceiptId: receipt.external_id ?? null,
-        warehouse: loc ? ((loc.code ?? loc.name) as string) : null,
-        notes: receipt.notes ?? null,
+        id: receiptMeta.id,
+        receiptNumber: receiptMeta.receiptNumber,
+        receivedDate: receiptMeta.receivedDate,
+        externalReceiptId: receiptMeta.externalReceiptId,
+        warehouse: receiptMeta.warehouse,
+        notes: receiptMeta.notes,
         transfers: [],
         lines: [],
         matchedLineCount: 0,
@@ -441,12 +510,12 @@ export async function GET(
     const unmatchedLineCount = responseLines.length - matchedLineCount;
 
     return NextResponse.json({
-      id: receipt.id,
-      receiptNumber: receipt.receipt_number,
-      receivedDate: receipt.received_date,
-      externalReceiptId: (receipt.external_id as string) ?? null,
-      warehouse: loc ? ((loc.code ?? loc.name) as string) : null,
-      notes: (receipt.notes as string) ?? null,
+      id: receiptMeta.id,
+      receiptNumber: receiptMeta.receiptNumber,
+      receivedDate: receiptMeta.receivedDate,
+      externalReceiptId: receiptMeta.externalReceiptId,
+      warehouse: receiptMeta.warehouse,
+      notes: receiptMeta.notes,
       transfers,
       lines: responseLines,
       matchedLineCount,
