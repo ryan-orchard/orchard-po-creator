@@ -2,8 +2,8 @@ export const runtime = "nodejs";
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireOperator } from "@/lib/auth";
-import { getRecords, TABLES } from "@/lib/airtable";
 import ansSkuMappingData from "@/../clients/magna/config/ans-sku-mapping.json";
+import { db } from "@/lib/supabase";
 
 const ANS_SKU_MAPPING = ansSkuMappingData as Record<
   string,
@@ -19,7 +19,6 @@ interface ParsedLine {
   amount: number;
   batchNumber: string | null;
   standardSku: string | null;
-  airtableSkuId: string | null;
   skuMapped: boolean;
 }
 
@@ -306,7 +305,6 @@ function parseInvoiceText(allLines: string[]): ParsedInvoice {
       amount,
       batchNumber,
       standardSku: mapping?.standardSku || null,
-      airtableSkuId: mapping?.airtableId || null,
       skuMapped: !!mapping,
     });
   }
@@ -411,12 +409,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check for duplicate invoice in Airtable
-    const existingInvoices = await getRecords(TABLES.INVOICES, {
-      filterByFormula: `{Invoice Number} = "${invoice.invoiceNumber}"`,
-    });
+    // Check for duplicate invoice in Supabase
+    const { count } = await db
+      .schema("orchard")
+      .from("invoices")
+      .select("id", { count: "exact", head: true })
+      .eq("invoice_number", invoice.invoiceNumber);
 
-    const isDuplicate = existingInvoices.length > 0;
+    const isDuplicate = (count ?? 0) > 0;
 
     // Find unmapped items
     const unmappedItems = invoice.lines

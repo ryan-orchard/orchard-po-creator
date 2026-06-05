@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireOperator } from "@/lib/auth";
 import { db } from "@/lib/supabase";
 import { logActivity } from "@/lib/activity-log";
-import { setReceiptLineStatuses } from "@/lib/receipt-status";
+import { setReceiptLineInvoiceStatuses } from "@/lib/receipt-status";
 
 // Supabase PostgrestError isn't an Error instance — pull the useful fields out.
 function formatError(err: unknown): string {
@@ -168,7 +168,7 @@ export async function POST(request: NextRequest) {
 
     // Mark linked receipt lines as Matched (Silver)
     if (linkedReceiptLineIds.length > 0) {
-      const { error: statusErr } = await setReceiptLineStatuses(linkedReceiptLineIds, "Matched", "Ryan Belanger");
+      const { error: statusErr } = await setReceiptLineInvoiceStatuses(linkedReceiptLineIds, "matched", "Ryan Belanger");
       if (statusErr) throw statusErr;
     }
 

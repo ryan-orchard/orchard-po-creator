@@ -70,7 +70,7 @@ export async function GET() {
         salesOrder: inv.sales_order ?? "",
         purchaseOrder: inv.po_id ?? null,
         invoiceAmount: Number(inv.total_amount),
-        matchStatus: status?.match_status ?? inv.match_status ?? "Open",
+        matchStatus: status?.match_status ?? "Unmatched",
         paymentStatus: status?.payment_status ?? "Unpaid",
         invoiceType: inv.invoice_type ?? "Supplier",
         lineCount: lineInfo?.count ?? 0,
@@ -170,7 +170,6 @@ export async function POST(request: NextRequest) {
         freight: body.freight ?? 0,
         tax: body.tax ?? 0,
         invoice_type: body.invoiceType || "Supplier",
-        match_status: "Open",
         po_id: poId,
       })
       .select("id")
@@ -184,7 +183,7 @@ export async function POST(request: NextRequest) {
     await db.schema("orchard_calcs").from("invoice_statuses").insert({
       invoice_id: invoice.id,
       payment_status: "Unpaid",
-      match_status: "Open",
+      match_status: "Unmatched",
       updated_by: "Ryan Belanger",
     });
 

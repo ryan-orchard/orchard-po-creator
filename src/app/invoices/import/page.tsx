@@ -14,7 +14,6 @@ interface ParsedLine {
   amount: number;
   batchNumber: string | null;
   standardSku: string | null;
-  airtableSkuId: string | null;
   skuMapped: boolean;
 }
 
@@ -231,7 +230,6 @@ export default function InvoiceImportPage() {
             unitPrice: l.unitPrice,
             amount: l.amount,
             batchNumber: null,
-            airtableSkuId: null,
           })),
         }),
       });

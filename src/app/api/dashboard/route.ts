@@ -14,9 +14,9 @@ export async function GET() {
     invoiceStatusesResult,
   ] = await Promise.all([
     // Receipt lines not yet linked (Silver status = Open)
-    db.schema("orchard_calcs").from("receipt_line_statuses").select("receipt_line_id", { count: "exact", head: true }).eq("status", "Open"),
-    // Invoices that are Open and not Paid
-    db.schema("orchard").from("invoices").select("id, match_status").neq("match_status", "Matched"),
+    db.schema("orchard_calcs").from("receipt_line_statuses").select("receipt_line_id", { count: "exact", head: true }).eq("transfer_status", "unmatched").is("flag", null),
+    // Invoices that are Open or unmatched — read from authoritative invoice_statuses
+    db.schema("orchard_calcs").from("invoice_statuses").select("invoice_id, match_status").neq("match_status", "Matched"),
     // PO lines + their statuses — POs in progress roll up from these
     db.schema("orchard").from("po_lines").select("id, po_id"),
     db.schema("orchard_calcs").from("po_line_statuses").select("po_line_id, state"),
@@ -41,7 +41,7 @@ export async function GET() {
   }
 
   const openInvoices = openInvoicesResult.data ?? [];
-  const invoicesWithoutReceipt = openInvoices.filter((inv) => inv.match_status === "Open").length;
+  const invoicesWithoutReceipt = openInvoices.filter((inv) => inv.match_status === "Unmatched" || !inv.match_status).length;
 
   // Compute AP summary
   const payStatusMap = new Map((invoiceStatusesResult.data ?? []).map((s) => [s.invoice_id, s.payment_status as string]));

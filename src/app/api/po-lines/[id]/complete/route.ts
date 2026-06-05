@@ -121,7 +121,7 @@ export async function POST(
         path_id: pathId,
         source_doc_type: "po_line",
         source_doc_id: id,
-        state: "confirmed",
+        status: "confirmed",
       });
     if (movError) return NextResponse.json({ error: movError.message }, { status: 500 });
   }

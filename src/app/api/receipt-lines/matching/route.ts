@@ -37,8 +37,8 @@ export async function GET() {
     const { data: silverStatuses } = await db
       .schema("orchard_calcs")
       .from("receipt_line_statuses")
-      .select("receipt_line_id, status");
-    const statusByLineId = new Map((silverStatuses ?? []).map((s) => [s.receipt_line_id as string, s.status as string]));
+      .select("receipt_line_id, transfer_status, flag");
+    const statusByLineId = new Map((silverStatuses ?? []).map((s) => [s.receipt_line_id as string, s]));
     const allReceipts = receiptsResult.data ?? [];
     const allWOs = woResult.data ?? [];
     const allItems = itemsResult.data ?? [];
@@ -301,7 +301,7 @@ export async function GET() {
 
       const rawItemId = rl.item_id as string | null;
       const threePlSku = (rl.three_pl_sku as string) || null;
-      const rlStatus = statusByLineId.get(rl.id as string) ?? "Open";
+      const rlStatus = statusByLineId.get(rl.id as string);
 
       // Resolve item_id (fall back to SKU_MAPPING for 3PL SKUs)
       let itemId = rawItemId;
@@ -317,11 +317,9 @@ export async function GET() {
       const isWOLinked = receiptToWOId.has(receiptId);
 
       let status: "open" | "linked" | "matched" | "excluded";
-      if (rlStatus === "Excluded") {
+      if (rlStatus?.flag === "excluded") {
         status = "excluded";
-      } else if (rlStatus === "Matched" || isPOMatched || isWOLinked) {
-        // "linked" = source matched but not necessarily invoice matched
-        // Simplified: treat Matched status as "linked" (full match requires invoice too)
+      } else if (rlStatus?.transfer_status === "matched" || isPOMatched || isWOLinked) {
         status = "linked";
       } else {
         status = "open";

@@ -497,6 +497,7 @@ export async function POST(request: NextRequest) {
                 newReceipts: writeResult.newReceipts,
                 skippedExisting: writeResult.skippedExisting,
                 totalReceiptRows: writeResult.totalReceiptRows,
+                failedOrders: writeResult.failedOrders,
               },
               status: "approved",
               reviewed_at: new Date().toISOString(),

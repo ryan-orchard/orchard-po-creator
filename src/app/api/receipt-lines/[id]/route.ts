@@ -1,14 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireOperator } from "@/lib/auth";
 import { db } from "@/lib/supabase";
-import { setReceiptLineStatus, type ReceiptLineStatus } from "@/lib/receipt-status";
+import {
+  setReceiptLineTransferStatus,
+  setReceiptLineInvoiceStatus,
+  setReceiptLineFlag,
+  type ReceiptLineTransferStatus,
+  type ReceiptLineInvoiceStatus,
+  type ReceiptLineFlag,
+} from "@/lib/receipt-status";
 
 /**
  * PATCH /api/receipt-lines/[id]
  *
- * Update a receipt line. Supports:
- * - { skuId: string } — Update item link (Silver line item_id)
- * - { matchStatus: "Open" | "Matched" | "Excluded" | "Review" } — Update Silver status
+ * Supports:
+ * - { skuId: string } — update item link
+ * - { transferStatus: "unmatched" | "partial" | "matched" } — update transfer match state
+ * - { invoiceStatus: "unmatched" | "matched" } — update invoice match state
+ * - { flag: "excluded" | "review" | null } — set or clear operational flag
  */
 export async function PATCH(
   request: NextRequest,
@@ -19,7 +28,6 @@ export async function PATCH(
   try {
     const { id } = await params;
     const body = await request.json();
-
     let didSomething = false;
 
     if (body.skuId !== undefined) {
@@ -33,13 +41,33 @@ export async function PATCH(
       didSomething = true;
     }
 
-    if (body.matchStatus !== undefined) {
-      const valid = ["Open", "Matched", "Excluded", "Review"];
-      if (!valid.includes(body.matchStatus)) {
-        return NextResponse.json({ error: `matchStatus must be one of: ${valid.join(", ")}` }, { status: 400 });
+    if (body.transferStatus !== undefined) {
+      const valid: ReceiptLineTransferStatus[] = ["unmatched", "partial", "matched"];
+      if (!valid.includes(body.transferStatus)) {
+        return NextResponse.json({ error: `transferStatus must be one of: ${valid.join(", ")}` }, { status: 400 });
       }
-      const { error } = await setReceiptLineStatus(id, body.matchStatus as ReceiptLineStatus, "Ryan Belanger");
+      const { error } = await setReceiptLineTransferStatus(id, body.transferStatus, "Ryan Belanger");
       if (error) return NextResponse.json({ error: (error as { message?: string }).message ?? "status update failed" }, { status: 500 });
+      didSomething = true;
+    }
+
+    if (body.invoiceStatus !== undefined) {
+      const valid: ReceiptLineInvoiceStatus[] = ["unmatched", "matched"];
+      if (!valid.includes(body.invoiceStatus)) {
+        return NextResponse.json({ error: `invoiceStatus must be one of: ${valid.join(", ")}` }, { status: 400 });
+      }
+      const { error } = await setReceiptLineInvoiceStatus(id, body.invoiceStatus, "Ryan Belanger");
+      if (error) return NextResponse.json({ error: (error as { message?: string }).message ?? "status update failed" }, { status: 500 });
+      didSomething = true;
+    }
+
+    if (body.flag !== undefined) {
+      const valid: (ReceiptLineFlag)[] = ["excluded", "review", null];
+      if (!valid.includes(body.flag)) {
+        return NextResponse.json({ error: `flag must be one of: excluded, review, null` }, { status: 400 });
+      }
+      const { error } = await setReceiptLineFlag(id, body.flag as ReceiptLineFlag, "Ryan Belanger");
+      if (error) return NextResponse.json({ error: (error as { message?: string }).message ?? "flag update failed" }, { status: 500 });
       didSomething = true;
     }
 

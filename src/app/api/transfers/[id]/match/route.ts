@@ -2,10 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireOperator } from "@/lib/auth";
 import { db } from "@/lib/supabase";
 
+function rollUpTransferStatus(statuses: string[]): string {
+  if (statuses.length === 0) return "in_transit";
+  const active = statuses.filter((s) => s !== "cancelled");
+  if (active.length === 0) return "cancelled";
+  if (active.every((s) => s === "received")) return "received";
+  if (active.some((s) => s === "received" || s === "partial")) return "partial";
+  return "in_transit";
+}
+
 // POST /api/transfers/[id]/match
 // Confirm transfer-line <-> receipt-line matches. Recomputes received qty,
-// flips fully-matched lines' movements to 'confirmed', and rolls the
-// transfer status up to 'received' once every line is closed.
+// writes transfer_line_statuses, flips movements, and rolls transfer status
+// up from line statuses.
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -64,22 +73,33 @@ export async function POST(
     }
   }
 
-  // Flip each line's movement: 'confirmed' only on an exact qty match.
-  let allClosed = lines.length > 0;
+  // Update each line's movement and status.
+  const lineStatusRows: { transfer_line_id: string; status: string; updated_at: string; updated_by: string }[] = [];
   for (const line of lines) {
     const shipped = Number(line.shipped_qty) || 0;
     const received = receivedByLine.get(line.id as string) ?? 0;
-    const movementState = shipped > 0 && received === shipped ? "confirmed" : "pending";
+    const movementStatus = shipped > 0 && received === shipped ? "confirmed" : "pending";
     await db
       .schema("orchard_calcs")
       .from("movements")
-      .update({ state: movementState, updated_at: now })
+      .update({ status: movementStatus, updated_at: now })
       .eq("source_doc_type", "transfer_line")
       .eq("source_doc_id", line.id);
-    if (received < shipped) allClosed = false;
+    const lineStatus =
+      received === 0 ? "in_transit" : received < shipped ? "partial" : "received";
+    lineStatusRows.push({ transfer_line_id: line.id as string, status: lineStatus, updated_at: now, updated_by: "Ryan Belanger" });
   }
 
-  const newStatus = allClosed ? "received" : "in_transit";
+  if (lineStatusRows.length > 0) {
+    await db
+      .schema("orchard_calcs")
+      .from("transfer_line_statuses")
+      .upsert(lineStatusRows, { onConflict: "transfer_line_id" });
+  }
+
+  // Roll up to transfer header.
+  const lineStatuses = lineStatusRows.map((r) => r.status);
+  const newStatus = rollUpTransferStatus(lineStatuses);
   await db
     .schema("orchard")
     .from("transfers")

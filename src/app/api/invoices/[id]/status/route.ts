@@ -22,24 +22,21 @@ export async function PATCH(
   }
 
   try {
-    // Update denormalized fields on invoices table
-    const invoiceUpdates: Record<string, unknown> = {};
-    if (matchStatus) invoiceUpdates.match_status = matchStatus;
-    if (classification !== undefined) invoiceUpdates.classification = classification;
-
-    if (Object.keys(invoiceUpdates).length > 0) {
-      await db.schema("orchard").from("invoices").update(invoiceUpdates).eq("id", id);
+    // classification lives on the invoices base table; match/payment status live in invoice_statuses.
+    if (classification !== undefined) {
+      await db.schema("orchard").from("invoices").update({ classification }).eq("id", id);
     }
 
-    // Upsert into invoice_statuses (authoritative for payment + match status)
     const statusUpsert: Record<string, unknown> = { invoice_id: id, updated_by: "Ryan Belanger" };
     if (paymentStatus) statusUpsert.payment_status = paymentStatus;
     if (matchStatus) statusUpsert.match_status = matchStatus;
 
-    await db
-      .schema("orchard_calcs")
-      .from("invoice_statuses")
-      .upsert(statusUpsert, { onConflict: "invoice_id" });
+    if (paymentStatus || matchStatus) {
+      await db
+        .schema("orchard_calcs")
+        .from("invoice_statuses")
+        .upsert(statusUpsert, { onConflict: "invoice_id" });
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

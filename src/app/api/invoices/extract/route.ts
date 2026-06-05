@@ -3,7 +3,7 @@ export const runtime = "nodejs";
 import { NextRequest, NextResponse } from "next/server";
 import { requireOperator } from "@/lib/auth";
 import Anthropic from "@anthropic-ai/sdk";
-import { getRecords, TABLES } from "@/lib/airtable";
+import { db } from "@/lib/supabase";
 
 const client = new Anthropic();
 
@@ -147,10 +147,12 @@ export async function POST(request: NextRequest) {
     // Check for duplicate
     let isDuplicate = false;
     if (extracted.invoiceNumber) {
-      const existing = await getRecords(TABLES.INVOICES, {
-        filterByFormula: `{Invoice Number} = "${extracted.invoiceNumber}"`,
-      });
-      isDuplicate = existing.length > 0;
+      const { count } = await db
+        .schema("orchard")
+        .from("invoices")
+        .select("id", { count: "exact", head: true })
+        .eq("invoice_number", extracted.invoiceNumber);
+      isDuplicate = (count ?? 0) > 0;
     }
 
     return NextResponse.json({

@@ -61,6 +61,7 @@ const FILTER_FIELDS: { field: FilterField; label: string }[] = [
 
 type SortField =
   | "poNumber"
+  | "orderDate"
   | "itemSku"
   | "itemName"
   | "supplierName"
@@ -377,6 +378,9 @@ export default function POLinesPage() {
         case "poNumber":
           cmp = a.poNumber.localeCompare(b.poNumber, undefined, { numeric: true });
           break;
+        case "orderDate":
+          cmp = (a.orderDate || "9999").localeCompare(b.orderDate || "9999");
+          break;
         case "itemSku":
           cmp = a.itemSku.localeCompare(b.itemSku);
           break;
@@ -462,6 +466,7 @@ export default function POLinesPage() {
   type Col = { field: SortField; label: string; align: string; width: string };
   const baseCols: Col[] = [
     { field: "poNumber",     label: "PO #",        align: "text-left",  width: "w-24" },
+    { field: "orderDate",    label: "PO Date",     align: "text-left",  width: "w-24" },
     { field: "itemSku",      label: "SKU",         align: "text-left",  width: "w-44" },
     { field: "itemName",     label: "Description", align: "text-left",  width: "" },
     { field: "supplierName", label: "Supplier",    align: "text-left",  width: "w-24" },
@@ -494,6 +499,7 @@ export default function POLinesPage() {
       cols.map((c) => {
         switch (c.field) {
           case "poNumber": return l.poNumber;
+          case "orderDate": return fmtDate(l.orderDate);
           case "itemSku": return l.itemSku;
           case "itemName": return l.itemName;
           case "supplierName": return l.supplierName;
@@ -724,6 +730,7 @@ export default function POLinesPage() {
                     className="border-b border-gray-100 last:border-0 hover:bg-gray-50/60 cursor-pointer"
                   >
                     <td className="px-4 py-2.5 font-medium text-gray-900 whitespace-nowrap">{line.poNumber}</td>
+                    <td className="px-4 py-2.5 text-gray-600 tabular-nums whitespace-nowrap">{fmtDate(line.orderDate)}</td>
                     <td className="px-4 py-2.5 text-gray-900 truncate" title={line.itemSku}>
                       {line.itemSku || "—"}
                     </td>

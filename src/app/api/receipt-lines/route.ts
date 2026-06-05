@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
       invoicesRes,
     ] = await Promise.all([
       db.schema("orchard_calcs").from("receipt_lines").select("*"),
-      db.schema("orchard_calcs").from("receipt_line_statuses").select("receipt_line_id, status"),
+      db.schema("orchard_calcs").from("receipt_line_statuses").select("receipt_line_id, transfer_status, invoice_status, flag"),
       db.schema("org_config").from("items").select("id, sku"),
       db.schema("orchard").from("purchase_orders").select("id, po_number"),
       db.schema("orchard_calcs").from("receipt_line_invoice_line_links").select("receipt_line_id, invoice_line_id"),
@@ -47,7 +47,7 @@ export async function GET(request: NextRequest) {
     if (invoicesRes.error) throw invoicesRes.error;
 
     const silverLines = silverLinesRes.data ?? [];
-    const statusByLineId = new Map((statusesRes.data ?? []).map((s) => [s.receipt_line_id, s.status as string]));
+    const statusByLineId = new Map((statusesRes.data ?? []).map((s) => [s.receipt_line_id, s]));
     const itemsById = new Map((itemsRes.data ?? []).map((i) => [i.id, i]));
     const posById = new Map((posRes.data ?? []).map((p) => [p.id, p]));
 
@@ -79,20 +79,21 @@ export async function GET(request: NextRequest) {
     // Counts (over all lines, before filter)
     const counts = { unmatched: 0, matched: 0, excluded: 0 };
     for (const line of silverLines) {
-      const s = (statusByLineId.get(line.id as string) ?? "Open").toLowerCase();
-      // Treat Open and Unmatched as "unmatched" for the badge
-      if (s === "matched") counts.matched++;
-      else if (s === "excluded") counts.excluded++;
+      const s = statusByLineId.get(line.id as string);
+      if (s?.flag === "excluded") counts.excluded++;
+      else if (s?.transfer_status === "matched" || s?.invoice_status === "matched") counts.matched++;
       else counts.unmatched++;
     }
 
-    // Filter by status
+    // Filter by status param
     let filtered = silverLines;
     if (status) {
+      const f = status.toLowerCase();
       filtered = filtered.filter((l) => {
-        const s = (statusByLineId.get(l.id as string) ?? "Open").toLowerCase();
-        if (status.toLowerCase() === "unmatched") return s === "open" || s === "unmatched";
-        return s === status.toLowerCase();
+        const s = statusByLineId.get(l.id as string);
+        if (f === "excluded") return s?.flag === "excluded";
+        if (f === "matched") return s?.transfer_status === "matched" || s?.invoice_status === "matched";
+        return !s || (s.transfer_status === "unmatched" && s.invoice_status === "unmatched" && !s.flag);
       });
     }
 
@@ -103,9 +104,7 @@ export async function GET(request: NextRequest) {
       const receiptId = line.source === "stord"
         ? bronzeReceiptByLineId.get(line.id as string) ?? syntheticReceiptId(line.source, line.source_doc_no, line.id as string)
         : syntheticReceiptId(line.source, line.source_doc_no, line.id as string);
-      const rawStatus = statusByLineId.get(line.id as string) ?? "Open";
-      // Frontend uses "Unmatched" terminology — Open is the new "Unmatched"
-      const displayStatus = rawStatus === "Open" ? "Unmatched" : rawStatus;
+      const s = statusByLineId.get(line.id as string);
 
       return {
         id: line.id,
@@ -118,10 +117,12 @@ export async function GET(request: NextRequest) {
         qty: line.qty_received,
         orderRef: line.source_doc_no,
         poNumber: po?.po_number ?? null,
-        stordReceiptId: null, // Bronze-only field; not exposed via Silver
+        stordReceiptId: null,
         invoiceId: invoice?.id ?? null,
         invoiceNumber: invoice?.number ?? null,
-        status: displayStatus,
+        transferStatus: s?.transfer_status ?? "unmatched",
+        invoiceStatus: s?.invoice_status ?? "unmatched",
+        flag: s?.flag ?? null,
         source: line.source,
       };
     });

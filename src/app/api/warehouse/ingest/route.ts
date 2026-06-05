@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireOperator } from "@/lib/auth";
 import * as XLSX from "xlsx";
-import { getRecords, TABLES } from "@/lib/airtable";
+import { db } from "@/lib/supabase";
 import { SKU_MAPPING } from "@/lib/client-config";
 
 interface StordRow {
@@ -32,7 +32,7 @@ interface ParsedReceipt {
     qtyReceived: number;
     lotNumber: string | null;
     standardSku: string | null;
-    airtableSkuId: string | null;
+    itemId: string | null;
     skuMapped: boolean;
   }[];
 }
@@ -158,12 +158,14 @@ export async function POST(request: NextRequest) {
       receiptGroups[key].push(row);
     }
 
-    // Fetch items for UOM lookup (still needed for SKU mapping context)
-    const allItems = await getRecords(TABLES.SKUS);
-    const itemUOM: Record<string, string> = {};
-    for (const item of allItems) {
-      itemUOM[item.id] = (item.fields["UOM"] as string) || "Each";
-    }
+    // Fetch items from Supabase for SKU mapping and available items dropdown
+    const { data: itemRows } = await db
+      .schema("org_config")
+      .from("items")
+      .select("id, sku, accounting_category, is_active")
+      .eq("is_active", true);
+    const allItems = itemRows ?? [];
+    const itemIdBySku = new Map(allItems.map((i) => [i.sku as string, i.id as string]));
 
     // Build parsed receipts — no PO matching
     const parsedReceipts: ParsedReceipt[] = [];
@@ -190,13 +192,14 @@ export async function POST(request: NextRequest) {
       const lines = Object.entries(skuAgg).map(([stordSku, agg]) => {
         const mapping = SKU_MAPPING[stordSku];
 
+        const standardSku = mapping?.standardSku || null;
         return {
           stordSku,
           productName: agg.productName,
           qtyReceived: agg.qty,
           lotNumber: Array.from(agg.lotNumbers).join(", ") || null,
-          standardSku: mapping?.standardSku || null,
-          airtableSkuId: mapping?.airtableId || null,
+          standardSku,
+          itemId: standardSku ? (itemIdBySku.get(standardSku) ?? null) : null,
           skuMapped: mapping !== undefined,
         };
       });
@@ -222,11 +225,10 @@ export async function POST(request: NextRequest) {
 
     // Build items list for SKU mapping dropdown
     const availableItems = allItems
-      .filter((item) => (item.fields["Status"] as string) !== "Inactive")
       .map((item) => ({
-        id: item.id,
-        standardSku: (item.fields["Standard SKU"] as string) || "",
-        category: (item.fields["Category"] as string) || "",
+        id: item.id as string,
+        standardSku: (item.sku as string) || "",
+        category: (item.accounting_category as string) || "",
       }))
       .sort((a, b) => a.standardSku.localeCompare(b.standardSku));
 

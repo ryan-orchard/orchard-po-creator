@@ -2,6 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireOperator } from "@/lib/auth";
 import { db } from "@/lib/supabase";
 
+function rollUpTransferStatus(statuses: string[]): string {
+  if (statuses.length === 0) return "in_transit";
+  const active = statuses.filter((s) => s !== "cancelled");
+  if (active.length === 0) return "cancelled";
+  if (active.every((s) => s === "received")) return "received";
+  if (active.some((s) => s === "received" || s === "partial")) return "partial";
+  return "in_transit";
+}
+
 // GET /api/transfers/[id] — header + lines with match state.
 export async function GET(
   _request: NextRequest,
@@ -103,6 +112,21 @@ export async function GET(
     }
   }
 
+  // Line statuses — authoritative source for transfer status rollup.
+  const { data: lineStatusRows } = lineIds.length
+    ? await db
+        .schema("orchard_calcs")
+        .from("transfer_line_statuses")
+        .select("transfer_line_id, status")
+        .in("transfer_line_id", lineIds)
+    : { data: [] };
+  const lineStatusMap = new Map(
+    (lineStatusRows ?? []).map((r) => [r.transfer_line_id as string, r.status as string])
+  );
+  const transferStatus = lineIds.length
+    ? rollUpTransferStatus(lineIds.map((lid) => lineStatusMap.get(lid) ?? "in_transit"))
+    : (transfer.status as string) ?? "in_transit";
+
   const fromLoc = locMap.get(transfer.from_location_id as string);
   const toLoc = locMap.get(transfer.to_location_id as string);
 
@@ -124,6 +148,7 @@ export async function GET(
       lotNumber: (l.lot_number as string | null) ?? null,
       poLineId: (l.po_line_id as string | null) ?? null,
       hasVariance: receivedQty > 0 && receivedQty !== shippedQty,
+      lineStatus: lineStatusMap.get(l.id as string) ?? "in_transit",
       matches,
     };
   });
@@ -164,7 +189,7 @@ export async function GET(
     carrier: (transfer.carrier as string | null) ?? null,
     shipDate: transfer.ship_date,
     expectedArrivalDate: (transfer.expected_arrival_date as string | null) ?? null,
-    status: transfer.status,
+    status: transferStatus,
     notes: (transfer.notes as string | null) ?? null,
     freightTotal,
     lines: detailLines,

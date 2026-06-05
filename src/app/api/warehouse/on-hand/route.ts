@@ -149,13 +149,13 @@ async function fetchAnsInventory(
       .from("movements")
       .select("item_id, qty, occurred_at")
       .eq("to_location_id", ANS_LOCATION_ID)
-      .eq("state", "confirmed"),
+      .eq("status", "confirmed"),
     db
       .schema("orchard_calcs")
       .from("movements")
       .select("item_id, qty")
       .eq("from_location_id", ANS_LOCATION_ID)
-      .eq("state", "confirmed")
+      .eq("status", "confirmed")
       // Exclude the bill-and-hold self-loop from outflows
       .neq("to_location_id", ANS_LOCATION_ID),
   ]);

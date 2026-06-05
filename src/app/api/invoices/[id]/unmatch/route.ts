@@ -50,18 +50,10 @@ export async function POST(
       linesCleared += (receiptLinks ?? []).length;
     }
 
-    // Reset invoice match_status
-    await db
-      .schema("orchard")
-      .from("invoices")
-      .update({ match_status: "Open" })
-      .eq("id", invoiceId);
-
-    // Sync invoice_statuses
     await db
       .schema("orchard_calcs")
       .from("invoice_statuses")
-      .upsert({ invoice_id: invoiceId, match_status: "Open", updated_by: "Ryan Belanger" }, { onConflict: "invoice_id" });
+      .upsert({ invoice_id: invoiceId, match_status: "Unmatched", updated_by: "Ryan Belanger" }, { onConflict: "invoice_id" });
 
     return NextResponse.json({ success: true, invoiceId, linesCleared });
   } catch (error) {

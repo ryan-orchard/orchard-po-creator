@@ -32,9 +32,20 @@ export async function POST(
     await db
       .schema("orchard_calcs")
       .from("movements")
-      .update({ state: "reversed", updated_at: now })
+      .update({ status: "reversed", updated_at: now })
       .eq("source_doc_type", "transfer_line")
       .in("source_doc_id", lineIds);
+
+    const cancelRows = lineIds.map((lid) => ({
+      transfer_line_id: lid,
+      status: "cancelled",
+      updated_at: now,
+      updated_by: "Ryan Belanger",
+    }));
+    await db
+      .schema("orchard_calcs")
+      .from("transfer_line_statuses")
+      .upsert(cancelRows, { onConflict: "transfer_line_id" });
   }
 
   return NextResponse.json({ success: true, id });

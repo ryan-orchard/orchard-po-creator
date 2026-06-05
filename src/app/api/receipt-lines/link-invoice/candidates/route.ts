@@ -133,26 +133,38 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // 6. Load those invoices (excluding already-Matched)
-    const { data: invoices } = await db
-      .schema("orchard")
-      .from("invoices")
-      .select(
-        "id, invoice_number, invoice_date, supplier_id, po_reference, total_amount, match_status, invoice_type, ship_to_text"
-      )
-      .in("id", candidateInvoiceIds)
-      .neq("match_status", "Matched");
+    // 6. Load those invoices and their authoritative match statuses
+    const [{ data: invoices }, { data: invoiceStatusRows }] = await Promise.all([
+      db
+        .schema("orchard")
+        .from("invoices")
+        .select("id, invoice_number, invoice_date, supplier_id, po_reference, total_amount, invoice_type, ship_to_text")
+        .in("id", candidateInvoiceIds),
+      db
+        .schema("orchard_calcs")
+        .from("invoice_statuses")
+        .select("invoice_id, match_status")
+        .in("invoice_id", candidateInvoiceIds),
+    ]);
+    const invoiceMatchStatusMap = new Map(
+      (invoiceStatusRows ?? []).map((s) => [s.invoice_id as string, s.match_status as string])
+    );
+    const unmatchedInvoices = (invoices ?? []).filter(
+      (inv) => (invoiceMatchStatusMap.get(inv.id as string) ?? "Unmatched") !== "Matched"
+    );
 
-    if (!invoices || invoices.length === 0) {
+    if (!unmatchedInvoices || unmatchedInvoices.length === 0) {
       return NextResponse.json({
         candidates: [],
         selectedItems,
         selectedRefs,
       });
     }
+    // Alias for the rest of the function
+    const invoices_ = unmatchedInvoices;
 
     // 7. Load all lines for those invoices
-    const invoiceIds = invoices.map((i) => i.id as string);
+    const invoiceIds = invoices_.map((i) => i.id as string);
     const { data: allInvoiceLines } = await db
       .schema("orchard")
       .from("invoice_lines")
@@ -184,7 +196,7 @@ export async function GET(request: NextRequest) {
     // 9. Supplier lookup for display
     const allSupplierIds = [
       ...new Set(
-        invoices.map((i) => i.supplier_id as string).filter(Boolean)
+        invoices_.map((i) => i.supplier_id as string).filter(Boolean)
       ),
     ];
     const { data: suppliers } = allSupplierIds.length
@@ -211,7 +223,7 @@ export async function GET(request: NextRequest) {
     const normalizedRefs = selectedRefs.map(normalize).filter(Boolean);
     const selectedItemIdSet = new Set(itemIds);
 
-    const candidates = invoices.map((inv) => {
+    const candidates = invoices_.map((inv) => {
       const lines = (linesByInvoice.get(inv.id as string) ?? []).map((l) => {
         const itemId = (l.item_id as string) ?? null;
         return {
@@ -253,7 +265,7 @@ export async function GET(request: NextRequest) {
         poReference: (inv.po_reference as string) ?? "",
         shipTo: (inv.ship_to_text as string) ?? "",
         invoiceType: (inv.invoice_type as string) ?? "Supplier",
-        matchStatus: (inv.match_status as string) ?? "Open",
+        matchStatus: invoiceMatchStatusMap.get(inv.id as string) ?? "Unmatched",
         skuOverlap: overlapItemIds.size,
         poRefMatches,
         supplierMatches,

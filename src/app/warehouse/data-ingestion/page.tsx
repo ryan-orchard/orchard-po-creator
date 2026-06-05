@@ -11,7 +11,7 @@ interface ReceiptLine {
   qtyReceived: number;
   lotNumber: string | null;
   standardSku: string | null;
-  airtableSkuId: string | null;
+  itemId: string | null;
   skuMapped: boolean;
 }
 
@@ -145,7 +145,7 @@ export default function DataIngestionPage() {
           externalReceiptId: receipt.orderNumber,
           lineItems: activeLines.map(({ line, lineIdx }) => {
             const overrideKey = `${i}-${lineIdx}`;
-            const skuId = skuOverrides[overrideKey] || line.airtableSkuId || undefined;
+            const skuId = skuOverrides[overrideKey] || line.itemId || undefined;
             return {
               skuId,
               qtyReceived: line.qtyReceived,
@@ -165,7 +165,7 @@ export default function DataIngestionPage() {
       }
 
       setSubmitted(true);
-      alert(`Created ${created} receipt(s) in Airtable. Go to Receipt Matching to link them to POs.`);
+      alert(`Created ${created} receipt(s). Go to Receipt Matching to link them to POs.`);
     } catch {
       alert("Error creating receipts. Please try again.");
     } finally {

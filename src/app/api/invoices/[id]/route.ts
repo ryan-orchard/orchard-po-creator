@@ -240,7 +240,7 @@ export async function GET(
       freight: Number(inv.freight) || 0,
       tax: Number(inv.tax) || 0,
       invoiceAmount: Number(inv.total_amount) || 0,
-      matchStatus: statusResult.data?.match_status ?? inv.match_status ?? "Open",
+      matchStatus: statusResult.data?.match_status ?? "Unmatched",
       paymentStatus: statusResult.data?.payment_status ?? "Unpaid",
       classification: inv.classification ?? "",
       notes: inv.notes ?? "",
@@ -264,7 +264,6 @@ export async function PATCH(
 
   const fieldMap: Record<string, string> = {
     workOrderId: "wo_id",
-    status: "match_status",
     invoiceNumber: "invoice_number",
     invoiceDate: "invoice_date",
     dueDate: "due_date",
@@ -295,14 +294,6 @@ export async function PATCH(
 
   const { error } = await db.schema("orchard").from("invoices").update(updates).eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-  // Sync match_status to invoice_statuses table too
-  if ("status" in body) {
-    await db
-      .schema("orchard_calcs")
-      .from("invoice_statuses")
-      .upsert({ invoice_id: id, match_status: body.status, updated_by: "Ryan Belanger" }, { onConflict: "invoice_id" });
-  }
 
   return NextResponse.json({ success: true, id });
 }
