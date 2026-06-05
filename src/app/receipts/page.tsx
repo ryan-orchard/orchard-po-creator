@@ -114,7 +114,18 @@ export default function ReceiptsPage() {
         return;
       }
       const data = await res.json();
-      setLines(data.lines || data || []);
+      const raw: (ReceiptLine & { invoiceStatus?: string; transferStatus?: string; flag?: string | null })[] =
+        data.lines || data || [];
+      // Map new split-status fields to the single Status field the page uses.
+      const mapped: ReceiptLine[] = raw.map((l) => ({
+        ...l,
+        status: (l.flag === "excluded"
+          ? "excluded"
+          : l.invoiceStatus === "matched"
+            ? "matched"
+            : "unmatched") as Status,
+      }));
+      setLines(mapped);
     } catch {
       setError("Failed to connect to server.");
     } finally {

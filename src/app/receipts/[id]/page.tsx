@@ -2,21 +2,41 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
+import LinkInvoiceModal, { ReceiptLineSummary } from "@/components/LinkInvoiceModal";
 
-interface ReceiptLine {
-  id: string;
-  skuId: string | null;
-  sku: string | null;
-  uom: string | null;
-  qtyReceived: number;
-  threePlSku: string | null;
-  lotNumber: string | null;
-  matched: boolean;
+// ─── types ────────────────────────────────────────────────────────────────────
+
+interface InvoiceCost {
+  invoiceId: string;
+  invoiceNumber: string;
+  unitCost: number;
+  overheadPerUnit: number;
+  landedUnitCost: number;
 }
 
-interface AvailableItem {
+interface InvoiceSuggestion extends InvoiceCost {
+  invoiceLineId: string;
+  confidence: "high" | "medium" | "low";
+}
+
+interface TransferSummary {
+  transferId: string;
+  transferNumber: string;
+  totalShippedQty: number;
+  totalReceivedQty: number;
+}
+
+interface ReceiptLineDetail {
   id: string;
-  standardSku: string;
+  sku: string | null;
+  itemId: string | null;
+  qtyReceived: number;
+  lotNumber: string | null;
+  threePlSku: string | null;
+  transferStatus: string;
+  invoiceStatus: string;
+  linkedInvoice: InvoiceCost | null;
+  suggestedInvoice: InvoiceSuggestion | null;
 }
 
 interface ReceiptDetail {
@@ -24,15 +44,31 @@ interface ReceiptDetail {
   receiptNumber: string;
   receivedDate: string;
   externalReceiptId: string | null;
-  notes: string | null;
-  purchaseOrder: string | null;
-  purchaseOrderId: string | null;
   warehouse: string | null;
-  warehouseId: string | null;
-  stordReceiptId: string | null;
-  lines: ReceiptLine[];
-  availableItems: AvailableItem[];
+  notes: string | null;
+  transfers: TransferSummary[];
+  lines: ReceiptLineDetail[];
+  matchedLineCount: number;
+  unmatchedLineCount: number;
 }
+
+// ─── helpers ──────────────────────────────────────────────────────────────────
+
+function fmt(d: string) {
+  if (!d) return "—";
+  return new Date(d + "T00:00:00").toLocaleDateString("en-US", {
+    month: "2-digit",
+    day: "2-digit",
+    year: "2-digit",
+  });
+}
+
+function fmtCurrency(n: number) {
+  if (n === 0) return "$0";
+  return `$${n.toFixed(4).replace(/\.?0+$/, "")}`;
+}
+
+// ─── component ────────────────────────────────────────────────────────────────
 
 export default function ReceiptDetailPage() {
   const router = useRouter();
@@ -41,45 +77,44 @@ export default function ReceiptDetailPage() {
 
   const [receipt, setReceipt] = useState<ReceiptDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  const [editingLineId, setEditingLineId] = useState<string | null>(null);
-  const [savingLineId, setSavingLineId] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<string | null>(null); // lineId being confirmed
+  const [modalLine, setModalLine] = useState<{ ids: string[]; summaries: ReceiptLineSummary[] } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [editingField, setEditingField] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
 
-  const loadReceipt = useCallback(() => {
+  const load = useCallback(() => {
+    setLoading(true);
     fetch(`/api/receipts/${id}`)
       .then((r) => r.json())
       .then((data) => {
-        if (data.error) {
-          setReceipt(null);
-        } else {
-          setReceipt(data);
-        }
+        setReceipt(data.error ? null : data);
         setLoading(false);
       })
       .catch(() => setLoading(false));
   }, [id]);
 
   useEffect(() => {
-    loadReceipt();
-  }, [loadReceipt]);
+    load();
+  }, [load]);
 
-  const handleUpdateLineSku = async (lineId: string, newSkuId: string) => {
-    setSavingLineId(lineId);
+  const handleConfirm = async (line: ReceiptLineDetail) => {
+    if (!line.suggestedInvoice) return;
+    setConfirming(line.id);
     try {
-      await fetch(`/api/receipt-lines/${lineId}`, {
-        method: "PATCH",
+      const res = await fetch("/api/receipt-lines/link-invoice", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ skuId: newSkuId }),
+        body: JSON.stringify({
+          receiptLineIds: [line.id],
+          invoiceLineIds: [line.suggestedInvoice.invoiceLineId],
+        }),
       });
-      loadReceipt();
+      if (!res.ok) throw new Error("Link failed");
+      load();
     } catch {
-      alert("Failed to update SKU.");
+      alert("Failed to confirm invoice match. Please try again.");
     } finally {
-      setSavingLineId(null);
-      setEditingLineId(null);
+      setConfirming(null);
     }
   };
 
@@ -92,23 +127,6 @@ export default function ReceiptDetailPage() {
     } catch {
       alert("Failed to delete receipt.");
       setDeleting(false);
-    }
-  };
-
-  const handleUpdateField = async (field: string, value: string | null) => {
-    setSaving(true);
-    try {
-      await fetch(`/api/receipts/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ [field]: value }),
-      });
-      loadReceipt();
-    } catch {
-      alert("Failed to update.");
-    } finally {
-      setSaving(false);
-      setEditingField(null);
     }
   };
 
@@ -128,15 +146,13 @@ export default function ReceiptDetailPage() {
     );
   }
 
-  const totalQty = receipt.lines.reduce((sum, l) => sum + l.qtyReceived, 0);
-  const isMatched = !!receipt.purchaseOrder;
-  const matchedLineCount = receipt.lines.filter((l) => l.matched).length;
-  const unmatchedLineCount = receipt.lines.length - matchedLineCount;
+  const allMatched = receipt.unmatchedLineCount === 0 && receipt.lines.length > 0;
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="max-w-4xl mx-auto px-6 py-8">
-        {/* Header */}
+      <div className="max-w-screen-2xl mx-auto px-6 py-8">
+
+        {/* ── Header ─────────────────────────────────────────────────────── */}
         <div className="flex items-center justify-between mb-6">
           <div>
             <div className="flex items-center gap-3">
@@ -145,29 +161,20 @@ export default function ReceiptDetailPage() {
               </h1>
               <span
                 className={`px-2.5 py-0.5 text-xs font-medium rounded-full ${
-                  isMatched
+                  allMatched
                     ? "bg-sage-100 text-sage-800"
                     : "bg-warm-100 text-warm-800"
                 }`}
               >
-                {isMatched ? "matched" : "unmatched"}
+                {allMatched ? "matched" : `${receipt.unmatchedLineCount} unmatched`}
               </span>
             </div>
             {receipt.externalReceiptId && (
-              <p className="text-sm text-gray-500 mt-1">
-                {receipt.receiptNumber}
-              </p>
+              <p className="text-sm text-gray-500 mt-1">{receipt.receiptNumber}</p>
             )}
           </div>
+
           <div className="flex items-center gap-3">
-            {!isMatched && unmatchedLineCount > 0 && (
-              <button
-                onClick={() => router.push(`/receipts/matching?receipt=${receipt.id}`)}
-                className="bg-gold-500 text-white px-4 py-2 text-sm rounded-md hover:bg-gold-600"
-              >
-                Match to PO
-              </button>
-            )}
             {showDeleteConfirm ? (
               <div className="flex items-center gap-2">
                 <span className="text-sm text-gray-500">Delete this receipt?</span>
@@ -176,7 +183,7 @@ export default function ReceiptDetailPage() {
                   disabled={deleting}
                   className="bg-red-600 text-white px-3 py-1.5 text-sm rounded-md hover:bg-red-700 disabled:opacity-50"
                 >
-                  {deleting ? "Deleting..." : "Confirm"}
+                  {deleting ? "Deleting…" : "Confirm"}
                 </button>
                 <button
                   onClick={() => setShowDeleteConfirm(false)}
@@ -202,262 +209,242 @@ export default function ReceiptDetailPage() {
           </div>
         </div>
 
-        {/* Info Card */}
+        {/* ── Info card ──────────────────────────────────────────────────── */}
         <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
-          <div className="grid grid-cols-2 gap-6">
-            {/* Left column */}
-            <div className="space-y-4">
-              <div>
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
-                  Purchase Order
-                </p>
-                <p className="text-sm text-gray-900">
-                  {receipt.purchaseOrderId ? (
-                    <button
-                      onClick={() => router.push(`/pos/${receipt.purchaseOrderId}`)}
-                      className="font-semibold text-gold-600 hover:text-gold-800 hover:underline"
-                    >
-                      {receipt.purchaseOrder}
-                    </button>
-                  ) : (
-                    <span className="text-warm-600 text-xs font-medium">Not matched</span>
-                  )}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
-                  Warehouse
-                </p>
-                <p className="text-sm text-gray-900">
-                  {receipt.warehouse || "—"}
-                </p>
-              </div>
-              {receipt.notes && (
-                <div>
-                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
-                    Notes
-                  </p>
-                  <p className="text-sm text-gray-900">{receipt.notes}</p>
-                </div>
-              )}
+          <div className="grid grid-cols-3 gap-6">
+            <div>
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
+                Received Date
+              </p>
+              <p className="text-sm text-gray-900">{fmt(receipt.receivedDate)}</p>
             </div>
-
-            {/* Right column */}
-            <div className="space-y-4">
-              <div>
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
-                  Received Date
-                </p>
-                {editingField === "receivedDate" ? (
-                  <input
-                    type="date"
-                    autoFocus
-                    defaultValue={receipt.receivedDate || ""}
-                    disabled={saving}
-                    className="text-sm border border-gray-300 rounded px-2 py-1"
-                    onBlur={(e) => {
-                      if (e.target.value && e.target.value !== receipt.receivedDate) {
-                        handleUpdateField("receivedDate", e.target.value);
-                      } else {
-                        setEditingField(null);
-                      }
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                      if (e.key === "Escape") setEditingField(null);
-                    }}
-                  />
+            <div>
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
+                Warehouse
+              </p>
+              <p className="text-sm text-gray-900">{receipt.warehouse || "—"}</p>
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
+                Invoice Match
+              </p>
+              <p className="text-sm text-gray-900">
+                {receipt.lines.length === 0 ? (
+                  <span className="text-gray-400">No lines</span>
                 ) : (
-                  <p
-                    className="text-sm text-gray-900 cursor-pointer hover:text-gold-600 group"
-                    onClick={() => setEditingField("receivedDate")}
-                  >
-                    {receipt.receivedDate
-                      ? new Date(receipt.receivedDate + "T00:00:00").toLocaleDateString(
-                          "en-US",
-                          { year: "numeric", month: "long", day: "numeric" }
-                        )
-                      : "—"}
-                    <svg className="w-3 h-3 inline ml-1 text-gray-400 opacity-0 group-hover:opacity-100" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                    </svg>
-                  </p>
+                  <>
+                    {receipt.matchedLineCount > 0 && (
+                      <span className="text-sage-700">{receipt.matchedLineCount} matched</span>
+                    )}
+                    {receipt.matchedLineCount > 0 && receipt.unmatchedLineCount > 0 && ", "}
+                    {receipt.unmatchedLineCount > 0 && (
+                      <span className="text-warm-600">{receipt.unmatchedLineCount} unmatched</span>
+                    )}
+                  </>
                 )}
-              </div>
-              <div>
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
-                  External Receipt ID
-                </p>
-                {editingField === "externalReceiptId" ? (
-                  <input
-                    type="text"
-                    autoFocus
-                    defaultValue={receipt.externalReceiptId || ""}
-                    disabled={saving}
-                    className="text-sm border border-gray-300 rounded px-2 py-1 w-full"
-                    onBlur={(e) => {
-                      if (e.target.value !== (receipt.externalReceiptId || "")) {
-                        handleUpdateField("externalReceiptId", e.target.value || null);
-                      } else {
-                        setEditingField(null);
-                      }
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                      if (e.key === "Escape") setEditingField(null);
-                    }}
-                  />
-                ) : (
-                  <p
-                    className="text-sm text-gray-900 cursor-pointer hover:text-gold-600 group"
-                    onClick={() => setEditingField("externalReceiptId")}
-                  >
-                    {receipt.externalReceiptId || "—"}
-                    <svg className="w-3 h-3 inline ml-1 text-gray-400 opacity-0 group-hover:opacity-100" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                    </svg>
-                  </p>
-                )}
-              </div>
-              {receipt.stordReceiptId && (
-                <div>
-                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
-                    Stord Receipt ID
-                  </p>
-                  <p className="text-sm text-gray-500 font-mono text-xs">
-                    {receipt.stordReceiptId}
-                  </p>
-                </div>
-              )}
-              <div>
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
-                  Line Matching
-                </p>
-                <p className="text-sm text-gray-900">
-                  {matchedLineCount > 0 && (
-                    <span className="text-sage-700">{matchedLineCount} matched</span>
-                  )}
-                  {matchedLineCount > 0 && unmatchedLineCount > 0 && ", "}
-                  {unmatchedLineCount > 0 && (
-                    <span className="text-warm-600">{unmatchedLineCount} unmatched</span>
-                  )}
-                  {receipt.lines.length === 0 && "No lines"}
-                </p>
-              </div>
+              </p>
             </div>
           </div>
         </div>
 
-        {/* Line Items */}
+        {/* ── Transfer section ───────────────────────────────────────────── */}
+        {receipt.transfers.length > 0 && (
+          <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
+            <h2 className="text-sm font-semibold text-gray-900 mb-3">
+              Transfer{receipt.transfers.length > 1 ? "s" : ""}
+            </h2>
+            <div className="space-y-2">
+              {receipt.transfers.map((t) => {
+                const variance = t.totalReceivedQty - t.totalShippedQty;
+                return (
+                  <div key={t.transferId} className="flex items-center gap-6 text-sm">
+                    <button
+                      onClick={() => router.push(`/transfers/${t.transferId}`)}
+                      className="font-medium text-gold-600 hover:text-gold-800 hover:underline"
+                    >
+                      {t.transferNumber}
+                    </button>
+                    <span className="text-gray-500">
+                      Shipped {t.totalShippedQty.toLocaleString()} · Received {t.totalReceivedQty.toLocaleString()}
+                    </span>
+                    {variance !== 0 && (
+                      <span className={`text-xs font-medium ${variance < 0 ? "text-warm-600" : "text-sage-700"}`}>
+                        {variance > 0 ? "+" : ""}{variance.toLocaleString()} variance
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ── Lines table ────────────────────────────────────────────────── */}
         <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-200">
+          <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-gray-900">
-              Receipt Lines ({receipt.lines.length})
+              Lines ({receipt.lines.length})
             </h2>
           </div>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-gray-50 border-b border-gray-200">
-                <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  SKU
-                </th>
-                <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  3PL SKU
-                </th>
-                <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  Lot #
-                </th>
-                <th className="text-right px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  Qty Received
-                </th>
-                <th className="text-center px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  Status
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {receipt.lines.map((line) => (
-                <tr key={line.id} className="border-b border-gray-100">
-                  <td className="px-6 py-3">
-                    {editingLineId === line.id ? (
-                      <select
-                        autoFocus
-                        className="text-sm border border-gray-300 rounded px-2 py-1 w-full max-w-[220px]"
-                        defaultValue={line.skuId || ""}
-                        onChange={(e) => {
-                          if (e.target.value) {
-                            handleUpdateLineSku(line.id, e.target.value);
-                          }
-                        }}
-                        onBlur={() => setEditingLineId(null)}
-                      >
-                        <option value="" disabled>
-                          Select SKU...
-                        </option>
-                        {receipt.availableItems.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {item.standardSku}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <span className="flex items-center gap-2">
-                        <span className="text-gray-900">
-                          {savingLineId === line.id
-                            ? "Saving..."
-                            : line.sku || (
-                                <span className="text-burgundy-500 text-xs">No SKU</span>
+
+          {receipt.lines.length === 0 ? (
+            <div className="px-6 py-12 text-center text-sm text-gray-400">
+              No lines found for this receipt.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-200">
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      SKU
+                    </th>
+                    <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      Qty
+                    </th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      Invoice
+                    </th>
+                    <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      Unit Cost
+                    </th>
+                    <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      Overhead/unit
+                    </th>
+                    <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      Landed Unit Cost
+                    </th>
+                    <th className="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      Status
+                    </th>
+                    <th className="px-4 py-3" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {receipt.lines.map((line) => {
+                    const isConfirming = confirming === line.id;
+                    const cost = line.linkedInvoice ?? line.suggestedInvoice;
+
+                    return (
+                      <tr key={line.id} className="border-b border-gray-100 hover:bg-gray-50">
+
+                        {/* SKU */}
+                        <td className="px-4 py-3 font-medium text-gray-900">
+                          {line.sku ?? (
+                            <span className="text-burgundy-500 text-xs">No SKU</span>
+                          )}
+                          {line.lotNumber && (
+                            <span className="ml-2 text-xs text-gray-400">
+                              lot {line.lotNumber}
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Qty */}
+                        <td className="px-4 py-3 text-right tabular-nums text-gray-900">
+                          {line.qtyReceived.toLocaleString()}
+                        </td>
+
+                        {/* Invoice */}
+                        <td className="px-4 py-3">
+                          {line.linkedInvoice ? (
+                            <button
+                              onClick={() => router.push(`/invoices/${line.linkedInvoice!.invoiceId}`)}
+                              className="text-gold-600 hover:text-gold-800 hover:underline font-medium"
+                            >
+                              {line.linkedInvoice.invoiceNumber} ↗
+                            </button>
+                          ) : line.suggestedInvoice ? (
+                            <span className="text-gray-500 text-xs italic">
+                              {line.suggestedInvoice.invoiceNumber}
+                              {line.suggestedInvoice.confidence === "high" && (
+                                <span className="ml-1 text-sage-600 not-italic font-medium">·</span>
                               )}
-                        </span>
-                        <button
-                          onClick={() => setEditingLineId(line.id)}
-                          className="text-gray-400 hover:text-gray-600"
-                          title="Edit SKU"
-                        >
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                          </svg>
-                        </button>
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-6 py-3 text-gray-500 text-xs">
-                    {line.threePlSku || "—"}
-                  </td>
-                  <td className="px-6 py-3 text-gray-600">
-                    {line.lotNumber || "—"}
-                  </td>
-                  <td className="px-6 py-3 text-right font-semibold tabular-nums text-gray-900">
-                    {line.qtyReceived.toLocaleString()}
-                  </td>
-                  <td className="px-6 py-3 text-center">
-                    {line.matched ? (
-                      <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-sage-100 text-sage-800">
-                        Matched
-                      </span>
-                    ) : (
-                      <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-500">
-                        Unmatched
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr className="border-t-2 border-gray-200">
-                <td colSpan={3} className="px-6 py-3 text-sm font-bold text-gray-900">
-                  Total
-                </td>
-                <td className="px-6 py-3 text-right font-bold tabular-nums text-gray-900">
-                  {totalQty.toLocaleString()}
-                </td>
-                <td />
-              </tr>
-            </tfoot>
-          </table>
+                            </span>
+                          ) : (
+                            <span className="text-gray-300">—</span>
+                          )}
+                        </td>
+
+                        {/* Unit Cost */}
+                        <td className="px-4 py-3 text-right tabular-nums text-gray-700">
+                          {cost ? fmtCurrency(cost.unitCost) : <span className="text-gray-300">$0</span>}
+                        </td>
+
+                        {/* Overhead/unit */}
+                        <td className="px-4 py-3 text-right tabular-nums text-gray-700">
+                          {cost ? fmtCurrency(cost.overheadPerUnit) : <span className="text-gray-300">$0</span>}
+                        </td>
+
+                        {/* Landed Unit Cost */}
+                        <td className="px-4 py-3 text-right tabular-nums font-semibold text-gray-900">
+                          {cost ? fmtCurrency(cost.landedUnitCost) : <span className="text-gray-300">$0</span>}
+                        </td>
+
+                        {/* Status */}
+                        <td className="px-4 py-3 text-center">
+                          {line.invoiceStatus === "matched" ? (
+                            <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-sage-100 text-sage-800">
+                              Matched
+                            </span>
+                          ) : line.suggestedInvoice ? (
+                            <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-gold-100 text-gold-800">
+                              Suggested
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-500">
+                              Unmatched
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Action */}
+                        <td className="px-4 py-3 text-right">
+                          {line.invoiceStatus === "matched" ? null : line.suggestedInvoice ? (
+                            <button
+                              onClick={() => handleConfirm(line)}
+                              disabled={isConfirming}
+                              className="px-3 py-1 text-xs font-medium bg-sage-600 text-white rounded hover:bg-sage-700 disabled:opacity-50 whitespace-nowrap"
+                            >
+                              {isConfirming ? "Saving…" : "Confirm"}
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => {
+                                if (!line.itemId || !line.sku) return;
+                                setModalLine({
+                                  ids: [line.id],
+                                  summaries: [{ itemSku: line.sku, qty: line.qtyReceived, ref: receipt.externalReceiptId }],
+                                });
+                              }}
+                              className="px-3 py-1 text-xs font-medium border border-gray-300 text-gray-700 rounded hover:bg-gray-50 whitespace-nowrap"
+                            >
+                              Link Invoice
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* ── Link Invoice Modal (fallback for lines with no suggestion) ───── */}
+      {modalLine && (
+        <LinkInvoiceModal
+          receiptLineIds={modalLine.ids}
+          receiptSummaries={modalLine.summaries}
+          onClose={() => setModalLine(null)}
+          onSuccess={() => {
+            setModalLine(null);
+            load();
+          }}
+        />
+      )}
     </div>
   );
 }
