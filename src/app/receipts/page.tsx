@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
+import LinkInvoiceModal, { ReceiptLineSummary } from "@/components/LinkInvoiceModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -87,6 +88,7 @@ interface PanelState {
   group: LineGroup;
   invoiceId: string;
   invoiceLineId: string;
+  confidence: "high" | "medium" | "low" | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -138,6 +140,7 @@ export default function ReceiptsPage() {
 
   // Action state
   const [confirmingKeys, setConfirmingKeys] = useState<Set<string>>(new Set());
+  const [findDifferentInvoice, setFindDifferentInvoice] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   // ── Fetch lines ──────────────────────────────────────────────────────────────
@@ -167,8 +170,8 @@ export default function ReceiptsPage() {
 
   // ── Open invoice panel ───────────────────────────────────────────────────────
 
-  const openPanel = useCallback(async (group: LineGroup, invoiceId: string, invoiceLineId: string) => {
-    setPanel({ group, invoiceId, invoiceLineId });
+  const openPanel = useCallback(async (group: LineGroup, invoiceId: string, invoiceLineId: string, confidence?: "high" | "medium" | "low") => {
+    setPanel({ group, invoiceId, invoiceLineId, confidence: confidence ?? null });
     setPanelCtx(null);
     setPanelLoading(true);
     try {
@@ -329,11 +332,12 @@ export default function ReceiptsPage() {
                     const isPanelOpen = panel?.group.groupKey === line.groupKey;
 
                     const inv = line.linkedInvoice ?? line.suggestedInvoice;
+                    const rowConfidence = line.suggestedInvoice?.confidence;
 
                     return (
                       <tr
                         key={line.groupKey}
-                        onClick={() => inv && openPanel(line, inv.invoiceId, inv.invoiceLineId)}
+                        onClick={() => inv && openPanel(line, inv.invoiceId, inv.invoiceLineId, rowConfidence)}
                         className={`transition-colors ${inv ? "cursor-pointer" : ""} ${isPanelOpen ? "bg-blue-50" : "hover:bg-gray-50"}`}
                       >
                         <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
@@ -416,6 +420,25 @@ export default function ReceiptsPage() {
         )}
       </div>
 
+      {/* Find different invoice modal */}
+      {findDifferentInvoice && panel && (
+        <LinkInvoiceModal
+          receiptLineIds={panel.group.lineIds}
+          receiptSummaries={[{
+            itemSku: panel.group.sku || "Unknown",
+            qty: panel.group.totalQty,
+            ref: panel.group.orderRef,
+          } as ReceiptLineSummary]}
+          onClose={() => setFindDifferentInvoice(false)}
+          onSuccess={async (result) => {
+            setFindDifferentInvoice(false);
+            closePanel();
+            showToast(`Linked to ${result.invoiceNumber}`);
+            await fetchLines();
+          }}
+        />
+      )}
+
       {/* Toast */}
       {toast && (
         <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 bg-gray-900 text-white text-sm px-4 py-2 rounded-lg shadow-lg">
@@ -449,26 +472,19 @@ export default function ReceiptsPage() {
 
                 {/* ── Invoice card ── */}
                 <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                  {/* Card header */}
                   <div className="px-5 pt-5 pb-4 border-b border-gray-100">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <div className="text-sm font-semibold text-gray-900">{panelCtx.invoice.supplier ?? "—"}</div>
-                        <div className="text-xs text-gray-400 mt-0.5">Supplier</div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-xs text-gray-400 uppercase tracking-wider">Invoice #</div>
-                        <div className="text-base font-bold text-gray-900 tabular-nums mt-0.5">{panelCtx.invoice.invoiceNumber}</div>
-                      </div>
-                    </div>
-                    {/* Details */}
-                    <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                    <div className="text-sm font-semibold text-gray-900 mb-3">Invoice</div>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                      <span className="text-gray-400">Invoice #</span>
+                      <span className="text-gray-900 font-medium tabular-nums">{panelCtx.invoice.invoiceNumber}</span>
                       {panelCtx.invoice.invoiceDate && (
                         <>
                           <span className="text-gray-400">Invoice Date</span>
                           <span className="text-gray-700">{formatDateLong(panelCtx.invoice.invoiceDate)}</span>
                         </>
                       )}
+                      <span className="text-gray-400">Supplier</span>
+                      <span className="text-gray-700">{panelCtx.invoice.supplier ?? "—"}</span>
                       {panelCtx.invoice.poReference && (
                         <>
                           <span className="text-gray-400">PO Reference</span>
@@ -483,8 +499,6 @@ export default function ReceiptsPage() {
                       )}
                     </div>
                   </div>
-
-                  {/* Line items */}
                   <div className="px-5 py-4">
                     <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
                       Line Items ({panelCtx.invoice.lines.length})
@@ -526,7 +540,6 @@ export default function ReceiptsPage() {
                         })}
                       </tbody>
                     </table>
-                    {/* Totals */}
                     <div className="mt-2 space-y-1 text-xs">
                       {panelCtx.invoice.freight > 0 && (
                         <div className="flex justify-between text-gray-400">
@@ -552,20 +565,38 @@ export default function ReceiptsPage() {
 
                 {/* ── Receipt card ── */}
                 <div className="bg-amber-50 rounded-xl border border-amber-100 px-5 py-4">
-                  <div className="text-sm font-semibold text-gray-900 mb-1">Receipt Being Matched</div>
-                  <div className="text-xs text-gray-500">
-                    {panel.group.sku || "Unknown"} · {panel.group.warehouse || panel.group.source.toUpperCase()}
-                    {panel.group.orderRef && ` · ${panel.group.orderRef}`} · {formatDateLong(panel.group.date)}
+                  <div className="text-sm font-semibold text-gray-900 mb-3">Receipt</div>
+                  <div className="text-base font-semibold text-gray-900 leading-tight">
+                    {panel.group.warehouse || panel.group.source.toUpperCase()}
+                    {panel.group.orderRef && <span className="text-gray-500 font-normal"> · {panel.group.orderRef}</span>}
                   </div>
-                  <div className="mt-3 flex items-baseline justify-between">
-                    <span className="text-xs text-gray-400 uppercase tracking-wide">Qty received</span>
-                    <span className="text-xl font-bold text-gray-900 tabular-nums">{panel.group.totalQty.toLocaleString()}</span>
+                  <div className="text-xs text-gray-500 mt-0.5">{formatDateLong(panel.group.date)}</div>
+                  <div className="mt-3 pt-3 border-t border-amber-100 flex items-baseline justify-between">
+                    <span className="text-sm text-gray-700">{panel.group.sku || "Unknown"}</span>
+                    <span className="text-lg font-bold text-gray-900 tabular-nums">{panel.group.totalQty.toLocaleString()}</span>
                   </div>
                 </div>
 
                 {/* ── Comparison card ── */}
                 <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
-                  <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Comparison</div>
+                  <div className="text-sm font-semibold text-gray-900 mb-3">Comparison</div>
+
+                  {/* Match confidence */}
+                  {panel.confidence && (
+                    <div className="flex items-center justify-between mb-3 pb-3 border-b border-gray-100">
+                      <span className="text-xs text-gray-500">AI match confidence</span>
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                        panel.confidence === "high"
+                          ? "bg-green-100 text-green-700"
+                          : panel.confidence === "medium"
+                          ? "bg-yellow-100 text-yellow-700"
+                          : "bg-orange-100 text-orange-600"
+                      }`}>
+                        {panel.confidence}
+                      </span>
+                    </div>
+                  )}
+
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between">
                       <span className="text-gray-500">Invoice line qty</span>
@@ -595,6 +626,7 @@ export default function ReceiptsPage() {
                       })()}
                     </div>
                   </div>
+
                   {panelCtx.targetLine.matchedReceiptLines.length > 0 && (
                     <div className="mt-3 pt-3 border-t border-gray-100 space-y-1">
                       <div className="text-xs text-gray-400 mb-1.5">Other receipts on this line</div>
@@ -605,6 +637,15 @@ export default function ReceiptsPage() {
                         </div>
                       ))}
                     </div>
+                  )}
+
+                  {panel.group.invoiceStatus !== "matched" && (
+                    <button
+                      onClick={() => setFindDifferentInvoice(true)}
+                      className="mt-3 pt-3 border-t border-gray-100 w-full text-xs text-gray-400 hover:text-gray-600 text-left transition-colors"
+                    >
+                      Find a different invoice →
+                    </button>
                   )}
                 </div>
 
