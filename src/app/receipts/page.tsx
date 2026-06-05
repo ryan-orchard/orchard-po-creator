@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
-import LinkInvoiceModal, { ReceiptLineSummary } from "@/components/LinkInvoiceModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -84,6 +83,16 @@ interface InvoiceContext {
   };
 }
 
+interface PickerCandidate {
+  invoiceId: string;
+  invoiceNumber: string;
+  supplier: string;
+  invoiceDate: string;
+  poRefMatches: boolean;
+  supplierMatches: boolean;
+  lines: Array<{ invoiceLineId: string; isOverlap: boolean }>;
+}
+
 interface PanelState {
   group: LineGroup;
   invoiceId: string;
@@ -140,7 +149,11 @@ export default function ReceiptsPage() {
 
   // Action state
   const [confirmingKeys, setConfirmingKeys] = useState<Set<string>>(new Set());
-  const [findDifferentInvoice, setFindDifferentInvoice] = useState(false);
+
+  // Invoice picker (above invoice card, select-then-confirm flow)
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerCandidates, setPickerCandidates] = useState<PickerCandidate[] | null>(null);
+  const [pickerLoading, setPickerLoading] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   // ── Fetch lines ──────────────────────────────────────────────────────────────
@@ -187,7 +200,29 @@ export default function ReceiptsPage() {
   const closePanel = () => {
     setPanel(null);
     setPanelCtx(null);
+    setPickerOpen(false);
+    setPickerCandidates(null);
   };
+
+  const fetchPickerCandidates = useCallback(async (lineIds: string[]) => {
+    setPickerLoading(true);
+    try {
+      const res = await fetch(`/api/receipt-lines/link-invoice/candidates?receiptLineIds=${lineIds.join(",")}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      setPickerCandidates(data.candidates ?? []);
+    } finally {
+      setPickerLoading(false);
+    }
+  }, []);
+
+  const handlePickInvoice = useCallback((candidate: PickerCandidate) => {
+    const overlapLine = candidate.lines.find(l => l.isOverlap) ?? candidate.lines[0];
+    if (!overlapLine || !panel) return;
+    setPickerOpen(false);
+    setPickerCandidates(null);
+    openPanel(panel.group, candidate.invoiceId, overlapLine.invoiceLineId, undefined);
+  }, [panel, openPanel]);
 
   // ── Confirm match ────────────────────────────────────────────────────────────
 
@@ -420,25 +455,6 @@ export default function ReceiptsPage() {
         )}
       </div>
 
-      {/* Find different invoice modal */}
-      {findDifferentInvoice && panel && (
-        <LinkInvoiceModal
-          receiptLineIds={panel.group.lineIds}
-          receiptSummaries={[{
-            itemSku: panel.group.sku || "Unknown",
-            qty: panel.group.totalQty,
-            ref: panel.group.orderRef,
-          } as ReceiptLineSummary]}
-          onClose={() => setFindDifferentInvoice(false)}
-          onSuccess={async (result) => {
-            setFindDifferentInvoice(false);
-            closePanel();
-            showToast(`Linked to ${result.invoiceNumber}`);
-            await fetchLines();
-          }}
-        />
-      )}
-
       {/* Toast */}
       {toast && (
         <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 bg-gray-900 text-white text-sm px-4 py-2 rounded-lg shadow-lg">
@@ -469,6 +485,56 @@ export default function ReceiptsPage() {
               <div className="flex-1 flex items-center justify-center text-sm text-gray-400">Loading…</div>
             ) : panelCtx ? (
               <div className="flex-1 overflow-y-auto p-5 space-y-3">
+
+                {/* ── Find another invoice ── */}
+                {panel.group.invoiceStatus !== "matched" && (
+                  <div>
+                    <button
+                      onClick={() => {
+                        if (pickerOpen) {
+                          setPickerOpen(false);
+                        } else {
+                          setPickerOpen(true);
+                          if (!pickerCandidates) fetchPickerCandidates(panel.group.lineIds);
+                        }
+                      }}
+                      className="w-full flex items-center justify-between text-xs text-gray-500 hover:text-gray-700 px-1 py-1 transition-colors"
+                    >
+                      <span className="font-medium">Find another invoice</span>
+                      <svg className={`w-3 h-3 transition-transform ${pickerOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+                    {pickerOpen && (
+                      <div className="mt-1 bg-white rounded-xl border border-gray-200 overflow-hidden">
+                        {pickerLoading ? (
+                          <div className="px-4 py-3 text-xs text-gray-400">Loading…</div>
+                        ) : pickerCandidates && pickerCandidates.length > 0 ? (
+                          pickerCandidates.map(c => (
+                            <button
+                              key={c.invoiceId}
+                              onClick={() => handlePickInvoice(c)}
+                              className={`w-full flex items-center justify-between px-4 py-2.5 text-left hover:bg-gray-50 border-b border-gray-50 last:border-0 transition-colors ${c.invoiceId === panel.invoiceId ? "bg-amber-50" : ""}`}
+                            >
+                              <div>
+                                <div className="text-sm font-medium text-gray-900">{c.invoiceNumber}</div>
+                                <div className="text-xs text-gray-400 mt-0.5">
+                                  {c.supplier}{c.invoiceDate ? ` · ${formatDateLong(c.invoiceDate)}` : ""}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1.5 ml-3 flex-shrink-0">
+                                {c.poRefMatches && <span className="text-xs text-green-600 font-semibold">PO match</span>}
+                                {c.supplierMatches && !c.poRefMatches && <span className="text-xs text-blue-500 font-medium">supplier</span>}
+                              </div>
+                            </button>
+                          ))
+                        ) : (
+                          <div className="px-4 py-3 text-xs text-gray-400">No other candidates found.</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* ── Invoice card ── */}
                 <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -639,14 +705,6 @@ export default function ReceiptsPage() {
                     </div>
                   )}
 
-                  {panel.group.invoiceStatus !== "matched" && (
-                    <button
-                      onClick={() => setFindDifferentInvoice(true)}
-                      className="mt-3 pt-3 border-t border-gray-100 w-full text-xs text-gray-400 hover:text-gray-600 text-left transition-colors"
-                    >
-                      Find a different invoice →
-                    </button>
-                  )}
                 </div>
 
               </div>
