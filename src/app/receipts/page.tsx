@@ -58,6 +58,7 @@ interface InvoiceContext {
     supplier: string | null;
     invoiceDate: string | null;
     poReference: string | null;
+    shipTo: string | null;
     freight: number;
     tax: number;
     totalAmount: number | null;
@@ -441,22 +442,12 @@ export default function ReceiptsPage() {
               </svg>
             </button>
 
-            {/* Header — supplier name left, invoice number right */}
-            <div className="px-8 pt-8 pb-6 flex-shrink-0">
-              <div className="flex items-start justify-between pr-6">
-                <div>
-                  <div className="text-xl font-bold text-gray-900">
-                    {panelCtx?.invoice.supplier ?? (panelLoading ? "" : "—")}
-                  </div>
-                  <div className="text-sm text-gray-400 mt-0.5">Supplier</div>
-                </div>
-                <div className="text-right">
-                  <div className="text-xs text-gray-400 font-medium uppercase tracking-wider">Invoice #</div>
-                  <div className="text-2xl font-bold text-gray-900 tabular-nums mt-0.5">
-                    {panelCtx?.invoice.invoiceNumber ?? "—"}
-                  </div>
-                </div>
+            {/* Header — supplier name only, smaller */}
+            <div className="px-8 pt-7 pb-5 border-b border-gray-100 flex-shrink-0 pr-12">
+              <div className="text-base font-semibold text-gray-900">
+                {panelCtx?.invoice.supplier ?? (panelLoading ? "" : "—")}
               </div>
+              <div className="text-xs text-gray-400 mt-0.5">Supplier</div>
             </div>
 
             {panelLoading ? (
@@ -464,9 +455,11 @@ export default function ReceiptsPage() {
             ) : panelCtx ? (
               <div className="flex-1 overflow-y-auto">
 
-                {/* Details */}
-                <div className="px-8 pb-5 border-b border-gray-100">
-                  <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+                {/* Details — invoice #, date, PO ref, ship to all in one grid */}
+                <div className="px-8 py-4 border-b border-gray-100">
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-2.5 text-sm">
+                    <div className="text-gray-400">Invoice #</div>
+                    <div className="text-gray-900 font-medium tabular-nums">{panelCtx.invoice.invoiceNumber}</div>
                     {panelCtx.invoice.invoiceDate && (
                       <>
                         <div className="text-gray-400">Invoice Date</div>
@@ -479,64 +472,75 @@ export default function ReceiptsPage() {
                         <div className="text-gray-800">{panelCtx.invoice.poReference}</div>
                       </>
                     )}
+                    {panelCtx.invoice.shipTo && (
+                      <>
+                        <div className="text-gray-400">Ship To</div>
+                        <div className="text-gray-800 text-xs leading-relaxed">{panelCtx.invoice.shipTo}</div>
+                      </>
+                    )}
                   </div>
                 </div>
 
                 {/* Line items */}
-                <div className="px-8 py-5 border-b border-gray-100">
-                  <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">
+                <div className="px-8 py-4 border-b border-gray-100">
+                  <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
                     Line Items ({panelCtx.invoice.lines.length})
                   </div>
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-gray-200">
                         <th className="text-left pb-2 text-xs font-semibold text-gray-400 uppercase tracking-wide">Description</th>
-                        <th className="text-right pb-2 text-xs font-semibold text-gray-400 uppercase tracking-wide w-16">Qty</th>
-                        <th className="text-right pb-2 text-xs font-semibold text-gray-400 uppercase tracking-wide w-20">Unit Cost</th>
-                        <th className="text-right pb-2 text-xs font-semibold text-gray-400 uppercase tracking-wide w-24">Amount</th>
+                        <th className="text-left pb-2 text-xs font-semibold text-gray-400 uppercase tracking-wide pl-2">SKU</th>
+                        <th className="text-right pb-2 text-xs font-semibold text-gray-400 uppercase tracking-wide w-14">Qty</th>
+                        <th className="text-right pb-2 text-xs font-semibold text-gray-400 uppercase tracking-wide w-16">Cost</th>
+                        <th className="text-right pb-2 text-xs font-semibold text-gray-400 uppercase tracking-wide w-20">Amount</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {panelCtx.invoice.lines.map(l => (
-                        <tr key={l.id} className={`border-b border-gray-50 ${l.isTarget ? "bg-amber-50" : ""}`}>
-                          <td className={`py-3 pr-3 text-sm ${l.isTarget ? "font-medium text-gray-900" : "text-gray-600"}`}>
-                            <div>{l.description || l.sku || l.ansItemNumber || "—"}</div>
-                            {l.description && l.sku && (
-                              <div className="text-xs text-gray-400 mt-0.5">{l.sku}</div>
-                            )}
-                          </td>
-                          <td className={`py-3 text-right text-sm tabular-nums ${l.isTarget ? "font-medium text-gray-900" : "text-gray-600"}`}>
-                            {l.qty.toLocaleString()}
-                          </td>
-                          <td className={`py-3 text-right text-sm tabular-nums ${l.isTarget ? "font-medium text-gray-900" : "text-gray-600"}`}>
-                            {l.unitPrice > 0 ? `$${l.unitPrice.toFixed(2)}` : "—"}
-                          </td>
-                          <td className={`py-3 text-right text-sm tabular-nums ${l.isTarget ? "font-medium text-gray-900" : "text-gray-600"}`}>
-                            {l.unitPrice > 0
-                              ? `$${(l.qty * l.unitPrice).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                              : "—"}
-                          </td>
-                        </tr>
-                      ))}
+                      {panelCtx.invoice.lines.map(l => {
+                        const base = l.isTarget ? "font-medium text-gray-900" : "text-gray-500";
+                        const row = l.isTarget ? "bg-amber-50" : "";
+                        return (
+                          <tr key={l.id} className={`border-b border-gray-50 ${row}`}>
+                            <td className={`py-2.5 pr-2 text-sm truncate max-w-[110px] ${base}`}>
+                              {l.description || "—"}
+                            </td>
+                            <td className={`py-2.5 pl-2 text-sm truncate max-w-[90px] ${base}`}>
+                              {l.sku || l.ansItemNumber || "—"}
+                            </td>
+                            <td className={`py-2.5 text-right text-sm tabular-nums ${base}`}>
+                              {l.qty.toLocaleString()}
+                            </td>
+                            <td className={`py-2.5 text-right text-sm tabular-nums ${base}`}>
+                              {l.unitPrice > 0 ? `$${l.unitPrice.toFixed(2)}` : "—"}
+                            </td>
+                            <td className={`py-2.5 text-right text-sm tabular-nums ${base}`}>
+                              {l.unitPrice > 0
+                                ? `$${(l.qty * l.unitPrice).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                : "—"}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
 
                   {/* Totals */}
-                  <div className="mt-2 space-y-1.5 text-sm">
+                  <div className="mt-2 space-y-1 text-sm">
                     {panelCtx.invoice.freight > 0 && (
-                      <div className="flex justify-between text-gray-500">
+                      <div className="flex justify-between text-gray-400">
                         <span>Freight</span>
                         <span className="tabular-nums">${panelCtx.invoice.freight.toLocaleString("en-US", { minimumFractionDigits: 2 })}</span>
                       </div>
                     )}
                     {panelCtx.invoice.tax > 0 && (
-                      <div className="flex justify-between text-gray-500">
+                      <div className="flex justify-between text-gray-400">
                         <span>Tax</span>
                         <span className="tabular-nums">${panelCtx.invoice.tax.toLocaleString("en-US", { minimumFractionDigits: 2 })}</span>
                       </div>
                     )}
                     {panelCtx.invoice.totalAmount != null && (
-                      <div className="flex justify-between font-bold text-gray-900 text-base pt-2 border-t border-gray-200">
+                      <div className="flex justify-between font-semibold text-gray-900 pt-1.5 border-t border-gray-100">
                         <span>Total</span>
                         <span className="tabular-nums">${panelCtx.invoice.totalAmount.toLocaleString("en-US", { minimumFractionDigits: 2 })}</span>
                       </div>
@@ -545,26 +549,19 @@ export default function ReceiptsPage() {
                 </div>
 
                 {/* Receipt matching context */}
-                <div className="px-8 py-5">
-                  <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">
-                    Receipt Being Matched
+                <div className="px-8 py-4">
+                  {/* Section label — this is the bold prominent text, SKU is secondary */}
+                  <div className="font-semibold text-gray-900 text-sm mb-0.5">Receipt Being Matched</div>
+                  <div className="text-xs text-gray-400 mb-4">
+                    {panel.group.sku || "Unknown"} · {panel.group.warehouse || panel.group.source.toUpperCase()}
+                    {panel.group.orderRef && ` · ${panel.group.orderRef}`} · {formatDateLong(panel.group.date)}
                   </div>
 
-                  <div className="flex justify-between items-baseline mb-4">
-                    <div>
-                      <div className="font-semibold text-gray-900 text-sm">{panel.group.sku || "Unknown"}</div>
-                      <div className="text-xs text-gray-400 mt-0.5">
-                        {[
-                          panel.group.warehouse || panel.group.source.toUpperCase(),
-                          panel.group.orderRef,
-                          formatDateLong(panel.group.date),
-                        ].filter(Boolean).join(" · ")}
-                      </div>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between text-gray-500">
+                      <span>Receipt qty</span>
+                      <span className="tabular-nums font-medium text-gray-900">{panel.group.totalQty.toLocaleString()}</span>
                     </div>
-                    <div className="text-lg font-bold text-gray-900 tabular-nums">{panel.group.totalQty.toLocaleString()}</div>
-                  </div>
-
-                  <div className="space-y-2 text-sm border-t border-gray-100 pt-4">
                     <div className="flex justify-between text-gray-500">
                       <span>Invoice line qty</span>
                       <span className="tabular-nums text-gray-800">{panelCtx.targetLine.qty.toLocaleString()}</span>
@@ -575,13 +572,15 @@ export default function ReceiptsPage() {
                         <span className="tabular-nums">{panelCtx.targetLine.alreadyMatchedQty.toLocaleString()}</span>
                       </div>
                     )}
-                    <div className="flex justify-between font-medium pt-1 border-t border-gray-100">
+                    <div className="flex justify-between font-medium pt-2 border-t border-gray-100">
                       <span className="text-gray-500">Remaining after</span>
                       {(() => {
-                        const r = Math.max(0, panelCtx.targetLine.remainingQty - panel.group.totalQty);
+                        const r = panelCtx.targetLine.remainingQty - panel.group.totalQty;
+                        const color = r === 0 ? "text-green-600" : r < 0 ? "text-red-500" : "text-amber-500";
+                        const suffix = r === 0 ? " ✓" : r < 0 ? " (over)" : "";
                         return (
-                          <span className={`tabular-nums ${r === 0 ? "text-green-600" : "text-gray-900"}`}>
-                            {r.toLocaleString()}{r === 0 && " ✓"}
+                          <span className={`tabular-nums ${color}`}>
+                            {Math.abs(r).toLocaleString()}{suffix}
                           </span>
                         );
                       })()}
