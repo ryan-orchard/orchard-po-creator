@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireOperator } from "@/lib/auth";
-import * as XLSX from "xlsx";
 import { db } from "@/lib/supabase";
 import { SKU_MAPPING } from "@/lib/client-config";
+import { parseStordAdjustmentRows } from "@/lib/stord-adjustments-parser";
 
 interface StordRow {
   adjustmentDate: Date;
@@ -20,6 +20,7 @@ interface StordRow {
   orderNumber: string;
   lotNumber: string;
   expiresAt: string;
+  notes: string;
 }
 
 interface ParsedReceipt {
@@ -60,54 +61,40 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 });
     }
 
-    // Parse XLSX or CSV
-    const buffer = await file.arrayBuffer();
-    const isCSV = file.name.toLowerCase().endsWith(".csv");
-    const workbook = XLSX.read(buffer, {
-      type: "array",
-      cellDates: true,
-      ...(isCSV ? { raw: false } : {}),
-    });
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const rawRows = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as unknown[][];
-
-    if (rawRows.length < 2) {
-      return NextResponse.json({ error: "File is empty or has no data rows" }, { status: 400 });
-    }
-
-    // Validate headers
-    const headers = rawRows[0] as string[];
-    const expectedHeaders = [
-      "Adjustment Date", "SKU", "Reason", "Reason Type", "Inventory Category",
-    ];
-    const missingHeaders = expectedHeaders.filter(
-      (h) => !headers.some((hdr) => hdr?.toLowerCase().trim() === h.toLowerCase())
-    );
-    if (missingHeaders.length > 0) {
+    // Parse via the shared, header-name-based parser (resilient to Stord
+    // renaming/reordering columns — same code path as the email auto-ingest).
+    const buffer = Buffer.from(await file.arrayBuffer());
+    let parsedRows;
+    try {
+      parsedRows = parseStordAdjustmentRows(buffer);
+    } catch (err) {
       return NextResponse.json(
-        { error: `Missing expected columns: ${missingHeaders.join(", ")}` },
+        { error: err instanceof Error ? err.message : "Unrecognized file format" },
         { status: 400 }
       );
     }
 
-    // Parse rows
-    const dataRows = rawRows.slice(1).filter((row) => row.length > 0 && row[0] != null);
-    const rows: StordRow[] = dataRows.map((row) => ({
-      adjustmentDate: row[0] instanceof Date ? row[0] : new Date(row[0] as string),
-      sku: (row[1] as string) || "",
-      reason: (row[2] as string) || "",
-      reasonType: (row[3] as string) || "",
-      inventoryCategory: (row[4] as string) || "",
-      valueBeforeAdjustment: Number(row[5]) || 0,
-      adjustedQuantity: Number(row[6]) || 0,
-      valueAfterAdjustment: Number(row[7]) || 0,
-      unit: (row[8] as string) || "",
-      productName: (row[9] as string) || "",
-      brand: (row[10] as string) || "",
-      facility: (row[11] as string) || "",
-      orderNumber: (row[12] as string) || "",
-      lotNumber: (row[13] as string) || "",
-      expiresAt: (row[14] as string) || "",
+    if (parsedRows.length === 0) {
+      return NextResponse.json({ error: "File is empty or has no data rows" }, { status: 400 });
+    }
+
+    const rows: StordRow[] = parsedRows.map((r) => ({
+      adjustmentDate: new Date(r.adjustmentDate),
+      sku: r.sku,
+      reason: r.reason,
+      reasonType: r.reasonType,
+      inventoryCategory: r.inventoryCategory,
+      valueBeforeAdjustment: r.valueBeforeAdjustment,
+      adjustedQuantity: r.adjustedQuantity,
+      valueAfterAdjustment: r.valueAfterAdjustment,
+      unit: r.unit,
+      productName: r.productName,
+      brand: r.brand,
+      facility: r.facility,
+      orderNumber: r.orderNumber,
+      lotNumber: r.lotNumber,
+      expiresAt: r.expiresAt,
+      notes: r.notes,
     }));
 
     // Classify rows
@@ -153,7 +140,7 @@ export async function POST(request: NextRequest) {
     // Group by Order Number -> aggregate by SKU
     const receiptGroups: Record<string, StordRow[]> = {};
     for (const row of rowsToProcess) {
-      const key = row.orderNumber || "UNKNOWN";
+      const key = row.orderNumber || row.notes || "UNKNOWN";
       if (!receiptGroups[key]) receiptGroups[key] = [];
       receiptGroups[key].push(row);
     }

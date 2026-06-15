@@ -388,7 +388,7 @@ export async function POST(request: NextRequest) {
               document_type: "transaction_export",
               confidence: 0.9,
               parsed_data: { error: (bmcError as Error).message, type: "bmc_report_failed" },
-              status: "pending",
+              status: "failed",
             });
 
           results.push({
@@ -459,7 +459,7 @@ export async function POST(request: NextRequest) {
               document_type: "ans_on_order",
               confidence: 0.9,
               parsed_data: { error: (ansError as Error).message, type: "ans_on_order_failed" },
-              status: "pending",
+              status: "failed",
             });
 
           results.push({
@@ -529,7 +529,7 @@ export async function POST(request: NextRequest) {
               document_type: "stord_adjustments",
               confidence: 0.9,
               parsed_data: { error: (stordError as Error).message, type: "stord_adjustments_failed" },
-              status: "pending",
+              status: "failed",
             });
 
           results.push({

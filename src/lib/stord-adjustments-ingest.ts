@@ -27,10 +27,15 @@ export async function processStordAdjustmentsReport(
     return { newReceipts: 0, skippedExisting: 0, totalReceiptRows: 0, failedOrders: [] };
   }
 
-  // Group by order number
+  // Group by order number. Stord leaves Order Number blank for some inbounds
+  // (e.g. water bottles), carrying the identifier in Notes instead — fall back
+  // to Notes so distinct no-order shipments don't collapse into one "UNKNOWN"
+  // receipt and silently dedup-collide.
+  const groupKey = (row: StordAdjustmentRow) =>
+    row.orderNumber || row.notes || "UNKNOWN";
   const groups: Record<string, StordAdjustmentRow[]> = {};
   for (const row of receiptRows) {
-    const key = row.orderNumber || "UNKNOWN";
+    const key = groupKey(row);
     if (!groups[key]) groups[key] = [];
     groups[key].push(row);
   }

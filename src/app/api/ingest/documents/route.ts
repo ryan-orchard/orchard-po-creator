@@ -8,6 +8,12 @@ export async function GET(request: NextRequest) {
 
   const status = request.nextUrl.searchParams.get("status"); // null = all
 
+  // The inbox is strictly for documents a human confirms (ANS invoices).
+  // Auto-processed report types (Stord adjustments, BMC transaction exports,
+  // ANS on-order) flow straight into their own pipelines and must never appear
+  // here — whether they succeed, fail, or arrive empty.
+  const REPORT_TYPES = ["stord_adjustments", "transaction_export", "ans_on_order"];
+
   let query = db
     .schema("orchard")
     .from("ingested_documents")
@@ -35,7 +41,8 @@ export async function GET(request: NextRequest) {
         received_at
       )
     `)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .not("document_type", "in", `(${REPORT_TYPES.join(",")})`);
 
   if (status) {
     query = query.eq("status", status);
