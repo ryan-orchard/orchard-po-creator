@@ -37,6 +37,7 @@ export interface AnsOnOrderRow {
 
 export interface AnsOnOrderReportResult {
   reportDate: string; // YYYY-MM-DD
+  sourceFilename: string | null; // original attachment filename, for bronze provenance
   rows: AnsOnOrderRow[];
   /** Rows present in the file that we couldn't extract a usable record from
    * (e.g., Customer PO present but no ITEMID, or footnote-only rows with notes). */
@@ -105,6 +106,57 @@ function cleanString(v: unknown): string | null {
   return s || null;
 }
 
+interface ColMap {
+  so: number;
+  itemId: number;
+  description: number;
+  salesQty: number;
+  disposition: number;
+  po: number;
+  customerReq: number;
+  estShip: number;
+  notes: number;
+}
+
+/** Normalize a header cell: lowercase, collapse all whitespace (incl. \r\n). */
+function normHeader(v: unknown): string {
+  return String(v ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Locate the header row and map each logical field to its column index by
+ * matching header text. Falls back to the historical fixed indices if a header
+ * can't be found, so older files still parse.
+ */
+function resolveColumns(grid: unknown[][]): { col: ColMap; headerRowIdx: number } {
+  let headerRowIdx = grid.findIndex((r) =>
+    (r || []).some((c) => {
+      const h = normHeader(c);
+      return h === "itemid" || h === "item id";
+    })
+  );
+  if (headerRowIdx < 0) headerRowIdx = 3; // documented row 4 (index 3)
+
+  const header = (grid[headerRowIdx] || []).map(normHeader);
+  const find = (pred: (h: string) => boolean, fallback: number): number => {
+    const idx = header.findIndex((h) => h !== "" && pred(h));
+    return idx >= 0 ? idx : fallback;
+  };
+
+  const col: ColMap = {
+    so: find((h) => h.includes("salesid") || h.includes("so#") || h === "so #", 0),
+    itemId: find((h) => h === "itemid" || h === "item id", 2),
+    description: find((h) => h.includes("description"), 3),
+    salesQty: find((h) => h.includes("sales qty"), 4),
+    disposition: find((h) => h.includes("dispos"), 10),
+    po: find((h) => h === "po" || h === "customer po" || (h.includes("po") && h.includes("customer") && !h.includes("req")), 8),
+    customerReq: find((h) => h.includes("customer req"), 14),
+    estShip: find((h) => h.includes("est ship") || h.includes("ship ready") || h.includes("shipping date confirmed"), 15),
+    notes: find((h) => h === "notes" || h.includes("notes"), 18),
+  };
+  return { col, headerRowIdx };
+}
+
 export function parseAnsOnOrderReport(
   buffer: Buffer,
   filename?: string,
@@ -122,29 +174,34 @@ export function parseAnsOnOrderReport(
     raw: false,
   });
 
-  // Data starts after the header row (row 4 in 1-indexed terms → index 3).
+  // Resolve column positions BY HEADER NAME, not fixed index — ANS reformats
+  // this sheet between versions (the 6/9/26 file shifted PO from col I→J, Est
+  // Ship from P→L, Notes from S→O, etc.). Fixed indices silently mis-map.
+  const { col, headerRowIdx } = resolveColumns(grid);
+
   // We carry forward the most recent SO# down each block until reset by a
   // blank row or a new SO#.
   let currentSo: string | null = null;
   const rows: AnsOnOrderRow[] = [];
   const malformed: AnsOnOrderReportResult["malformed"] = [];
 
-  for (let i = 4; i < grid.length; i++) {
+  for (let i = headerRowIdx + 1; i < grid.length; i++) {
     const r = grid[i] || [];
     const rowNumber = i + 1; // 1-indexed for human reference
 
-    const soCell = cleanString(r[0]);
-    const itemId = cleanString(r[2]);
-    const customerPo = cleanString(r[8]);
+    const soCell = cleanString(r[col.so]);
+    const itemId = cleanString(r[col.itemId]);
+    const customerPo = cleanString(r[col.po]);
+    const noteCell = cleanString(r[col.notes]);
 
     // Skip blank rows; reset the SO# carry-forward
-    if (!soCell && !itemId && !customerPo && !cleanString(r[18])) {
+    if (!soCell && !itemId && !customerPo && !noteCell) {
       currentSo = null;
       continue;
     }
 
-    // Skip repeated header rows (column A literally "SO#")
-    if (soCell && /^SO#$/i.test(soCell)) {
+    // Skip repeated header rows (SO column "SO#"/"SALESID", or item col "ITEMID")
+    if ((soCell && /^(SO#|SALESID)$/i.test(soCell)) || /^ITEMID$/i.test(itemId ?? "")) {
       currentSo = null;
       continue;
     }
@@ -156,12 +213,11 @@ export function parseAnsOnOrderReport(
 
     // Footnote / orphan rows (notes only, no PO and no item)
     if (!itemId && !customerPo) {
-      const note = cleanString(r[18]);
-      if (note) {
+      if (noteCell) {
         malformed.push({
           rowNumber,
           reason: "footnote_only",
-          raw: [note],
+          raw: [noteCell],
         });
       }
       continue;
@@ -172,7 +228,7 @@ export function parseAnsOnOrderReport(
       malformed.push({
         rowNumber,
         reason: "missing_itemid",
-        raw: [customerPo, cleanString(r[18])],
+        raw: [customerPo, noteCell],
       });
       continue;
     }
@@ -182,7 +238,7 @@ export function parseAnsOnOrderReport(
       malformed.push({
         rowNumber,
         reason: "missing_customer_po",
-        raw: [itemId, cleanString(r[18])],
+        raw: [itemId, noteCell],
       });
       continue;
     }
@@ -190,13 +246,13 @@ export function parseAnsOnOrderReport(
     rows.push({
       soNumber: currentSo,
       ansItemNumber: itemId,
-      description: cleanString(r[3]),
-      salesQty: parseSalesQty(r[4]),
+      description: cleanString(r[col.description]),
+      salesQty: parseSalesQty(r[col.salesQty]),
       customerPo,
-      disposition: cleanString(r[10]),
-      customerReqShipDate: parseDateCell(r[14]),
-      estShipReadyDate: parseDateCell(r[15]),
-      notes: cleanString(r[18]),
+      disposition: cleanString(r[col.disposition]),
+      customerReqShipDate: parseDateCell(r[col.customerReq]),
+      estShipReadyDate: parseDateCell(r[col.estShip]),
+      notes: noteCell,
     });
   }
 
@@ -205,5 +261,5 @@ export function parseAnsOnOrderReport(
     fallbackDate ||
     new Date().toISOString().slice(0, 10);
 
-  return { reportDate, rows, malformed };
+  return { reportDate, sourceFilename: filename ?? null, rows, malformed };
 }
