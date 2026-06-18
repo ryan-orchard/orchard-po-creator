@@ -1,21 +1,30 @@
 /**
  * ANS On Order Report ingestion.
  *
- * For each parsed row:
- *   1. Resolve to a PO line via ('PO-' || customer_po) + ans_item_number.
- *   2. Diff against the existing orchard_calcs.po_line_statuses row.
- *   3. Emit activity-log entries for meaningful changes (status transition,
- *      expected ship date shift, customer req ship date shift, new confirmation).
- *      Notes changes are skipped — they rewrite every week and would be noise.
- *   4. Upsert into orchard_calcs.po_line_statuses with status='confirmed'.
+ * Bronze-first: this function writes raw report rows into the bronze table
+ * orchard.ans_on_order_reports. An AFTER INSERT trigger
+ * (orchard.derive_po_line_status_from_ans, see
+ * scripts/migrate-ans-bronze-derive-trigger.sql) derives silver —
+ * orchard_calcs.po_line_statuses.expected_ship_date et al. This function does
+ * NOT write silver directly; silver is a pure projection of bronze.
  *
- * Bronze rows for each report live in orchard.ans_on_order_reports.
- * This function currently writes directly to silver; a follow-up should
- * write bronze first and derive silver from it.
+ * Steps:
+ *   1. Resolve each row to a PO line via ('PO-' || customer_po) + ans_item_number
+ *      (for activity logging only; the trigger resolves independently for the write).
+ *   2. Snapshot the existing silver rows BEFORE the bronze insert.
+ *   3. Emit activity-log entries for meaningful changes vs that snapshot (status
+ *      transition, expected ship date shift, customer req ship date shift, new
+ *      confirmation). Notes changes are skipped — they rewrite every week.
+ *   4. Upsert every parsed row into bronze (idempotent on the natural key); the
+ *      trigger projects them into silver.
  */
 import { db } from "./supabase";
 import { logActivity } from "./activity-log";
 import type { AnsOnOrderReportResult, AnsOnOrderRow } from "./ans-on-order-parser";
+
+// ANS On Order reports come from Magna's co-packer; Magna is the only client
+// on this feed today. Hardcoded until a second client needs it.
+const CLIENT_ID = "magna";
 
 export interface AnsOnOrderIngestResult {
   reportDate: string;
@@ -147,14 +156,8 @@ export async function processAnsOnOrderReport(
     resolved.push({ parsed: row, poLineId: pl.id, poId: pl.poId });
   }
 
-  if (resolved.length === 0) {
-    return {
-      reportDate: report.reportDate,
-      matchedLines: 0,
-      unmatchedRows: unmatched,
-      activityEvents: 0,
-    };
-  }
+  // Note: even if nothing resolves, we still write bronze below — resolution is
+  // only needed for activity logging. The diff/log block no-ops on empty input.
 
   // ── Load existing statuses for the resolved po_line_ids ────────────────
   const poLineIds = resolved.map((r) => r.poLineId);
@@ -239,27 +242,38 @@ export async function processAnsOnOrderReport(
     }
   }
 
-  // ── Upsert po_line_statuses ────────────────────────────────────────────
-  const upsertRows = resolved.map((r) => ({
-    po_line_id: r.poLineId,
-    status: "confirmed",
-    expected_ship_date: r.parsed.estShipReadyDate,
-    expected_receive_date: r.parsed.customerReqShipDate,
-    source_report_date: report.reportDate,
-    notes: r.parsed.notes,
-    updated_by: `ANS On Order Report ${report.reportDate}`,
-    updated_at: new Date().toISOString(),
+  // ── Write bronze; the trigger derives silver ───────────────────────────
+  // Every parsed row is preserved in bronze, even rows we couldn't resolve to a
+  // PO line above — resolution is a silver concern handled by the trigger, which
+  // no-ops on rows it can't match. Idempotent on the natural key so re-ingesting
+  // the same file is a no-op rather than a duplicate.
+  const receivedAt = new Date().toISOString();
+  const bronzeRows = report.rows.map((row) => ({
+    client_id: CLIENT_ID,
+    report_date: report.reportDate,
+    report_received_at: receivedAt,
+    source_filename: report.sourceFilename,
+    customer_po: row.customerPo,
+    ans_item_number: row.ansItemNumber,
+    est_ship_date: row.estShipReadyDate,
+    customer_req_date: row.customerReqShipDate,
+    qty_ordered: row.salesQty,
+    qty_cancelled: null,
+    notes: row.notes,
+    raw_payload: row,
   }));
 
-  // Batch upsert
   const batchSize = 100;
-  for (let i = 0; i < upsertRows.length; i += batchSize) {
-    const batch = upsertRows.slice(i, i + batchSize);
-    const { error: upErr } = await db
-      .schema("orchard_calcs")
-      .from("po_line_statuses")
-      .upsert(batch, { onConflict: "po_line_id" });
-    if (upErr) throw new Error(`Failed to upsert po_line_statuses: ${upErr.message}`);
+  for (let i = 0; i < bronzeRows.length; i += batchSize) {
+    const batch = bronzeRows.slice(i, i + batchSize);
+    const { error: bErr } = await db
+      .schema("orchard")
+      .from("ans_on_order_reports")
+      .upsert(batch, {
+        onConflict: "client_id,report_date,customer_po,ans_item_number",
+        ignoreDuplicates: true,
+      });
+    if (bErr) throw new Error(`Failed to write bronze ans_on_order_reports: ${bErr.message}`);
   }
 
   console.log(
