@@ -4,15 +4,7 @@ import { db } from "@/lib/supabase";
 import { generateNextNumber } from "@/lib/sequence";
 import { logActivity } from "@/lib/activity-log";
 import { deriveCostBasis } from "@/lib/po-calc";
-
-// A PO's status is a roll-up of its line statuses (ordered < confirmed < complete).
-function rollUpStatus(states: string[]): string {
-  const active = states.filter((s) => s !== "cancelled");
-  if (active.length === 0) return states.length > 0 ? "cancelled" : "ordered";
-  if (active.every((s) => s === "complete")) return "complete";
-  if (active.every((s) => s === "complete" || s === "confirmed")) return "confirmed";
-  return "ordered";
-}
+import { rollUpPoStatus } from "@/lib/po-status";
 
 export async function GET() {
   const [posResult, lineStatusesResult, linesResult, itemsResult] = await Promise.all([
@@ -61,7 +53,7 @@ export async function GET() {
     id: po.id,
     poNumber: po.po_number,
     date: po.order_date,
-    status: rollUpStatus((lineIdsByPO[po.id] ?? []).map((lid) => lineState.get(lid) ?? "ordered")),
+    status: rollUpPoStatus((lineIdsByPO[po.id] ?? []).map((lid) => lineState.get(lid) ?? "ordered")),
     supplier: [po.supplier_id],
     shipTo: [po.location_id],
     deliveryDate: po.delivery_date,
@@ -119,8 +111,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: poError?.message ?? "Failed to create PO" }, { status: 500 });
   }
 
-  // Insert line items. New lines have no po_line_statuses row — they roll up
-  // as 'ordered' until the status is advanced.
+  // Insert line items. New POs start as Draft — write an explicit 'draft'
+  // status row per line so the PO rolls up to Draft until it's advanced.
   if (lineItems.length > 0) {
     const lineRows = lineItems.map((item) => ({
       po_id: po.id,
@@ -130,9 +122,30 @@ export async function POST(request: NextRequest) {
       cost_basis: deriveCostBasis(item.uom),
     }));
 
-    const { error: lineError } = await db.schema("orchard").from("po_lines").insert(lineRows);
+    const { data: insertedLines, error: lineError } = await db
+      .schema("orchard")
+      .from("po_lines")
+      .insert(lineRows)
+      .select("id");
     if (lineError) {
       return NextResponse.json({ error: lineError.message }, { status: 500 });
+    }
+
+    const now = new Date().toISOString();
+    const statusRows = (insertedLines ?? []).map((l) => ({
+      po_line_id: l.id as string,
+      status: "draft",
+      updated_at: now,
+      updated_by: "Ryan Belanger",
+    }));
+    if (statusRows.length > 0) {
+      const { error: statusError } = await db
+        .schema("orchard_calcs")
+        .from("po_line_statuses")
+        .upsert(statusRows, { onConflict: "po_line_id" });
+      if (statusError) {
+        return NextResponse.json({ error: statusError.message }, { status: 500 });
+      }
     }
   }
 

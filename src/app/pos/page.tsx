@@ -26,6 +26,7 @@ interface POLine {
 }
 
 const stateColors: Record<string, string> = {
+  draft: "bg-slate-100 text-slate-600",
   ordered: "bg-warm-100 text-warm-800",
   confirmed: "bg-gold-100 text-gold-800",
   complete: "bg-sage-100 text-sage-800",
@@ -33,22 +34,25 @@ const stateColors: Record<string, string> = {
 };
 
 const stateLabels: Record<string, string> = {
+  draft: "Draft",
   ordered: "Ordered",
   confirmed: "Confirmed",
   complete: "Complete",
   cancelled: "Cancelled",
 };
 
-type TabKey = "ordered" | "confirmed" | "complete" | "all";
+type TabKey = "draft" | "ordered" | "confirmed" | "complete" | "all";
 
-// PO line statuses. "All" includes complete.
+// PO line statuses. "All" spans every active status (cancelled excluded).
 const TABS: { key: TabKey; label: string; states: string[] }[] = [
+  { key: "draft", label: "Draft", states: ["draft"] },
   { key: "ordered", label: "Ordered", states: ["ordered"] },
   { key: "confirmed", label: "Confirmed", states: ["confirmed"] },
   { key: "complete", label: "Complete", states: ["complete"] },
-  { key: "all", label: "All", states: ["ordered", "confirmed", "complete"] },
+  { key: "all", label: "All", states: ["draft", "ordered", "confirmed", "complete"] },
 ];
 
+// Drafts are not yet committed orders — they don't count toward Open PO value.
 const OPEN_STATES = ["ordered", "confirmed"];
 
 // Only these columns are filterable
@@ -439,13 +443,14 @@ export default function POLinesPage() {
   }, [lines, openPOIds]);
 
   const tabCounts = useMemo(() => {
-    const counts: Record<TabKey, number> = { ordered: 0, confirmed: 0, complete: 0, all: 0 };
+    const counts: Record<TabKey, number> = { draft: 0, ordered: 0, confirmed: 0, complete: 0, all: 0 };
     for (const l of lines) {
-      if (l.lineState === "ordered") counts.ordered++;
+      if (l.lineState === "draft") counts.draft++;
+      else if (l.lineState === "ordered") counts.ordered++;
       else if (l.lineState === "confirmed") counts.confirmed++;
       else if (l.lineState === "complete") counts.complete++;
     }
-    counts.all = counts.ordered + counts.confirmed + counts.complete;
+    counts.all = counts.draft + counts.ordered + counts.confirmed + counts.complete;
     return counts;
   }, [lines]);
 
@@ -573,7 +578,8 @@ export default function POLinesPage() {
               <div className="space-y-2.5">
                 {TABS.filter((t) => t.key !== "all").map((tab) => {
                   const count = tabCounts[tab.key];
-                  const dot = tab.key === "ordered" ? "bg-warm-500" : "bg-gold-500";
+                  const dot =
+                    tab.key === "draft" ? "bg-slate-400" : tab.key === "ordered" ? "bg-warm-500" : "bg-gold-500";
                   return (
                     <div key={tab.key} className="flex items-center justify-between px-2 py-1.5">
                       <span className="flex items-center gap-2.5">
