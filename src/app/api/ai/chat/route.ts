@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { db } from "@/lib/supabase";
+import { rollUpPoStatus } from "@/lib/po-status";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -87,7 +88,7 @@ const TOOLS: Anthropic.Tool[] = [
       properties: {
         status: {
           type: "string",
-          enum: ["ordered", "confirmed", "complete", "all"],
+          enum: ["draft", "ordered", "confirmed", "complete", "all"],
           description: "Filter by status.",
         },
         limit: { type: "number", description: "Max POs to return. Default: 15." },
@@ -357,10 +358,10 @@ async function toolGetPurchaseOrders(status = "all", limit = 15) {
   const lineIds = (poLines ?? []).map((l) => l.id as string);
   const { data: lineStatuses } = lineIds.length > 0
     ? await db.schema("orchard_calcs").from("po_line_statuses")
-        .select("po_line_id, state").in("po_line_id", lineIds)
+        .select("po_line_id, status").in("po_line_id", lineIds)
     : { data: [] };
 
-  const stateMap = new Map((lineStatuses ?? []).map((s) => [s.po_line_id as string, s.state as string]));
+  const stateMap = new Map((lineStatuses ?? []).map((s) => [s.po_line_id as string, s.status as string]));
   const linesByPO = new Map<string, string[]>();
   for (const l of poLines ?? []) {
     const arr = linesByPO.get(l.po_id as string) ?? [];
@@ -375,18 +376,10 @@ async function toolGetPurchaseOrders(status = "all", limit = 15) {
 
   const supplierMap = new Map((suppliers ?? []).map((s) => [s.id as string, (s.code || s.name) as string]));
 
-  function rollUp(states: string[]): string {
-    const active = states.filter((s) => s !== "cancelled");
-    if (!active.length) return states.length ? "cancelled" : "ordered";
-    if (active.every((s) => s === "complete")) return "complete";
-    if (active.every((s) => s === "complete" || s === "confirmed")) return "confirmed";
-    return "ordered";
-  }
-
   return pos.map((po) => {
     const lineIds = linesByPO.get(po.id as string) ?? [];
     const states = lineIds.map((id) => stateMap.get(id) ?? "ordered");
-    const poStatus = rollUp(states);
+    const poStatus = rollUpPoStatus(states);
     return {
       poNumber: po.po_number as string,
       supplier: po.supplier_id ? supplierMap.get(po.supplier_id as string) ?? null : null,

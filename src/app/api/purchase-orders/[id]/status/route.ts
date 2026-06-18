@@ -4,7 +4,7 @@ import { db } from "@/lib/supabase";
 import { logActivity } from "@/lib/activity-log";
 
 // PATCH /api/purchase-orders/[id]/status
-// Sets every (non-cancelled) line of the PO to 'ordered' or 'confirmed'.
+// Sets every (non-cancelled) line of the PO to 'draft', 'ordered', or 'confirmed'.
 // 'complete' is not handled here — it goes through
 // POST /api/po-lines/[id]/complete, which also posts the Acquisition movement.
 export async function PATCH(
@@ -17,9 +17,9 @@ export async function PATCH(
   const { id } = await params;
   const { status: lineStatus, soNumber } = await request.json();
 
-  if (lineStatus !== "ordered" && lineStatus !== "confirmed") {
+  if (lineStatus !== "draft" && lineStatus !== "ordered" && lineStatus !== "confirmed") {
     return NextResponse.json(
-      { error: "status must be 'ordered' or 'confirmed'" },
+      { error: "status must be 'draft', 'ordered', or 'confirmed'" },
       { status: 400 }
     );
   }

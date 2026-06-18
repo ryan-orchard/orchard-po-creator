@@ -58,11 +58,11 @@ export async function GET(
       ? await db
           .schema("orchard_calcs")
           .from("po_line_statuses")
-          .select("po_line_id, state")
+          .select("po_line_id, status")
           .in("po_line_id", (poLinesRaw ?? []).map((pl) => pl.id as string))
       : { data: [] };
     const lineStateById = new Map(
-      (poLineStatusRows ?? []).map((s) => [s.po_line_id as string, s.state as string])
+      (poLineStatusRows ?? []).map((s) => [s.po_line_id as string, s.status as string])
     );
     const poStatusMap = new Map<string, string>();
     for (const pid of matchablePoIds) {

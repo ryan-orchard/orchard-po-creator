@@ -1,14 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/supabase";
-
-// A PO's status is a roll-up of its line statuses (ordered < confirmed < complete).
-function rollUpStatus(states: string[]): string {
-  const active = states.filter((s) => s !== "cancelled");
-  if (active.length === 0) return states.length > 0 ? "cancelled" : "ordered";
-  if (active.every((s) => s === "complete")) return "complete";
-  if (active.every((s) => s === "complete" || s === "confirmed")) return "confirmed";
-  return "ordered";
-}
+import { rollUpPoStatus } from "@/lib/po-status";
 
 export async function GET(
   _request: NextRequest,
@@ -98,7 +90,7 @@ export async function GET(
           .select("po_line_id, status")
           .in("po_line_id", poLineIds);
         const stateByLine = new Map((ls ?? []).map((s) => [s.po_line_id, s.status]));
-        poStatus = rollUpStatus(poLineIds.map((lid) => stateByLine.get(lid) ?? "ordered"));
+        poStatus = rollUpPoStatus(poLineIds.map((lid) => stateByLine.get(lid) ?? "ordered"));
       }
 
       if (poResult.data) {

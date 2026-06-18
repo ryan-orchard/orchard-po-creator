@@ -126,10 +126,11 @@ interface EditLineItem {
 
 // ─── Constants ───
 
-const STATUSES = ["ordered", "confirmed", "complete"] as const;
+const STATUSES = ["draft", "ordered", "confirmed", "complete"] as const;
 type Tab = "details" | "receipts" | "invoices";
 
 const statusColors: Record<string, string> = {
+  draft: "bg-slate-100 text-slate-600",
   ordered: "bg-warm-100 text-warm-800",
   confirmed: "bg-gold-100 text-gold-800",
   complete: "bg-sage-100 text-sage-800",
@@ -137,6 +138,7 @@ const statusColors: Record<string, string> = {
 };
 
 const statusLabels: Record<string, string> = {
+  draft: "Draft",
   ordered: "Ordered",
   confirmed: "Confirmed",
   complete: "Complete",
