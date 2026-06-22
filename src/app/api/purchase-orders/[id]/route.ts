@@ -58,6 +58,7 @@ export async function GET(
       const qty = Number(l.qty);
       return {
         id: l.id,
+        status: stateByLine.get(l.id as string) ?? "ordered",
         skuId: l.item_id,
         sku: item
           ? {

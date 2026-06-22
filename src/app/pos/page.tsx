@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
+import LineStatusSelect from "@/components/LineStatusSelect";
 
 interface POLine {
   poLineId: string;
@@ -24,14 +25,6 @@ interface POLine {
   cancelledQty: number;
   notes: string | null;
 }
-
-const stateColors: Record<string, string> = {
-  draft: "bg-slate-100 text-slate-600",
-  ordered: "bg-warm-100 text-warm-800",
-  confirmed: "bg-gold-100 text-gold-800",
-  complete: "bg-sage-100 text-sage-800",
-  cancelled: "bg-gray-100 text-gray-600",
-};
 
 const stateLabels: Record<string, string> = {
   draft: "Draft",
@@ -755,12 +748,18 @@ export default function POLinesPage() {
                     <td className="px-4 py-2.5 text-right font-medium text-gray-900 tabular-nums">
                       {line.lineTotal ? fmtMoney0(line.lineTotal) : "—"}
                     </td>
-                    <td className="px-4 py-2.5">
-                      <span
-                        className={`inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-medium rounded-full ${stateColors[line.lineState] || "bg-gray-100 text-gray-600"}`}
-                      >
-                        {stateLabels[line.lineState] || line.lineState}
-                      </span>
+                    <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
+                      <LineStatusSelect
+                        poLineId={line.poLineId}
+                        status={line.lineState}
+                        onChanged={(next) =>
+                          setLines((prev) =>
+                            prev.map((l) =>
+                              l.poLineId === line.poLineId ? { ...l, lineState: next } : l
+                            )
+                          )
+                        }
+                      />
                     </td>
                     <td className="px-4 py-2.5 text-gray-600 tabular-nums whitespace-nowrap">{fmtDate(line.poShipDate)}</td>
                     <td className="px-4 py-2.5 text-gray-600 tabular-nums whitespace-nowrap">{dateCellFor(line)}</td>

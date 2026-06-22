@@ -3,6 +3,7 @@
 import React, { Suspense, useState, useEffect, useCallback } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { MAGNA } from "@/config/magna";
+import LineStatusSelect from "@/components/LineStatusSelect";
 
 // ─── Types ───
 
@@ -54,6 +55,7 @@ interface PODetail {
   } | null;
   lineItems: {
     id: string;
+    status: string;
     skuId: string | null;
     sku: {
       id: string;
@@ -831,6 +833,7 @@ function PODetailPageContent() {
                       {!isSimpleMode && <th className="text-right px-4 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wider">Qty (Ctns)</th>}
                       <th className="text-right px-4 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wider">Unit Cost</th>
                       <th className="text-right px-4 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wider">Total</th>
+                      {!editingLines && <th className="text-left px-4 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wider">Status</th>}
                       {showReceived && !editingLines && <th className="text-right px-4 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wider">Received</th>}
                       {editingLines && <th className="px-4 py-3 w-8"></th>}
                     </tr>
@@ -926,6 +929,9 @@ function PODetailPageContent() {
                           )}
                           <td className="px-4 py-3 text-xs text-right text-gray-700 tabular-nums">{fmtCurrency(item.unitCost || 0)}</td>
                           <td className="px-4 py-3 text-xs text-right font-semibold text-gray-900 tabular-nums">{fmtCurrency(item.totalPrice || 0)}</td>
+                          <td className="px-4 py-3">
+                            <LineStatusSelect poLineId={item.id} status={item.status} onChanged={() => refreshPO()} />
+                          </td>
                           {showReceived && (() => {
                             const uom = item.sku?.uom || "Each";
                             const ordered = uom === "Carton" ? item.qtyCartons : item.qtySticks;
@@ -962,6 +968,7 @@ function PODetailPageContent() {
                       <td className="px-4 py-3 text-xs text-right font-bold text-gray-900 tabular-nums">
                         {fmtCurrency(editingLines ? editGrandTotal : po.grandTotal || 0)}
                       </td>
+                      {!editingLines && <td />}
                       {showReceived && !editingLines && (
                         <td className="px-4 py-3 text-right font-bold tabular-nums">{receiptStatus.totalReceived.toLocaleString()}</td>
                       )}
