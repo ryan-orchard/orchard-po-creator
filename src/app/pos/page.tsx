@@ -24,6 +24,7 @@ interface POLine {
   receivedDate: string | null;
   cancelledQty: number;
   notes: string | null;
+  invoicedQty: number;
 }
 
 const stateLabels: Record<string, string> = {
@@ -66,6 +67,7 @@ type SortField =
   | "unitCost"
   | "lineTotal"
   | "lineState"
+  | "invoicedQty"
   | "poShipDate"
   | "xShipDate"
   | "actualShipDate"
@@ -96,6 +98,22 @@ const fmtMoney2 = (n: number) =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
+
+// Invoice coverage: fully invoiced = within 1% of ordered qty net of cancels
+// (co-man over/under-runs land a few units off the PO qty).
+const invoicedRatioFor = (l: POLine) => {
+  const target = Math.max(0, l.qty - l.cancelledQty);
+  return target > 0 ? l.invoicedQty / target : 0;
+};
+const invoicedStateFor = (l: POLine): "none" | "partial" | "full" => {
+  if (l.invoicedQty <= 0) return "none";
+  return invoicedRatioFor(l) >= 0.99 ? "full" : "partial";
+};
+const invoicedLabels: Record<string, string> = { none: "—", partial: "Partial", full: "Invoiced" };
+const invoicedColors: Record<string, string> = {
+  partial: "bg-gold-100 text-gold-800",
+  full: "bg-sage-100 text-sage-800",
+};
 
 // Generic outside-click hook
 function useClickOutside(ref: React.RefObject<HTMLElement | null>, onClose: () => void) {
@@ -399,6 +417,9 @@ export default function POLinesPage() {
         case "lineState":
           cmp = a.lineState.localeCompare(b.lineState);
           break;
+        case "invoicedQty":
+          cmp = invoicedRatioFor(a) - invoicedRatioFor(b);
+          break;
         case "poShipDate":
           cmp = (a.poShipDate || "9999").localeCompare(b.poShipDate || "9999");
           break;
@@ -472,6 +493,7 @@ export default function POLinesPage() {
     { field: "unitCost",     label: "Unit Cost",   align: "text-right", width: "w-24" },
     { field: "lineTotal",    label: "Total",       align: "text-right", width: "w-24" },
     { field: "lineState",    label: "Status",      align: "text-left",  width: "w-28" },
+    { field: "invoicedQty",  label: "Invoiced",    align: "text-left",  width: "w-24" },
     { field: "poShipDate",   label: "PO Ship",     align: "text-left",  width: "w-24" },
   ];
 
@@ -505,6 +527,7 @@ export default function POLinesPage() {
           case "unitCost": return l.unitCost.toFixed(2);
           case "lineTotal": return l.lineTotal.toFixed(2);
           case "lineState": return stateLabels[l.lineState] || l.lineState;
+          case "invoicedQty": return l.invoicedQty;
           case "poShipDate": return fmtDate(l.poShipDate);
           case "xShipDate": return fmtDate(xShipFor(l));
           case "actualShipDate": return fmtDate(l.actualShipDate);
@@ -760,6 +783,18 @@ export default function POLinesPage() {
                           )
                         }
                       />
+                    </td>
+                    <td className="px-4 py-2.5 whitespace-nowrap">
+                      {invoicedStateFor(line) === "none" ? (
+                        <span className="text-gray-300">—</span>
+                      ) : (
+                        <span
+                          className={`inline-block px-2 py-0.5 text-xs font-medium rounded-full ${invoicedColors[invoicedStateFor(line)]}`}
+                          title={`${line.invoicedQty.toLocaleString()} of ${(line.qty - line.cancelledQty).toLocaleString()} invoiced`}
+                        >
+                          {invoicedLabels[invoicedStateFor(line)]}
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-2.5 text-gray-600 tabular-nums whitespace-nowrap">{fmtDate(line.poShipDate)}</td>
                     <td className="px-4 py-2.5 text-gray-600 tabular-nums whitespace-nowrap">{dateCellFor(line)}</td>
