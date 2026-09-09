@@ -38,7 +38,7 @@ interface ShipTo {
   isDefault: boolean;
 }
 
-const WAREHOUSE_CODES = ["STORD", "BMC", "RJW", "AMZN", "FBA"];
+const WAREHOUSE_CODES = ["STORD", "BMC", "RJW", "AMZN", "FBA", "ANS"];
 
 interface LineItem {
   key: string;
