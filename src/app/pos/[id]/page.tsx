@@ -576,7 +576,9 @@ function PODetailPageContent() {
     );
   }
 
-  const isSimpleMode = po.lineItems.length > 0 && !po.lineItems.some((li) => li.sku?.uom === "Carton");
+  // In edit mode, base this on the lines being edited so swapping a stick SKU for a carton SKU shows the Ctns input
+  const modeLines = editingLines ? editLineItems : po.lineItems;
+  const isSimpleMode = modeLines.length > 0 && !modeLines.some((li) => li.sku?.uom === "Carton");
   const showReceived = receiptStatus && receiptStatus.totalReceived > 0;
 
   // Activity event styling
