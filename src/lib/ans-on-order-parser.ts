@@ -2,7 +2,10 @@
  * ANS On Order Report parser.
  *
  * Source: weekly Excel sent by ANS to magna@orchardinventory.com.
- * Filename pattern: "OpenSalesOrdersSummary- MAGNA<M.D.YY>.xlsx" (spaces vary).
+ * Filename patterns:
+ *   "OpenSalesOrdersSummary- MAGNA<M.D.YY>.xlsx" (spaces vary) — original layout below
+ *   "MAGNA_OOR_<M.D.YY>.xlsx" — 10/20/26 layout: headers on row 1, "Item",
+ *     "Cust Req Ship Date", "Est. ship week" (columns resolved by header name)
  *
  * Single sheet. Headers on row 4 (1-indexed). Sections separated by blank
  * rows and occasional repeated header rows. Trailing footnote rows have
@@ -44,7 +47,7 @@ export interface AnsOnOrderReportResult {
   malformed: { rowNumber: number; reason: string; raw: unknown[] }[];
 }
 
-const FILENAME_RE = /OpenSalesOrdersSummary/i;
+const FILENAME_RE = /OpenSalesOrdersSummary|MAGNA[\s_-]*OOR/i;
 
 export function isAnsOnOrderReport(subject: string, filename: string): boolean {
   const lower = filename.toLowerCase();
@@ -59,8 +62,8 @@ export function isAnsOnOrderReport(subject: string, filename: string): boolean {
  * or "OpenSalesOrdersSummary- MAGNA 5.18.26 (1).xlsx". Returns YYYY-MM-DD or null.
  */
 export function extractReportDateFromFilename(filename: string): string | null {
-  // Match M.D.YY or MM.DD.YY anywhere after MAGNA
-  const m = filename.match(/MAGNA\s*(\d{1,2})\.(\d{1,2})\.(\d{2,4})/i);
+  // Match M.D.YY or MM.DD.YY anywhere after MAGNA (optionally "_OOR_" between)
+  const m = filename.match(/MAGNA[\s_-]*(?:OOR[\s_-]*)?(\d{1,2})\.(\d{1,2})\.(\d{2,4})/i);
   if (!m) return null;
   const month = parseInt(m[1], 10);
   const day = parseInt(m[2], 10);
@@ -132,7 +135,7 @@ function resolveColumns(grid: unknown[][]): { col: ColMap; headerRowIdx: number 
   let headerRowIdx = grid.findIndex((r) =>
     (r || []).some((c) => {
       const h = normHeader(c);
-      return h === "itemid" || h === "item id";
+      return h === "itemid" || h === "item id" || h === "item";
     })
   );
   if (headerRowIdx < 0) headerRowIdx = 3; // documented row 4 (index 3)
@@ -144,14 +147,21 @@ function resolveColumns(grid: unknown[][]): { col: ColMap; headerRowIdx: number 
   };
 
   const col: ColMap = {
-    so: find((h) => h.includes("salesid") || h.includes("so#") || h === "so #", 0),
-    itemId: find((h) => h === "itemid" || h === "item id", 2),
+    so: find((h) => h.includes("salesid") || h.includes("so#") || h === "so #" || h === "sales order", 0),
+    itemId: find((h) => h === "itemid" || h === "item id" || h === "item", 2),
     description: find((h) => h.includes("description"), 3),
     salesQty: find((h) => h.includes("sales qty"), 4),
     disposition: find((h) => h.includes("dispos"), 10),
     po: find((h) => h === "po" || h === "customer po" || (h.includes("po") && h.includes("customer") && !h.includes("req")), 8),
-    customerReq: find((h) => h.includes("customer req"), 14),
-    estShip: find((h) => h.includes("est ship") || h.includes("ship ready") || h.includes("shipping date confirmed"), 15),
+    customerReq: find((h) => h.includes("customer req") || h.includes("cust req"), 14),
+    estShip: find(
+      (h) =>
+        h.includes("est ship") ||
+        h.includes("est. ship") ||
+        h.includes("ship ready") ||
+        h.includes("shipping date confirmed"),
+      15
+    ),
     notes: find((h) => h === "notes" || h.includes("notes"), 18),
   };
   return { col, headerRowIdx };
@@ -200,8 +210,8 @@ export function parseAnsOnOrderReport(
       continue;
     }
 
-    // Skip repeated header rows (SO column "SO#"/"SALESID", or item col "ITEMID")
-    if ((soCell && /^(SO#|SALESID)$/i.test(soCell)) || /^ITEMID$/i.test(itemId ?? "")) {
+    // Skip repeated header rows (SO column "SO#"/"SALESID"/"Sales order", or item col "ITEMID"/"Item")
+    if ((soCell && /^(SO#|SALESID|Sales order)$/i.test(soCell)) || /^(ITEMID|Item)$/i.test(itemId ?? "")) {
       currentSo = null;
       continue;
     }
