@@ -53,6 +53,17 @@ const DATE_FMT_OPTIONS: Intl.DateTimeFormatOptions = {
   timeZone: "UTC",
 };
 
+/**
+ * Base ANS item code, ignoring the formula-version suffix ("-10L"/"-11L") and
+ * the 1ct marker ("-1"): F4064S-1-11L, F4064S-11L and F4064S-1 all → F4064S,
+ * while F4064S-28-11L → F4064S-28 stays distinct. ANS drops/changes these
+ * suffixes between reports, so exact matches against org_config.items miss.
+ * Keep in sync with orchard.ans_item_base() (scripts/migrate-ans-item-base-match.sql).
+ */
+export function ansItemBase(code: string): string {
+  return code.trim().toUpperCase().replace(/-\d+L$/, "").replace(/-1$/, "");
+}
+
 function fmtDate(d: string | null): string {
   if (!d) return "TBD";
   // d is YYYY-MM-DD; render as M/D/YY for log readability
@@ -75,59 +86,49 @@ export async function processAnsOnOrderReport(
   }
 
   // ── Resolve every (customer_po, ans_item_number) pair to a po_line_id ───
+  // Mirrors the trigger: exact ans_item_number first, else the base code
+  // (ansItemBase), restricted to items that are actually on the PO.
   const poNumbers = [...new Set(report.rows.map((r) => `PO-${r.customerPo}`))];
-  const ansItemNumbers = [...new Set(report.rows.map((r) => r.ansItemNumber))];
 
-  const [poResp, itemResp] = await Promise.all([
-    db
-      .schema("orchard")
-      .from("purchase_orders")
-      .select("id, po_number")
-      .in("po_number", poNumbers),
-    db
-      .schema("org_config")
-      .from("items")
-      .select("id, ans_item_number")
-      .in("ans_item_number", ansItemNumbers),
-  ]);
-
+  const poResp = await db
+    .schema("orchard")
+    .from("purchase_orders")
+    .select("id, po_number")
+    .in("po_number", poNumbers);
   if (poResp.error) throw new Error(`Failed to resolve POs: ${poResp.error.message}`);
-  if (itemResp.error) throw new Error(`Failed to resolve items: ${itemResp.error.message}`);
 
   const poIdByNumber = new Map((poResp.data ?? []).map((p) => [p.po_number as string, p.id as string]));
-  const itemIdByAns = new Map(
-    (itemResp.data ?? []).map((i) => [i.ans_item_number as string, i.id as string])
-  );
-
   const poIds = [...new Set([...poIdByNumber.values()])];
-  const itemIds = [...new Set([...itemIdByAns.values()])];
 
-  let poLinesResp: { data: { id: string; po_id: string; item_id: string }[] | null; error: Error | null } = {
-    data: [],
-    error: null,
-  };
-  if (poIds.length > 0 && itemIds.length > 0) {
-    const r = await db
-      .schema("orchard")
-      .from("po_lines")
-      .select("id, po_id, item_id")
-      .in("po_id", poIds)
-      .in("item_id", itemIds);
-    poLinesResp = { data: r.data as { id: string; po_id: string; item_id: string }[] | null, error: r.error as Error | null };
+  const poLines: { id: string; po_id: string; item_id: string }[] = [];
+  if (poIds.length > 0) {
+    const r = await db.schema("orchard").from("po_lines").select("id, po_id, item_id").in("po_id", poIds);
+    if (r.error) throw new Error(`Failed to load po_lines: ${r.error.message}`);
+    poLines.push(...((r.data ?? []) as { id: string; po_id: string; item_id: string }[]));
   }
 
-  if (poLinesResp.error) throw new Error(`Failed to load po_lines: ${poLinesResp.error.message}`);
+  const itemIds = [...new Set(poLines.map((pl) => pl.item_id))];
+  const ansByItemId = new Map<string, string>();
+  if (itemIds.length > 0) {
+    const r = await db.schema("org_config").from("items").select("id, ans_item_number").in("id", itemIds);
+    if (r.error) throw new Error(`Failed to resolve items: ${r.error.message}`);
+    for (const i of r.data ?? []) {
+      if (i.ans_item_number) ansByItemId.set(i.id as string, i.ans_item_number as string);
+    }
+  }
 
-  // Key: `${po_id}::${item_id}` → { id, po_id }
-  const poLineByPair = new Map<string, { id: string; poId: string }>();
-  for (const pl of poLinesResp.data ?? []) {
-    poLineByPair.set(`${pl.po_id}::${pl.item_id}`, { id: pl.id, poId: pl.po_id });
+  const linesByPo = new Map<string, { id: string; ans: string }[]>();
+  for (const pl of poLines) {
+    const ans = ansByItemId.get(pl.item_id);
+    if (!ans) continue;
+    const list = linesByPo.get(pl.po_id) ?? [];
+    list.push({ id: pl.id, ans });
+    linesByPo.set(pl.po_id, list);
   }
 
   const resolved: ResolvedRow[] = [];
   for (const row of report.rows) {
     const poId = poIdByNumber.get(`PO-${row.customerPo}`);
-    const itemId = itemIdByAns.get(row.ansItemNumber);
     if (!poId) {
       unmatched.push({
         customerPo: row.customerPo,
@@ -136,15 +137,12 @@ export async function processAnsOnOrderReport(
       });
       continue;
     }
-    if (!itemId) {
-      unmatched.push({
-        customerPo: row.customerPo,
-        ansItemNumber: row.ansItemNumber,
-        reason: "ANS item number not mapped in org_config.items.ans_item_number",
-      });
-      continue;
-    }
-    const pl = poLineByPair.get(`${poId}::${itemId}`);
+    const candidates = linesByPo.get(poId) ?? [];
+    const base = ansItemBase(row.ansItemNumber);
+    const match =
+      candidates.find((c) => c.ans === row.ansItemNumber) ??
+      candidates.find((c) => ansItemBase(c.ans) === base);
+    const pl = match ? { id: match.id, poId } : null;
     if (!pl) {
       unmatched.push({
         customerPo: row.customerPo,
@@ -202,18 +200,16 @@ export async function processAnsOnOrderReport(
       });
       activityEvents += 1;
     } else {
-      // State transition
-      if (prior.status && prior.status !== "confirmed" && prior.status !== "in_transit" && prior.status !== "received") {
-        // Going from ordered/draft → confirmed is a real signal; from confirmed → confirmed is not
-        if (prior.status !== "confirmed") {
-          logActivity({
-            poId: r.poId,
-            action: "ans_line_status_change",
-            description: `${reportTag}: ${itemTag} status ${prior.status} → confirmed${dispositionSuffix}`,
-            actor: "Orchard AI",
-          });
-          activityEvents += 1;
-        }
+      // State transition — the trigger only bumps ordered → confirmed; draft,
+      // complete and cancelled lines keep their status (dates still update).
+      if (prior.status === "ordered") {
+        logActivity({
+          poId: r.poId,
+          action: "ans_line_status_change",
+          description: `${reportTag}: ${itemTag} status ${prior.status} → confirmed${dispositionSuffix}`,
+          actor: "Orchard AI",
+        });
+        activityEvents += 1;
       }
       // Expected ship date revision — the headline signal Ryan cares about
       if (prior.expected_ship_date !== r.parsed.estShipReadyDate) {
