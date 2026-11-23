@@ -211,12 +211,14 @@ export default function POPrintPage() {
             <tr style={{ borderBottom: "1.5px solid #111" }}>
               {(isSimpleMode
                 ? [
+                    ["SKU #", "left"],
                     ["Product", "left"],
                     ["Qty", "right"],
                     ["Unit Cost", "right"],
                     ["Total", "right"],
                   ]
                 : [
+                    ["SKU #", "left"],
                     ["Product", "left"],
                     ["Pack Size", "left"],
                     ["Qty (Sticks)", "right"],
@@ -251,8 +253,11 @@ export default function POPrintPage() {
                 <React.Fragment key={sectionName}>
                   {items.map((item) => (
                     <tr key={item.id} style={{ borderBottom: "1px solid #f0f0f0" }}>
-                      <td style={{ padding: "9px 12px 9px 0", color: "#111", whiteSpace: "nowrap" }}>
-                        {item.sku?.ansItemNumber || item.sku?.flavor || item.sku?.standardSku || "—"}
+                      <td style={{ padding: "9px 12px 9px 0", color: "#111", whiteSpace: "nowrap", fontWeight: 600 }}>
+                        {item.sku?.standardSku || "—"}
+                      </td>
+                      <td style={{ padding: "9px 12px", color: "#111", whiteSpace: "nowrap" }}>
+                        {item.sku?.ansItemNumber || item.sku?.flavor || "—"}
                       </td>
                       {!isSimpleMode && (
                         <td style={{ padding: "9px 12px", color: "#888", whiteSpace: "nowrap" }}>
