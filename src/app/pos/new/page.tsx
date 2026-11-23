@@ -168,24 +168,23 @@ export default function NewPOPage() {
 
   const grandTotal = lineItems.reduce((sum, item) => sum + item.totalPrice, 0);
 
-  // Simple mode: hide carton columns when no Carton-UOM items are on the PO
-  const isSimpleMode = (() => {
-    const itemsWithSkus = lineItems.filter((li) => li.sku);
-    if (itemsWithSkus.length > 0) {
-      return !itemsWithSkus.some((li) => li.sku?.uom === "Carton");
-    }
-    // No items selected yet — check if supplier's items are all non-Carton
-    if (supplierId) {
-      const supplier = suppliers.find((s) => s.id === supplierId);
-      const supplierSkus = supplier?.categories?.length
-        ? skus.filter((s) => supplier.categories.includes(s.category))
-        : [];
-      if (supplierSkus.length > 0) {
-        return !supplierSkus.some((s) => s.uom === "Carton");
-      }
-    }
-    return false;
-  })();
+  // Simple mode: hide the carton column and label qty as plain "Qty" unless a
+  // Carton-UOM (stick) SKU is actually on the PO. Packaging / "Each" items are
+  // never counted in sticks.
+  const isSimpleMode = !lineItems.some((li) => li.sku?.uom === "Carton");
+
+  // Match free-typed SKU text (e.g. "PKGIP2801" or "PKGIP2801 — Island Punch")
+  // to a real SKU so rows the user typed but never picked from the dropdown
+  // still save.
+  const resolveSkuFromText = (text: string): SKU | undefined => {
+    const t = text.trim().toLowerCase();
+    if (!t) return undefined;
+    const code = t.split(/\s+[—–-]\s+|\s+/)[0];
+    return (
+      skus.find((s) => (s.standardSku || "").toLowerCase() === t) ||
+      skus.find((s) => (s.standardSku || "").toLowerCase() === code)
+    );
+  };
 
   const handleSaveCustomShipTo = async () => {
     if (!customShipTo.name) return;
@@ -210,10 +209,36 @@ export default function NewPOPage() {
   };
 
   const handleSubmit = async () => {
-    if (!supplierId || !shipToId || !deliveryDate || lineItems.every((li) => !li.skuId)) {
-      alert("Please fill in all required fields: supplier, ship-to, delivery date, and at least one SKU.");
+    // Resolve any SKU text that was typed/pasted but not picked from the list
+    const unresolved: string[] = [];
+    const resolvedLines: LineItem[] = lineItems.map((li) => {
+      if (li.skuId) return li;
+      const text = skuSearch[li.key] || "";
+      if (!text.trim()) return li;
+      const sku = resolveSkuFromText(text);
+      if (!sku) {
+        unresolved.push(text.trim());
+        return li;
+      }
+      return { ...li, skuId: sku.id, sku };
+    });
+
+    const missing: string[] = [];
+    if (!supplierId) missing.push("supplier");
+    if (!shipToId) missing.push("ship-to");
+    if (!deliveryDate) missing.push("delivery date");
+    if (unresolved.length > 0) {
+      alert(
+        `These SKUs weren't recognized — please pick them from the dropdown list:\n\n${unresolved.join("\n")}`
+      );
       return;
     }
+    if (resolvedLines.every((li) => !li.skuId)) missing.push("at least one SKU");
+    if (missing.length > 0) {
+      alert(`Please fill in: ${missing.join(", ")}.`);
+      return;
+    }
+    if (resolvedLines !== lineItems) setLineItems(resolvedLines);
 
     setSubmitting(true);
     try {
@@ -229,7 +254,7 @@ export default function NewPOPage() {
           paymentTerms,
           notes,
           grandTotal,
-          lineItems: lineItems
+          lineItems: resolvedLines
             .filter((li) => li.skuId)
             .map((li) => ({
               skuId: li.skuId,
@@ -245,10 +270,13 @@ export default function NewPOPage() {
       });
 
       const result = await res.json();
+      if (!res.ok || !result?.id) {
+        throw new Error(result?.error || `HTTP ${res.status}`);
+      }
       router.push(`/pos/${result.id}?created=1`);
     } catch (err) {
       console.error(err);
-      alert("Error creating PO. Please try again.");
+      alert(`Error creating PO: ${err instanceof Error ? err.message : "please try again"}.`);
     } finally {
       setSubmitting(false);
     }
@@ -266,6 +294,7 @@ export default function NewPOPage() {
       (s) =>
         (s.standardSku || "").toLowerCase().includes(search) ||
         (s.flavor || "").toLowerCase().includes(search) ||
+        `${s.standardSku} — ${s.flavor}`.toLowerCase().includes(search) ||
         (s.category || "").toLowerCase().includes(search) ||
         (s.description || "").toLowerCase().includes(search)
     );
@@ -544,9 +573,21 @@ export default function NewPOPage() {
                           }
                         }}
                         onFocus={() => setActiveDropdown(item.key)}
-                        onBlur={() =>
-                          setTimeout(() => setActiveDropdown(null), 200)
-                        }
+                        onBlur={() => {
+                          setTimeout(() => setActiveDropdown(null), 200);
+                          if (!item.skuId) {
+                            const match = resolveSkuFromText(skuSearch[item.key] || "");
+                            if (match) {
+                              const prevQty = item.qtySticks;
+                              updateLineItem(item.key, { skuId: match.id });
+                              if (match.uom !== "Carton" && prevQty) {
+                                updateLineItem(item.key, { qtySticks: prevQty });
+                              }
+                              setSkuSearch((prev) => ({ ...prev, [item.key]: "" }));
+                            }
+                          }
+                        }}
+                        autoComplete="off"
                         placeholder="Search SKU or flavor..."
                         className="w-full border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-black"
                       />
