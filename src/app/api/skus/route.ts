@@ -18,6 +18,8 @@ export async function GET(req: Request) {
       id: item.id,
       standardSku: item.sku,
       name: item.name !== item.sku ? item.name : null,
+      // Display name used by the PO / WO SKU pickers ("SKU — flavor")
+      flavor: item.name ?? null,
       category: item.category ?? null,
       uom: item.unit_of_measure,
       count: item.sticks_per_carton,
